@@ -275,6 +275,10 @@ class Partida {
   }
 
   valoresPendientes = $state<Record<string, number>>({});
+  /** Valores ya mandados cuya confirmación aún no ha vuelto (por red, un jugador espera al host): por "idInstancia:idDefinicion",
+   *  el valor que se espera (absoluto) y cuántos envíos hay en camino. Mientras esté, se ve ESTE valor y no el que
+   *  haya en `instancias` (el viejo, o uno intermedio), así no parpadea entre el antiguo y el nuevo. */
+  valoresEnVuelo = $state<Record<string, { valor: number; envios: number }>>({});
   #temporizadorValores: ReturnType<typeof setTimeout> | null = null;
 
   /** Aviso de una línea (algo que falló sin que haya una ventana donde mostrarlo); desaparece solo. */
@@ -724,7 +728,12 @@ class Partida {
 
   /** Valor actual que se ve: el de Rust más lo que aún no se ha mandado. */
   valorMostrado(instancia: Instancia, idDefinicion: number): number {
-    return valorActual(instancia, idDefinicion) + (this.valoresPendientes[claveValor(instancia.id_instancia, idDefinicion)] ?? 0);
+    return this.#base(instancia, idDefinicion) + (this.valoresPendientes[claveValor(instancia.id_instancia, idDefinicion)] ?? 0);
+  }
+
+  /** Sobre lo que se suman los pasos aún sin mandar: lo que se espera de lo ya mandado o, si no hay nada en camino, lo de Rust. */
+  #base(instancia: Instancia, idDefinicion: number): number {
+    return this.valoresEnVuelo[claveValor(instancia.id_instancia, idDefinicion)]?.valor ?? valorActual(instancia, idDefinicion);
   }
 
   /**
@@ -737,7 +746,7 @@ class Partida {
     const instancia = this.instancias.find((i) => i.id_instancia === idInstancia);
     if (!instancia || delta === 0 || !this.controla(instancia)) return;
     const clave = claveValor(idInstancia, idDefinicion);
-    const actual = valorActual(instancia, idDefinicion);
+    const actual = this.#base(instancia, idDefinicion);
     // El máximo es solo el valor por defecto: se puede pasar de él o bajar de 0 (como en Rust)
     const nuevo = Math.min(LIMITE_VALOR_ACTUAL, Math.max(-LIMITE_VALOR_ACTUAL, this.valorMostrado(instancia, idDefinicion) + delta));
     if (nuevo === actual) delete this.valoresPendientes[clave];
@@ -754,20 +763,37 @@ class Partida {
     const enviados = Object.entries(this.valoresPendientes).filter(([, delta]) => delta !== 0);
     if (enviados.length === 0) return;
 
+    // Lo que se va a mandar sale de «pendiente» y pasa a «en camino» YA, antes de esperar: así la pantalla enseña
+    // el valor que se espera hasta que Rust (o el host, por red) lo confirme, y lo que se cambie mientras tanto
+    // se suma encima en vez de pisarse
     for (const [clave, delta] of enviados) {
       const [idInstancia, idDefinicion] = clave.split(":").map(Number);
-      try {
-        await invoke("modificar_valor_actual", { idInstancia, idDefinicion, delta });
-      } catch (err) {
-        console.error("modificar_valor_actual:", err);
-      }
-    }
-    this.instancias = await invoke<Instancia[]>("obtener_instancias_activas");
-    // Lo mandado ya está en el valor de Rust; lo que se haya cambiado mientras tanto sigue pendiente
-    for (const [clave, delta] of enviados) {
+      const instancia = this.instancias.find((i) => i.id_instancia === idInstancia);
+      const base = this.valoresEnVuelo[clave]?.valor ?? (instancia ? valorActual(instancia, idDefinicion) : 0);
+      this.valoresEnVuelo[clave] = { valor: base + delta, envios: (this.valoresEnVuelo[clave]?.envios ?? 0) + 1 };
       const resto = (this.valoresPendientes[clave] ?? 0) - delta;
       if (resto === 0) delete this.valoresPendientes[clave];
       else this.valoresPendientes[clave] = resto;
+    }
+
+    try {
+      for (const [clave, delta] of enviados) {
+        const [idInstancia, idDefinicion] = clave.split(":").map(Number);
+        try {
+          await invoke("modificar_valor_actual", { idInstancia, idDefinicion, delta });
+        } catch (err) {
+          console.error("modificar_valor_actual:", err);
+        }
+      }
+      this.instancias = await invoke<Instancia[]>("obtener_instancias_activas");
+    } finally {
+      // Confirmado (o fallido: entonces se ve lo que de verdad hay): se deja de esperar, salvo que haya otro envío en camino
+      for (const [clave] of enviados) {
+        const e = this.valoresEnVuelo[clave];
+        if (!e) continue;
+        if (e.envios <= 1) delete this.valoresEnVuelo[clave];
+        else e.envios--;
+      }
     }
   }
 
@@ -891,6 +917,9 @@ class Partida {
     // Lo pendiente de una ficha que desaparece ya no hace falta
     for (const clave of Object.keys(this.valoresPendientes)) {
       if (clave.startsWith(`${idInstancia}:`)) delete this.valoresPendientes[clave];
+    }
+    for (const clave of Object.keys(this.valoresEnVuelo)) {
+      if (clave.startsWith(`${idInstancia}:`)) delete this.valoresEnVuelo[clave];
     }
     await this.#cambiarInstancias("borrar_instancia", { idInstancia });
     if (this.idsSeleccionados.includes(idInstancia)) {

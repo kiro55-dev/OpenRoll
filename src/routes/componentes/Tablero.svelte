@@ -639,6 +639,7 @@
   $effect(() => {
     void [fichas, origenRecorrido, partida.idsSeleccionados, partida.idsFocoAjeno, partida.definiciones, cam, ancho, alto, dpr, casillas, arrastre.actual, arrastreAjeno.piezas];
     void Object.values(partida.valoresPendientes); // la barra de vida y los radios siguen a la rueda
+    void Object.values(partida.valoresEnVuelo).map((e) => e.valor); // y a lo que está en camino hacia el host
     // Las miniaturas se piden aquí y se leen para que, al llegar, se repinten las fichas
     const a = arrastre.actual;
     const bases = fichas.map((f) => f.instancia.base);

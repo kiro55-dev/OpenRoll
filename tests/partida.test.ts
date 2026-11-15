@@ -628,6 +628,48 @@ describe("fichas: selección y vida", () => {
     expect(partida.valoresPendientes).toEqual({});
   });
 
+  it("mientras el host no confirma, se ve el valor nuevo (no el antiguo ni uno doble) y lo que se cambie se suma encima", async () => {
+    const partida = await nuevoStore();
+    const orco = () => partida.instancias[0]; // vida 10
+    partida.seleccionarInstancia(orco());
+
+    // El host tarda: la respuesta no llega hasta que se suelte `confirmar`
+    let confirmar!: () => void;
+    const lenta = new Promise<void>((r) => (confirmar = r));
+    const original = backend.invoke;
+    const enviados: number[] = [];
+    backend.invoke = async (cmd: string, args?: Args) => {
+      if (cmd === "modificar_valor_actual") {
+        enviados.push(args!.delta);
+        if (enviados.length === 1) await lenta;
+      }
+      return original(cmd, args);
+    };
+
+    for (let i = 0; i < 4; i++) partida.cambiarValorActual(1, 1, 1);
+    await vi.advanceTimersByTimeAsync(1000); // se manda +4 y queda en camino
+    expect(enviados).toEqual([4]);
+    expect(partida.valoresPendientes).toEqual({});
+    expect(partida.valorMostrado(orco(), 1)).toBe(14); // no vuelve a 10 mientras viaja
+
+    // Otro paso mientras tanto: se suma sobre lo esperado
+    partida.cambiarValorActual(1, 1, 1);
+    expect(partida.valorMostrado(orco(), 1)).toBe(15);
+
+    // Aunque el estado ya traiga el cambio antes de la respuesta, no se cuenta dos veces
+    orco().valores_actuales[0].valor = 14;
+    expect(partida.valorMostrado(orco(), 1)).toBe(15);
+
+    confirmar();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(partida.valoresEnVuelo).toEqual({});
+    await vi.advanceTimersByTimeAsync(1000); // el +1 de después sale ya con su propio envío
+    expect(enviados).toEqual([4, 1]);
+    expect(partida.valorMostrado(orco(), 1)).toBe(15);
+    expect(partida.valoresPendientes).toEqual({});
+    expect(partida.valoresEnVuelo).toEqual({});
+  });
+
   it("el máximo es solo el valor por defecto (vida extra) y se manda ya si la ficha pierde el foco", async () => {
     const partida = await nuevoStore();
     partida.seleccionarInstancia(partida.instancias[0]);
