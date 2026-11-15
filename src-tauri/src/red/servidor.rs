@@ -600,6 +600,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn poner_o_cambiar_la_contrasena_invalida_a_los_que_ya_habian_entrado() {
+        let (red, puerto) = red_de_prueba("srv_cambio_contrasena", Some("dragón")).await;
+        let (mut c, reto) = conectar_con_reto(puerto, &origen(&red)).await;
+        mandar(&mut c, &hola(&red, &reto, None)).await;
+        leer(&mut c).await; // Identificate
+        let MensajeHost::Bienvenido { token: Some(token), .. } = unirse(&mut c, "Ana", Some("dragón"), false).await else { panic!("sin bienvenida") };
+        leer(&mut c).await; // Vista
+
+        // Cambia la contraseña: el conectado sale y su token ya no sirve (se le pregunta como a un desconocido)
+        red.poner_contrasena(Some("nueva".into())).unwrap();
+        assert!(matches!(leer(&mut c).await, MensajeHost::Rechazado { .. }), "los conectados salen");
+        let (mut c2, reto2) = conectar_con_reto(puerto, &origen(&red)).await;
+        mandar(&mut c2, &hola(&red, &reto2, Some(&token))).await;
+        assert_eq!(leer(&mut c2).await, MensajeHost::Identificate { pide_contrasena: true, error: None, nombre_existente: None });
+        // Con la contraseña nueva entra otra vez, y es la misma Ana (conserva sus fichas)
+        let entrada = unirse(&mut c2, "Ana", Some("nueva"), true).await;
+        let MensajeHost::Bienvenido { yo, token: Some(token2), .. } = entrada else { panic!("debía entrar: {entrada:?}") };
+        assert_eq!(yo.id, 1);
+        leer(&mut c2).await; // Vista
+
+        // Quitarla no echa a nadie y su token sigue valiendo
+        red.poner_contrasena(None).unwrap();
+        let (mut c3, reto3) = conectar_con_reto(puerto, &origen(&red)).await;
+        mandar(&mut c3, &hola(&red, &reto3, Some(&token2))).await;
+        assert!(matches!(leer(&mut c3).await, MensajeHost::Bienvenido { token: None, .. }));
+    }
+
+    #[tokio::test]
     async fn sin_contrasena_basta_el_nombre_y_un_nombre_vacio_no_vale() {
         let (red, puerto) = red_de_prueba("srv_sin_contrasena", None).await;
         let (mut c, reto) = conectar_con_reto(puerto, &origen(&red)).await;

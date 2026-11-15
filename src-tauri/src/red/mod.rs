@@ -790,23 +790,42 @@ impl Red {
             s.regenerar();
             Ok(())
         })?;
+        self.echar_a_todos("El host ha cambiado el enlace de la sala");
+        Ok(())
+    }
+
+    /// Saca a todos los conectados y olvida sus sesiones (los tokens de `sala.json` ya los ha borrado quien llama).
+    fn echar_a_todos(&self, motivo: &str) {
         let mut subidas = (PathBuf::new(), Vec::new());
         if let Some(s) = self.dentro().as_mut() {
             s.sesiones.clear();
             s.cerradas.clear();
             subidas = (s.dir.clone(), s.subidas.drain().flat_map(|(_, r)| r).collect());
             for (_, c) in s.conexiones.drain() {
-                let _ = c.enviar.send(MensajeHost::Rechazado { motivo: "El host ha cambiado el enlace de la sala".into() });
+                let _ = c.enviar.send(MensajeHost::Rechazado { motivo: motivo.into() });
             }
         }
         self.anular_borradores(None);
         self.descartar_subidas(&subidas.0, subidas.1);
         self.avisar();
-        Ok(())
     }
 
+    /// Poner o cambiar la contraseña: nadie que ya hubiera entrado sirve con ella. Se olvidan todos los navegadores
+    /// (su token) y se echa a los conectados, así que todos tienen que escribir la nueva. Quitarla no echa a nadie:
+    /// sin contraseña entra cualquiera con el enlace, y los recordados siguen valiendo.
     pub fn poner_contrasena(&self, contrasena: Option<String>) -> Result<(), String> {
-        self.cambiar_sala(|s| s.poner_contrasena(contrasena.as_deref()))
+        let nueva = contrasena.as_deref().is_some_and(|c| !c.is_empty());
+        self.cambiar_sala(|s| {
+            s.poner_contrasena(contrasena.as_deref())?;
+            if nueva {
+                s.olvidar_navegadores();
+            }
+            Ok(())
+        })?;
+        if nueva {
+            self.echar_a_todos("El host ha cambiado la contraseña de la sala");
+        }
+        Ok(())
     }
 
     /// Echa a un jugador y olvida su navegador. Sigue registrado en la partida, con sus fichas.

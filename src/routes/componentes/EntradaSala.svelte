@@ -38,8 +38,8 @@
   {#if estado.recordado}
     <!-- Ya habías entrado y no te reconoce: o el host cambió el enlace, o este no es su servidor -->
     <p class="cuidado">
-      Ya habías entrado en esta sala desde este navegador, pero ahora no te reconoce. Si el host no ha generado
-      un enlace nuevo, desconfía de este enlace y no pongas la contraseña.
+      Ya habías entrado en esta sala desde este navegador, pero ahora no te reconoce. Es posible que el host haya
+      cambiado lo contraseña o generado nuevo enlace.
     </p>
   {/if}
   <label>

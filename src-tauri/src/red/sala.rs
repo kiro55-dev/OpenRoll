@@ -242,6 +242,11 @@ impl SalaGuardada {
         self.jugador_de_prueba("r", "t", &SalaGuardada::responder(token, "r", "t"))
     }
 
+    /// Olvida el navegador de TODOS los jugadores: cada uno tendrá que volver a identificarse (con la contraseña, si hay).
+    pub fn olvidar_navegadores(&mut self) {
+        self.tokens.clear();
+    }
+
     /// Olvida a un jugador: la próxima vez tendrá que poner la contraseña (si la hay).
     pub fn revocar(&mut self, id_jugador: IdJugador) {
         self.tokens.retain(|t| t.id_jugador != id_jugador);

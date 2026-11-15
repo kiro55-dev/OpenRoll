@@ -253,7 +253,7 @@
             : sala.estado.respaldo.tipo === "Lan"
               ? "Pasa a cada jugador el de la red en la que estéis juntos (p. ej. el de Radmin VPN)."
               : "Con tu dirección propia no cambia al volver a abrir la sala."}
-          Los que ya entraron no repiten la contraseña.
+          Los que ya entraron no repiten la contraseña, salvo que la cambies.
         </span>
       {:else}
         <span class="nota">Abre la sala para obtenerlo.</span>
@@ -287,7 +287,7 @@
           bind:value={contrasena}
           onkeydown={(e) => e.key === "Enter" && contrasena && guardarContrasena()}
         />
-        <button type="button" class="btn-secundario" disabled={ocupado || !contrasena} onclick={guardarContrasena}>Guardar</button>
+        <button type="button" class="btn-secundario" disabled={ocupado || !contrasena} title={ayuda("Los que ya habían entrado saldrán y tendrán que escribir la contraseña nueva")} onclick={guardarContrasena}>Guardar</button>
         {#if sala.estado.pide_contrasena}
           <button type="button" class="btn-secundario" disabled={ocupado} onclick={() => hacer(() => sala.ponerContrasena(null))}>Quitar</button>
         {/if}
