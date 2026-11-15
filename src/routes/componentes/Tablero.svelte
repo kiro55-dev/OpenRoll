@@ -310,6 +310,9 @@
         const d = derechoSobreFicha;
         if (!d || (aqui.x === d.salida.x && aqui.y === d.salida.y)) return;
         origenRecorrido = d.idInstancia; // la flecha sale de una ficha: Enter la moverá hasta el final
+        // El botón derecho no mueve el foco del teclado: si antes se pulsó un botón, una fila del banco o el chat, seguiría
+        // ahí y el Enter sería SUYO (no movería la ficha, y activaría ese botón: abrir una ficha, tirar...). Se suelta.
+        if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur();
         cambiarRecorrido(extenderRecorrido([d.salida], aqui));
         return;
       }
