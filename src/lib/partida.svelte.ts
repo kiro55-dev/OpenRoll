@@ -292,6 +292,8 @@ class Partida {
    *  el valor que se espera (absoluto) y cuántos envíos hay en camino. Mientras esté, se ve ESTE valor y no el que
    *  haya en `instancias` (el viejo, o uno intermedio), así no parpadea entre el antiguo y el nuevo. */
   valoresEnVuelo = $state<Record<string, { valor: number; envios: number }>>({});
+  /** Lo mismo para la variación de − y + (`ponerPaso`): la que se espera de cada "idEntidad:idDefinicion" hasta que se confirme. */
+  pasosEnVuelo = $state<Record<string, { paso: number; envios: number }>>({});
   #temporizadorValores: ReturnType<typeof setTimeout> | null = null;
 
   /** Aviso de una línea (algo que falló sin que haya una ventana donde mostrarlo); desaparece solo. */
@@ -853,31 +855,36 @@ class Partida {
     if (creadas?.length && destino === null) this.#cambiarFoco(creadas.map((i) => i.id_instancia));
   }
 
-  /** Cuánto suman o restan − y + del valor `idDefinicion` de esa ficha (1 si no se ha cambiado). Es de la ENTIDAD. */
+  /** Cuánto suman o restan − y + del valor `idDefinicion` de esa ficha (1 si no se ha cambiado). Es de la ENTIDAD. Mientras el
+   *  host no confirme un cambio (un jugador con latencia), se ve el que se acaba de poner y no el de Rust. */
   pasoDe(entidad: Entidad, idDefinicion: number): number {
-    return entidad.pasos_valor?.find((p) => p.id_definicion === idDefinicion)?.paso ?? 1;
+    return this.pasosEnVuelo[`${entidad.id}:${idDefinicion}`]?.paso ?? entidad.pasos_valor?.find((p) => p.id_definicion === idDefinicion)?.paso ?? 1;
   }
 
   /**
    * Cambia el paso de − y + de ese valor en la ficha `idEntidad`, que comparten todas sus instancias. Lo guarda Rust
-   * (el host, o un jugador de una ficha suya). Se ve al momento y Rust lo confirma al releer. Devuelve el que queda.
+   * (el host, o un jugador de una ficha suya). Se ve al momento y se sigue viendo hasta que Rust lo confirme y se relea
+   * (`pasosEnVuelo`), aunque en medio llegue una lectura vieja. Devuelve el que queda.
    */
   async ponerPaso(idEntidad: number, idDefinicion: number, paso: number): Promise<number> {
     const n = Math.trunc(Number(paso));
     if (!Number.isFinite(n) || n < 1) return 1;
     const valido = Math.min(n, PASO_VALOR_MAX);
-    const poner = (e: Entidad): Entidad =>
-      e.id !== idEntidad
-        ? e
-        : { ...e, pasos_valor: [...(e.pasos_valor ?? []).filter((p) => p.id_definicion !== idDefinicion), ...(valido === 1 ? [] : [{ id_definicion: idDefinicion, paso: valido }])] };
-    this.banco = this.banco.map(poner);
-    this.instancias = this.instancias.map((i) => ({ ...i, base: poner(i.base) }));
+    const clave = `${idEntidad}:${idDefinicion}`;
+    this.pasosEnVuelo[clave] = { paso: valido, envios: (this.pasosEnVuelo[clave]?.envios ?? 0) + 1 };
     try {
       await invoke("poner_paso_valor", { idEntidad, idDefinicion, paso: valido });
     } catch (err) {
       console.error("poner_paso_valor:", err);
     } finally {
-      await this.recargarEntidades();
+      // Primero se relee y luego se deja de esperar: así no hay un instante con el valor viejo. Si hay otro envío en camino,
+      // sigue valiendo el último que se puso (cada uno lo sobrescribe)
+      await this.recargarEntidades().catch(() => {});
+      const e = this.pasosEnVuelo[clave];
+      if (e) {
+        if (e.envios <= 1) delete this.pasosEnVuelo[clave];
+        else e.envios--;
+      }
     }
     return valido;
   }

@@ -735,6 +735,34 @@ describe("fichas: selección y vida", () => {
     expect(partida.pasoDe(ficha1(), 1)).toBe(1);
   });
 
+  it("mientras el host no confirma el paso, se ve el nuevo aunque llegue una lectura vieja", async () => {
+    const partida = await nuevoStore();
+    let confirmar!: () => void;
+    const lenta = new Promise<void>((r) => (confirmar = r));
+    const original = backend.invoke;
+    backend.invoke = async (cmd: string, args?: Args) => {
+      if (cmd === "poner_paso_valor") await lenta;
+      return original(cmd, args);
+    };
+    const ficha = () => partida.banco.find((b) => b.id === 1)!;
+    const puesta = partida.ponerPaso(1, 1, 5);
+    expect(partida.pasoDe(ficha(), 1)).toBe(5);
+
+    // En medio llega un cambio de otra cosa y se relee: Rust aún no lo tiene, y no vuelve al antiguo
+    await partida.recargarEntidades();
+    expect(ficha().pasos_valor ?? []).toEqual([]);
+    expect(partida.pasoDe(ficha(), 1)).toBe(5);
+    expect(partida.pasoDe(partida.instancias[0].base, 1)).toBe(5);
+    // Otro cambio mientras viaja: el último manda
+    const otra = partida.ponerPaso(1, 1, 8);
+    expect(partida.pasoDe(ficha(), 1)).toBe(8);
+
+    confirmar();
+    await Promise.all([puesta, otra]);
+    expect(partida.pasosEnVuelo).toEqual({});
+    expect(partida.pasoDe(ficha(), 1)).toBe(8); // el que dejó Rust
+  });
+
   it("si Rust rechaza el paso (no es de su ficha), la pantalla vuelve al que hay", async () => {
     const partida = await nuevoStore();
     const original = backend.invoke;
