@@ -277,6 +277,12 @@ su pantalla relee. Las peticiones de un jugador se ejecutan **en orden**, una a 
   chat con el nombre de quien tira (`Tiradas.autor`, vacío si es el host). El chat entero va en la vista de cada
   jugador (`historial_tiradas`) y en los `Cambios`: todos ven las tiradas de todos, como «Ana: 1d20 (7) = 7».
   `clean`/`c` solo lo puede usar el host, y solo el host puede tirar en privado (casilla «Pública» de la barra de dados: desmarcada, la tirada no llega a los jugadores). El historial personal (↑ ↓) de cada jugador se guarda en el disco del host (`historial_jugador_<id>.txt`, máx. 100) y lo recupera al reconectar (`obtener_historial_personal`); se borra al quitarlo de la partida.
+- **Variables en las tiradas (protocolo 11).** `tirar_dado` lleva `idInstancia`: la ficha con el foco del jugador (su
+  foco es local), de la que salen las variables (`2d6 + f`). El host solo deja usar las de una ficha suya
+  (`controla_instancia`). Los valores de las variables solo llegan al host y a los propietarios (`vista_jugador` los
+  vacía, `cambios_para` quita `CambioEntidad::Variable`); las definiciones van a todos en
+  `VistaJugador.definiciones_variables` / `Cambios.definiciones_variables`. En el chat todos ven solo el resultado:
+  «2d6 (3, 4) + f (+1) = 8».
 - **Pantalla del host.** Tras una acción de un jugador el host emite `partida-cambiada` (`tiradas` o `entidades`)
   y su store relee (`partida.alCambiarPartida`); el ping y el recorrido de un jugador llegan al host como el
   evento `aviso-tablero` y a los demás jugadores como `Aviso`.

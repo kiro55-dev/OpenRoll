@@ -14,4 +14,5 @@ pub mod papelera;
 pub mod partida;
 pub mod recursos;
 pub mod tablero;
+pub mod variables;
 pub mod visibilidad;

@@ -16,6 +16,8 @@ pub enum CambioEntidad {
     Tipo(TipoEntidad),
     /// El valor (o el `publico`) de UN parámetro, el de su `id_definicion`.
     Parametro(Parametro),
+    /// El valor de UNA variable, la de su `id_definicion`.
+    Variable(ValorVariable),
     Cuerpo(Cuerpo),
     Zona(u16),
     /// Otra foto: la miniatura propia (recorte de la anterior) deja de valer.
@@ -40,6 +42,11 @@ pub fn entre(antes: &Entidad, despues: &Entidad) -> Vec<CambioEntidad> {
     for p in &despues.parametros {
         if antes.parametros.iter().find(|a| a.id_definicion == p.id_definicion) != Some(p) {
             cambios.push(CambioEntidad::Parametro(p.clone()));
+        }
+    }
+    for v in &despues.variables {
+        if antes.variables.iter().find(|a| a.id_definicion == v.id_definicion) != Some(v) {
+            cambios.push(CambioEntidad::Variable(v.clone()));
         }
     }
     if antes.cuerpo != despues.cuerpo {
@@ -78,6 +85,11 @@ pub fn aplicar(e: &mut Entidad, cambios: &[CambioEntidad]) {
                     *actual = p.clone();
                 }
             }
+            CambioEntidad::Variable(v) => {
+                if let Some(actual) = e.variables.iter_mut().find(|a| a.id_definicion == v.id_definicion) {
+                    *actual = v.clone();
+                }
+            }
             CambioEntidad::Cuerpo(c) => e.cuerpo = c.clone(),
             CambioEntidad::Zona(z) => e.zona_id = *z,
             CambioEntidad::Foto(f) => {
@@ -103,6 +115,7 @@ mod tests {
             nombre: "Orco".into(),
             tipo: TipoEntidad::Enemigo,
             parametros: vec![param(ID_VIDA, 20, false), param(ID_ARMADURA, 12, true)],
+            variables: vec![ValorVariable { id_definicion: 1, valor: 10 }, ValorVariable { id_definicion: 2, valor: 8 }],
             cuerpo: Cuerpo::Pequenio,
             zona_id: 1,
             foto_url: Some("imagenes/a.png".into()),
@@ -148,6 +161,7 @@ mod tests {
         despues.nombre = "Troll".into();
         despues.tipo = TipoEntidad::NPC;
         despues.parametros[0] = Parametro { id_definicion: ID_VIDA, valor: ValorParametro::Numero(40), publico: true };
+        despues.variables[1].valor = 14;
         despues.cuerpo = Cuerpo::Grande(vec![2, 3]);
         despues.zona_id = 4;
         despues.foto_url = Some("imagenes/b.png".into());
@@ -157,7 +171,8 @@ mod tests {
         despues.propietarios = vec![3];
 
         let cambios = entre(&antes, &despues);
-        assert_eq!(cambios.len(), 10, "un cambio por campo");
+        assert_eq!(cambios.len(), 11, "un cambio por campo");
+        assert!(cambios.contains(&CambioEntidad::Variable(ValorVariable { id_definicion: 2, valor: 14 })), "solo la variable que cambió");
         let mut aplicada = antes.clone();
         aplicar(&mut aplicada, &cambios);
         assert_eq!(sin_miniatura(&aplicada), sin_miniatura(&despues));

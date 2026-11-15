@@ -10,8 +10,19 @@
   import { moverVentana } from "$lib/moverVentana";
   import { FormularioParametro, formasDisponibles, VISIBILIDADES, resumenDefinicion } from "$lib/formularioParametro.svelte";
   import ArrastreFlotante from "./comunes/ArrastreFlotante.svelte";
+  import TablaVariables from "./ventana-parametros/TablaVariables.svelte";
 
   let { onCerrar }: { onCerrar: () => void } = $props();
+
+  /** Subpestaña: los parámetros de siempre (vida, rangos... lo que se dibuja) o las variables (Fuerza «f»...). */
+  let pestana = $state<"parametros" | "variables">("parametros");
+
+  async function cambiarPestana(p: "parametros" | "variables") {
+    if (p === pestana) return;
+    if (!(await guardarSiCambio())) return; // un parámetro editado que no vale se queda a la vista con su error
+    error = "";
+    pestana = p;
+  }
 
   type Fila = DefinicionParametro & { orden: number };
 
@@ -115,7 +126,7 @@
 
   function alTeclear(e: KeyboardEvent) {
     if (e.key === "Escape") cerrar();
-    else if (e.key === "Enter" && creando && (e.target as HTMLElement).tagName === "INPUT") {
+    else if (e.key === "Enter" && pestana === "parametros" && creando && (e.target as HTMLElement).tagName === "INPUT") {
       e.preventDefault();
       guardar();
     }
@@ -141,6 +152,14 @@
   </div>
 
   <div class="cuerpo">
+    <div class="subpestanas" role="tablist" aria-label="Qué se configura">
+      <button type="button" role="tab" aria-selected={pestana === "parametros"} class:activa={pestana === "parametros"} onclick={() => cambiarPestana("parametros")}>Parámetros visuales</button>
+      <button type="button" role="tab" aria-selected={pestana === "variables"} class:activa={pestana === "variables"} onclick={() => cambiarPestana("variables")}>Variables</button>
+    </div>
+
+    {#if pestana === "variables"}
+      <TablaVariables onError={(m) => (error = m)} />
+    {:else}
     <p class="ayuda">Los tienen todas las fichas. Pulsa uno para configurarlo y arrástralo para cambiar el orden en que salen en ellas.</p>
 
     <div class="lista">
@@ -248,6 +267,7 @@
     {:else}
       <button type="button" class="btn-crear" onclick={nuevo}>+ Crear parámetro</button>
     {/if}
+    {/if}
 
     {#if error}
       <p class="error" role="alert">{error}</p>
@@ -287,6 +307,14 @@
   .btn-cerrar:hover { color: white; }
 
   .cuerpo { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+  .subpestanas { display: flex; gap: 2px; border-bottom: 1px solid #27272a; margin-top: -2px; }
+  .subpestanas button {
+    background: none; border: none; border-bottom: 2px solid transparent; color: #a1a1aa;
+    padding: 3px 10px 4px; font-size: 11px; font-weight: 600; cursor: pointer;
+  }
+  .subpestanas button:hover { color: #f4f4f5; }
+  .subpestanas button.activa { color: white; border-bottom-color: #3b82f6; }
   .ayuda { margin: 0; color: #a1a1aa; font-size: 10px; }
 
   .lista { display: flex; flex-direction: column; gap: 3px; max-height: 240px; overflow-y: auto; }

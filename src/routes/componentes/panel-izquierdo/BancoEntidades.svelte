@@ -17,7 +17,7 @@
   // Filtros
   let busqueda = $state("");
   let filtroZona = $state<"todos" | "actual">("todos");
-  let filtroTipo = $state<"todos" | "Enemigo" | "NPC" | "Jugador">("todos");
+  let filtroTipo = $state<"todos" | "Enemigo" | "NPC" | "Jugador" | "Objeto">("todos");
 
   // Control de qué filas están visibles en el scroll para descargar imágenes
   let visibles = $state<Record<number, boolean>>({});
@@ -190,6 +190,13 @@
         >
           Jugadores
         </button>
+        <button
+          type="button"
+          class:activo={filtroTipo === "Objeto"}
+          onclick={() => (filtroTipo = "Objeto")}
+        >
+          Objetos
+        </button>
       </div>
     </div>
   </div>
@@ -222,6 +229,14 @@
             {#if estaEnPantalla && mini}
               <img src={mini} alt="" class="img-cuadrado" draggable="false" />
             {/if}
+          </div>
+        {:else if item.tipo === "Objeto"}
+          <div class="contenedor-hexagono">
+            <div class="interior-hexagono">
+              {#if estaEnPantalla && mini}
+                <img src={mini} alt="" class="img-hexagono" draggable="false" />
+              {/if}
+            </div>
           </div>
         {:else}
           <div class="contenedor-circulo">
@@ -398,6 +413,32 @@
     height: 100%;
     object-fit: cover;
     pointer-events: none;
+  }
+  /* Hexágono gris para Objetos: el borde es la capa de fuera, que asoma 2px alrededor de la de dentro */
+  .contenedor-hexagono {
+    width: 20px;
+    height: 20px;
+    padding: 2px;
+    box-sizing: border-box;
+    background: #6d6b65;
+    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+    flex-shrink: 0;
+    margin-left: 1px;
+    margin-right: 1px;
+  }
+  .interior-hexagono {
+    width: 100%;
+    height: 100%;
+    background: #3f3f46;
+    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+    overflow: hidden;
+  }
+  .img-hexagono {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+    display: block;
   }
   .contenedor-circulo {
     width: 18px;

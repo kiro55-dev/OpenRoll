@@ -38,7 +38,7 @@ export interface Mapa {
   compartido: boolean;
 }
 
-export type TipoEntidad = "Enemigo" | "NPC" | "Jugador";
+export type TipoEntidad = "Enemigo" | "NPC" | "Jugador" | "Objeto";
 export type Cuerpo = "Pequenio" | { Grande: number[] };
 
 // ---- Parámetros (espejo de modelos.rs) ----
@@ -78,6 +78,21 @@ export interface ValorActual {
   valor: number;
 }
 
+/** Variable de la partida (`DefinicionVariable` en Rust): Fuerza «f», neutro 10, escala 2. Ver $lib/variables. */
+export interface DefinicionVariable {
+  id: number;
+  nombre: string;
+  abreviatura: string;
+  neutro: number;
+  escala: number;
+}
+
+/** Valor de una variable en una ficha. */
+export interface ValorVariable {
+  id_definicion: number;
+  valor: number;
+}
+
 /** Ids de los parámetros de serie (fijos en Rust: `ID_VIDA`...). */
 export const ID_PARAMETRO = { vida: 1, armadura: 2, velocidad: 3, rangoArma: 4 } as const;
 
@@ -109,6 +124,8 @@ export interface Entidad {
   tipo: TipoEntidad;
   /** Uno por definición, en el orden de las definiciones */
   parametros: Parametro[];
+  /** Una por variable de la partida, en su orden. Solo llegan al host y a los propietarios (a los demás, vacía). */
+  variables: ValorVariable[];
   cuerpo: Cuerpo;
   zona_id: number;
   foto_url: string | null;
@@ -220,6 +237,8 @@ class Partida {
   instancias = $state<Instancia[]>([]);
   /** Parámetros comunes a todas las fichas (vida, armadura...). */
   definiciones = $state<DefinicionParametro[]>([]);
+  /** Variables de las fichas (Fuerza «f»...), usables en el chat de dados. */
+  definicionesVariables = $state<DefinicionVariable[]>([]);
 
   /** «Fichas activas» de arriba abajo. */
   instanciasOrdenadas = $derived([...this.instancias].sort((a, b) => a.orden - b.orden || a.id_instancia - b.id_instancia));
@@ -275,7 +294,7 @@ class Partida {
   async iniciar() {
     this.#escucharCambios();
     await iniciarImagenes(); // hace falta antes de mostrar ningún mapa con imagen
-    this.definiciones = await invoke<DefinicionParametro[]>("obtener_definiciones_parametros");
+    await this.recargarDefiniciones();
     await this.recargarZonas();
     if (esJugador) {
       // El jugador empieza en el mapa que tiene abierto el host (si lo comparte)
@@ -450,15 +469,22 @@ class Partida {
   // Parámetros de la partida (comunes a todas las fichas)
   // ------------------------------------------------------------------
 
+  /** Los parámetros y las variables de la partida. */
   async recargarDefiniciones() {
-    this.definiciones = await invoke<DefinicionParametro[]>("obtener_definiciones_parametros");
+    const [definiciones, variables] = await Promise.all([
+      invoke<DefinicionParametro[]>("obtener_definiciones_parametros"),
+      invoke<DefinicionVariable[]>("obtener_definiciones_variables")
+    ]);
+    this.definiciones = definiciones;
+    this.definicionesVariables = variables ?? [];
   }
 
   /** Crear, borrar o reordenar un parámetro cambia también las fichas: se vuelve a leer todo.
    *  Los errores de Rust (nombre repetido...) se propagan para que los muestre quien llama. */
-  async #cambiarDefiniciones(cmd: string, args: Record<string, unknown>) {
+  async #cambiarDefiniciones(cmd: string, args: Record<string, unknown>, alResponder?: (r: unknown) => void) {
     try {
-      await invoke(cmd, args);
+      const respuesta = await invoke(cmd, args);
+      alResponder?.(respuesta);
     } finally {
       await Promise.all([this.recargarDefiniciones(), this.recargarEntidades()]);
     }
@@ -481,6 +507,32 @@ class Partida {
   /** `ids` = todos los parámetros en el orden nuevo (el que seguirán las fichas). */
   reordenarDefiniciones(ids: number[]) {
     return this.#cambiarDefiniciones("reordenar_definiciones_parametros", { ids });
+  }
+
+  // ------------------------------------------------------------------
+  // Variables de la partida (Fuerza «f»...): las define el host
+  // ------------------------------------------------------------------
+
+  /** Devuelve la variable creada (con el id que le puso Rust). */
+  async crearVariable(definicion: Omit<DefinicionVariable, "id">): Promise<DefinicionVariable> {
+    let creada: DefinicionVariable | null = null;
+    await this.#cambiarDefiniciones("crear_definicion_variable", { definicion: { ...definicion, id: 0 } }, (r) => (creada = r as DefinicionVariable));
+    return creada!;
+  }
+
+  /** Cambia nombre, abreviatura, neutro o escala. Las fichas conservan sus valores. */
+  modificarVariable(definicion: DefinicionVariable) {
+    return this.#cambiarDefiniciones("modificar_definicion_variable", { definicion });
+  }
+
+  /** Desaparece de la lista y de todas las fichas. */
+  borrarVariable(id: number) {
+    return this.#cambiarDefiniciones("borrar_definicion_variable", { id });
+  }
+
+  /** `ids` = todas las variables en el orden nuevo (el que seguirán las fichas). */
+  reordenarVariables(ids: number[]) {
+    return this.#cambiarDefiniciones("reordenar_definiciones_variables", { ids });
   }
 
   /** Rust también cambia el banco y las instancias al borrar zonas o mapas: se vuelven a leer. */
@@ -1180,3 +1232,6 @@ class Partida {
 }
 
 export const partida = new Partida();
+
+// Las variables de una tirada (`2d6 + f`) salen de la ficha con el foco, si hay una sola
+tiradas.fichaConFoco = () => partida.instanciaSeleccionada?.id_instancia ?? null;

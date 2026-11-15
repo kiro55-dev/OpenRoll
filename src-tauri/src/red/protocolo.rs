@@ -29,7 +29,8 @@ use crate::tablero_general::modelos::Jugador;
 use crate::tablero_general::tablero::AvisoTablero;
 
 /// Súbelo cuando cambie cualquier mensaje.
-pub const VERSION_PROTOCOLO: u32 = 10;
+/// 11: variables de las fichas (`definiciones_variables` en la vista, `Entidad.variables`, `idInstancia` en `tirar_dado`).
+pub const VERSION_PROTOCOLO: u32 = 11;
 
 /// Primer byte de un trozo binario: de una imagen que baja (host → jugador) o que sube (jugador → host).
 pub const TROZO_BAJADA: u8 = 1;

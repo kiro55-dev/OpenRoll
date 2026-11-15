@@ -1,19 +1,42 @@
 // src-tauri/src/tablero_general/dados.rs
 use std::fmt::Write;
 use tauri::State;
-use crate::tablero_general::estado::DeltaPartida;
+use crate::tablero_general::estado::{DeltaPartida, EstadoPartida};
+use crate::tablero_general::jugadores::controla_instancia;
 use crate::tablero_general::modelos::{IdJugador, ID_HOST};
 use crate::tablero_general::partida::{procesar_delta, registrar_comando_personal, registrar_tirada, AppState};
+use crate::tablero_general::variables;
 
 pub struct Tirada {
     pub signo: i32,
     pub veces: i32,
     pub d: i32,
     pub bonificador: Option<i32>,
+    /// Si el bonificador sale de una variable de la ficha (`2d6 + f`): su abreviatura, para el desglose («f (+1)»).
+    pub variable: Option<String>,
     pub ventaja: bool,
     pub desventaja: bool,
     /// Multiplica la suma de ESTE término de dados (`2*3d20`). 1 = sin multiplicar.
     pub multiplicador: i32,
+}
+
+/// Lo que vale en una tirada la variable que nombra `texto` (por nombre o abreviatura): su abreviatura y su
+/// resultado en la ficha con el foco (`id_instancia`). Un jugador solo puede usar las de sus fichas.
+fn resolver_variable(
+    est: &EstadoPartida,
+    jugador: IdJugador,
+    id_instancia: Option<u16>,
+    texto: &str,
+) -> Result<(String, i32), String> {
+    let def = variables::buscar(&est.definiciones_variables, texto)
+        .ok_or_else(|| format!("«{}» no es una variable", texto.trim()))?;
+    let id = id_instancia.ok_or("Pon el foco en una ficha (solo una) para usar sus variables")?;
+    let inst = est.instancias_activas.iter().find(|i| i.id_instancia == id).ok_or("Esa ficha ya no está activa")?;
+    if !controla_instancia(est, jugador, id) {
+        return Err("Solo puedes usar las variables de tus fichas".into());
+    }
+    let valor = inst.base.variables.iter().find(|v| v.id_definicion == def.id).map_or(def.neutro, |v| v.valor);
+    Ok((def.abreviatura.clone(), variables::modificador(def, valor)))
 }
 
 // Resalta en negrita si es 1 (pifia) o el valor máximo de caras (crítico)
@@ -29,9 +52,14 @@ fn formatear_num(valor: i32, caras: i32) -> String {
 /// jugador no podrá mandar al host textos enormes que parsear.
 pub const MAX_LONGITUD_COMANDO: usize = 200;
 
-/// Solo acepta tiradas: números, `d`, `+`, `-`, `*` y `adv`/`desv`/`dis`. Cualquier otro texto es un error,
-/// así que nada de lo escrito llega al desglose (que lo forma `ejecutar_tiradas` con números y palabras fijas).
-fn parsear_comando(comando: &str) -> Result<Vec<Tirada>, String> {
+/// Solo acepta tiradas: números, `d`, `+`, `-`, `*` y `adv`/`desv`/`dis`, y variables (un término solo de
+/// letras), que `resolver` convierte en (abreviatura, resultado). Cualquier otro texto es un error, así que nada
+/// de lo escrito llega al desglose (que lo forma `ejecutar_tiradas` con números, palabras fijas y la abreviatura
+/// que definió el host, que solo lleva letras).
+fn parsear_comando(
+    comando: &str,
+    resolver: &mut dyn FnMut(&str) -> Result<(String, i32), String>,
+) -> Result<Vec<Tirada>, String> {
     if comando.chars().count() > MAX_LONGITUD_COMANDO {
         return Err(format!("El comando no puede pasar de {MAX_LONGITUD_COMANDO} caracteres"));
     }
@@ -65,6 +93,22 @@ fn parsear_comando(comando: &str) -> Result<Vec<Tirada>, String> {
 
     // 2. Parseamos cada término
     for (signo, termino) in terminos {
+        // Una variable de la ficha (`f`, `Fuerza`): un término de dados siempre lleva algún dígito
+        if variables::parece_variable(&termino) {
+            let (abreviatura, valor) = resolver(&termino)?;
+            tiradas.push(Tirada {
+                signo,
+                veces: 0,
+                d: 0,
+                bonificador: Some(valor),
+                variable: Some(abreviatura),
+                ventaja: false,
+                desventaja: false,
+                multiplicador: 1,
+            });
+            continue;
+        }
+
         // Multiplicador opcional delante de un término de dados: `2*3d20`
         let (multiplicador, termino) = match termino.split_once('*') {
             Some((m, resto)) => {
@@ -129,6 +173,7 @@ fn parsear_comando(comando: &str) -> Result<Vec<Tirada>, String> {
                     veces,
                     d: caras,
                     bonificador: None,
+                    variable: None,
                     ventaja,
                     desventaja,
                     multiplicador,
@@ -141,6 +186,7 @@ fn parsear_comando(comando: &str) -> Result<Vec<Tirada>, String> {
                 veces: 0,
                 d: 0,
                 bonificador: Some(bonif),
+                variable: None,
                 ventaja: false,
                 desventaja: false,
                 multiplicador: 1,
@@ -174,7 +220,14 @@ fn ejecutar_tiradas(tiradas: &[Tirada]) -> Result<(String, i32), String> {
 
         // Bonificadores numéricos directos
         if let Some(bonificador) = t.bonificador {
-            let _ = write!(resultado, "{bonificador}");
+            match &t.variable {
+                Some(abreviatura) => {
+                    let _ = write!(resultado, "{abreviatura} ({bonificador:+})");
+                }
+                None => {
+                    let _ = write!(resultado, "{bonificador}");
+                }
+            }
             total += i64::from(t.signo) * i64::from(bonificador);
             continue;
         }
@@ -240,19 +293,31 @@ fn ejecutar_tiradas(tiradas: &[Tirada]) -> Result<(String, i32), String> {
 }
 
 #[tauri::command]
-pub fn tirar_dado(comando: String, publica: Option<bool>, state: State<'_, AppState>) -> Result<String, String> {
-    tirar_dado_de(&state, ID_HOST, &comando, publica.unwrap_or(true))
+pub fn tirar_dado(
+    comando: String,
+    publica: Option<bool>,
+    id_instancia: Option<u16>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    tirar_dado_de(&state, ID_HOST, &comando, publica.unwrap_or(true), id_instancia)
 }
 
 /// La tirada de `jugador` (el host o un jugador de la sala, que la pide por la red). Rust la procesa y la
 /// registra con el nombre de quien tira; el chat de tiradas llega así a todos. Un `clean` no es una tirada
 /// (`limpiar_chat` es solo del host).
 /// `publica`: si los jugadores ven la tirada (solo el host puede tirar en privado).
-pub fn tirar_dado_de(state: &AppState, jugador: IdJugador, comando: &str, publica: bool) -> Result<String, String> {
+/// `id_instancia`: la ficha con el foco, de la que salen las variables (`2d6 + f`); solo se mira si hay alguna.
+pub fn tirar_dado_de(
+    state: &AppState,
+    jugador: IdJugador,
+    comando: &str,
+    publica: bool,
+    id_instancia: Option<u16>,
+) -> Result<String, String> {
     if jugador != ID_HOST && es_comando_limpiar(comando) {
         return Err("Solo el host puede limpiar el chat".into());
     }
-    let tiradas = parsear_comando(comando)?;
+    let tiradas = parsear_comando(comando, &mut |texto| resolver_variable(&state.lock(), jugador, id_instancia, texto))?;
     let (desglose, total) = ejecutar_tiradas(&tiradas)?;
 
     // 1. Registra en el estado de la partida / deltas (con el total tal cual, sin releerlo de un texto)
@@ -288,9 +353,75 @@ pub fn limpiar_chat(comando: String, state: State<'_, AppState>) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tablero_general::modelos::*;
+    use crate::tablero_general::variables::pruebas::var;
+
+    /// Sin variables: un término de letras es un error, como antes.
+    fn sin_variables(texto: &str) -> Result<(String, i32), String> {
+        Err(format!("«{texto}» no es una variable"))
+    }
+
+    fn parsear_comando(cmd: &str) -> Result<Vec<Tirada>, String> {
+        super::parsear_comando(cmd, &mut sin_variables)
+    }
 
     fn tirar(cmd: &str) -> Result<(String, i32), String> {
         ejecutar_tiradas(&parsear_comando(cmd)?)
+    }
+
+    /// Partida con Fuerza (f, 10/2) y Cordura (cor, 7/3), y la instancia 1 (ficha de Ana, jugador 3) con
+    /// Fuerza 12 (+1) y Cordura 9 (0); la instancia 2 es solo del host.
+    fn partida_con_variables() -> EstadoPartida {
+        let mut e = EstadoPartida::default();
+        e.definiciones_variables = vec![var(1, "Fuerza", "f", 10, 2), var(2, "Cordura", "cor", 7, 3)];
+        let ficha = |id: u16, propietarios: Vec<u16>, fuerza: i16| Entidad {
+            id, nombre: format!("F{id}"), tipo: TipoEntidad::Jugador, parametros: vec![],
+            variables: vec![ValorVariable { id_definicion: 1, valor: fuerza }, ValorVariable { id_definicion: 2, valor: 9 }],
+            cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
+            archivos_adjuntos: vec![], es_unico: false, propietarios,
+        };
+        let inst = |id: u16, base: Entidad| Instancia {
+            id_instancia: id, id_mapa: None, base, valores_actuales: vec![], coordenadas: Coordenada::NoPuesto,
+            activo: true, rotacion: 0, espejo: false, orden: 0, capa: 0, atenuada: false,
+        };
+        e.jugadores = vec![Jugador { id: 3, nombre: "Ana".into() }];
+        e.instancias_activas = vec![inst(1, ficha(1, vec![3], 12)), inst(2, ficha(2, vec![], 4))];
+        e
+    }
+
+    fn tirar_con(e: &EstadoPartida, jugador: IdJugador, foco: Option<u16>, cmd: &str) -> Result<(String, i32), String> {
+        ejecutar_tiradas(&super::parsear_comando(cmd, &mut |t| resolver_variable(e, jugador, foco, t))?)
+    }
+
+    #[test]
+    fn las_variables_de_la_ficha_con_el_foco_suman_su_resultado() {
+        let e = partida_con_variables();
+        let (d, total) = tirar_con(&e, ID_HOST, Some(1), "2d1 + f").unwrap();
+        assert_eq!(total, 3);
+        assert_eq!(d, "2d1 (<b>1</b>, <b>1</b>) + f (+1)");
+        // Por nombre, en mayúsculas, restando y la de resultado 0
+        assert_eq!(tirar_con(&e, ID_HOST, Some(1), "1d1 + FUERZA - cor").unwrap(), ("1d1 (<b>1</b>) + f (+1) - cor (+0)".into(), 2));
+        assert_eq!(tirar_con(&e, ID_HOST, Some(1), "f").unwrap().1, 1);
+        // La otra ficha: Fuerza 4 → -3
+        let (d, total) = tirar_con(&e, ID_HOST, Some(2), "10 + f").unwrap();
+        assert_eq!((d.as_str(), total), ("10 + f (-3)", 7));
+        // Sin variables el foco no importa
+        assert_eq!(tirar_con(&e, ID_HOST, None, "1d1 + 2").unwrap().1, 3);
+    }
+
+    #[test]
+    fn las_variables_necesitan_foco_existir_y_ser_de_quien_tira() {
+        let e = partida_con_variables();
+        assert!(tirar_con(&e, ID_HOST, None, "1d20 + f").unwrap_err().contains("foco"));
+        assert!(tirar_con(&e, ID_HOST, Some(9), "1d20 + f").unwrap_err().contains("ya no está activa"));
+        assert!(tirar_con(&e, ID_HOST, Some(1), "1d20 + fu").unwrap_err().contains("no es una variable"));
+        assert_eq!(tirar_con(&e, 3, Some(1), "1d1 + f").unwrap().1, 2, "Ana usa las de su ficha");
+        assert!(tirar_con(&e, 3, Some(2), "1d1 + f").unwrap_err().contains("tus fichas"), "pero no las de otra");
+        assert!(tirar_con(&e, ID_HOST, Some(1), "2*f").is_err(), "el multiplicador solo vale para dados");
+        // Lo escrito no llega al desglose: solo la abreviatura que definió el host
+        for malo in ["f<b>", "<script>", "f'", "f;"] {
+            assert!(tirar_con(&e, ID_HOST, Some(1), malo).is_err(), "{malo}");
+        }
     }
 
     #[test]

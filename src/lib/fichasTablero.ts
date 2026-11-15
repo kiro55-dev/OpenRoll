@@ -15,12 +15,25 @@ import {
   type RejillaTablero
 } from "$lib/tablero";
 
-/** Color de cada tipo de ficha: Enemigo = cuadrado rojo, NPC = rombo azul, Jugador = círculo verde. */
+/**
+ * Color de cada tipo de ficha: Enemigo = cuadrado rojo, NPC = rombo azul, Jugador = círculo verde, Objeto = hexágono gris.
+ * (En el tablero todas son un cuadrado; la forma del tipo se ve en el banco y en «Fichas activas».)
+ */
 export const COLOR_TIPO: Record<TipoEntidad, string> = {
   Enemigo: "#ef4444",
   NPC: "#3b82f6",
-  Jugador: "#22c55e"
+  Jugador: "#22c55e",
+  Objeto: "#6D6B65"
 };
+
+/**
+ * ¿Este tipo de ficha oculta este parámetro? Un Objeto no representa en el tablero los parámetros con forma visual
+ * (cuadrado, rombo, círculo, barra de vida), así que tampoco se enseñan en la caja «Parámetros». Los de tipo «Resumen» y los
+ * que no se representan (texto, etc.) se ven como en cualquier otra ficha.
+ */
+export function parametroOculto(tipo: TipoEntidad, d: DefinicionParametro): boolean {
+  return tipo === "Objeto" && !!d.representar_mapa && !("Resumen" in d.representar_mapa);
+}
 
 /** Instancia colocada con su casilla central. */
 export type FichaEnMapa = { instancia: Instancia; casilla: Casilla };
@@ -245,6 +258,8 @@ export function dibujarFormas(
   valorDe: (d: DefinicionParametro) => number,
   maximoDe: (d: DefinicionParametro) => number
 ) {
+  // Un Objeto no dibuja los parámetros visuales en el tablero (ni rangos ni barra de vida): solo su cuerpo
+  if (ficha.instancia.base.tipo === "Objeto") return;
   const lados = ladosInstancia(ficha.instancia);
   // Pasa una línea de rejilla (en casillas) a pantalla
   const px = (columna: number) => cam.x + columna * rejilla.anchoCasilla * cam.zoom;

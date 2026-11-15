@@ -5,6 +5,7 @@
   import { ayuda } from "$lib/ajustesVista.svelte";
   import { partida, numeroDe, veParametro, type Cuerpo } from "$lib/partida.svelte";
   import { arrastreTirada } from "$lib/arrastreTirada.svelte";
+  import { parametroOculto } from "$lib/fichasTablero";
 
   const textoCuerpo = (c: Cuerpo) => (typeof c === "object" ? `${c.Grande[0] ?? 1}×${c.Grande[1] ?? 1}` : "1×1");
 
@@ -13,7 +14,7 @@
   const parametros = $derived(
     ficha
       ? // Solo los que Rust manda: lo privado no se enseña
-        partida.definiciones.filter((d) => veParametro(ficha, d.id)).map((d) => {
+        partida.definiciones.filter((d) => veParametro(ficha, d.id) && !parametroOculto(ficha.base.tipo, d)).map((d) => {
           const v = ficha.base.parametros.find((p) => p.id_definicion === d.id)?.valor;
           const unidad = d.unidad ? ` ${d.unidad}` : "";
           const texto = !v ? "—" : "Numero" in v ? `${v.Numero}${unidad}` : v.Texto || "—";

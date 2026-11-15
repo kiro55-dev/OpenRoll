@@ -3,9 +3,10 @@
 // Espejo a mano de src-tauri/src/red/protocolo.rs y red/vista.rs. Si cambia algo allí, cámbialo aquí y
 // sube VERSION_PROTOCOLO en los dos lados (y publica la página a la vez que la app).
 import type { AvisoTablero } from "$lib/avisosTablero";
-import type { DefinicionParametro, Entidad, Instancia, Mapa, Zona } from "$lib/partida.svelte";
+import type { DefinicionParametro, DefinicionVariable, Entidad, Instancia, Mapa, Zona } from "$lib/partida.svelte";
 
-export const VERSION_PROTOCOLO = 10;
+/** 11: variables de las fichas (`definiciones_variables`, `Entidad.variables`, `idInstancia` en `tirar_dado`). */
+export const VERSION_PROTOCOLO = 11;
 
 export interface Jugador {
   id: number;
@@ -28,6 +29,8 @@ export interface VistaJugador {
   instancias: Instancia[];
   entidades: Entidad[];
   definiciones: DefinicionParametro[];
+  /** Las variables de la partida (los valores van solo en sus fichas). */
+  definiciones_variables?: DefinicionVariable[];
   /** El chat de tiradas, de todos, la más reciente primero. */
   historial_tiradas: TiradaChat[];
   /** El mapa que debe tener abierto (el del host, si lo comparte). `null`/ausente: aún ninguno. */
@@ -45,6 +48,7 @@ export interface Cambios {
   entidades?: Entidad[];
   entidades_quitadas?: number[];
   definiciones?: DefinicionParametro[];
+  definiciones_variables?: DefinicionVariable[];
   historial_tiradas?: TiradaChat[];
   /** Cambió el mapa que debe ver (`mapa_visible` puede venir vacío: ninguno). */
   mapa_visible_cambiado?: boolean;

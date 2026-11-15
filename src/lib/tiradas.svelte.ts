@@ -101,6 +101,9 @@ class Tiradas {
   comando = $state("");
   /** Solo el host: si las tiradas que hace las ven los jugadores (casilla de la barra de dados). */
   publica = $state(true);
+  /** La instancia con el foco (una sola), de la que salen las variables de una tirada (`2d6 + f`). La pone
+   *  `partida.svelte.ts` (que ya importa este store: así no se importan el uno al otro). */
+  fichaConFoco: () => number | null = () => null;
 
   // Navegación por los comandos anteriores con ↑ ↓, como en una terminal.
   #anteriores: string[] = [];
@@ -180,13 +183,17 @@ class Tiradas {
     }
 
     try {
+      // Las variables (`2d6 + f`) salen de la ficha con el foco: Rust solo la mira si el comando usa alguna.
       // Solo el host puede tirar en privado (las de los jugadores son siempre públicas)
-      await invoke<string>("tirar_dado", esJugador ? { comando: cmd } : { comando: cmd, publica: this.publica });
+      const idInstancia = this.fichaConFoco();
+      await invoke<string>("tirar_dado", esJugador ? { comando: cmd, idInstancia } : { comando: cmd, publica: this.publica, idInstancia });
       // La tirada ya está en el chat de la partida (con el nombre de quien tira): se vuelve a leer, así sale
       // igual para todos y no se duplica cuando llega también como cambio
       await this.cargar();
-    } catch {
-      this.#anadir({ hora: horaActual(), comando: "tirada no válida", total: null });
+    } catch (err) {
+      // El motivo, si Rust lo da (sin foco, una variable que no existe...). Solo lo ve quien tira.
+      const motivo = typeof err === "string" && err.trim() ? `: ${err}` : "";
+      this.#anadir({ hora: horaActual(), comando: `tirada no válida${motivo}`, total: null });
     }
   }
 

@@ -178,7 +178,28 @@ describe("tirar", () => {
     const { tiradas } = await nuevoStore();
     tirarRespuesta = () => "ERROR";
     await tiradas.tirar("patata");
-    expect(tiradas.historial[0]).toMatchObject({ comando: "tirada no válida", total: null });
+    // Con el motivo que da Rust, que solo ve quien tira
+    expect(tiradas.historial[0]).toMatchObject({ comando: "tirada no válida: comando inválido", total: null });
+  });
+
+  it("manda la ficha con el foco (de ella salen las variables, 2d6 + f)", async () => {
+    const { tiradas } = await nuevoStore();
+    await tiradas.tirar("2d6 + f");
+    expect(llamadas.find((l) => l.cmd === "tirar_dado")?.args).toMatchObject({ comando: "2d6 + f", idInstancia: null });
+    tiradas.fichaConFoco = () => 7;
+    await tiradas.tirar("1d20 + f");
+    expect(llamadas.filter((l) => l.cmd === "tirar_dado")[1].args).toMatchObject({ idInstancia: 7, publica: true });
+    // Rust la rechaza sin foco: se ve por qué
+    tirarRespuesta = () => "ERROR";
+    await tiradas.tirar("1d20 + f");
+    expect(tiradas.historial[0].comando).toBe("tirada no válida: comando inválido");
+  });
+
+  it("el jugador también manda su ficha con el foco", async () => {
+    const { tiradas } = await nuevoStore(true);
+    tiradas.fichaConFoco = () => 3;
+    await tiradas.tirar("1d20 + f");
+    expect(llamadas.find((l) => l.cmd === "tirar_dado")?.args).toEqual({ comando: "1d20 + f", idInstancia: 3 });
   });
 
   it("un total 0 real se muestra como total, no como error", async () => {
@@ -211,7 +232,7 @@ describe("tirar", () => {
     // Mezclado: va a Rust como tirada, que lo rechaza
     tirarRespuesta = () => "ERROR";
     await tiradas.tirar("c + 1d6");
-    expect(tiradas.historial[0]).toMatchObject({ comando: "tirada no válida", total: null });
+    expect(tiradas.historial[0]).toMatchObject({ comando: "tirada no válida: comando inválido", total: null });
     expect(llamadas.filter((l) => l.cmd === "limpiar_chat")).toHaveLength(1);
   });
 

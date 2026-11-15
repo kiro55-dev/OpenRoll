@@ -186,7 +186,7 @@ mod tests {
         {
             let mut est = state.lock();
             let ficha = |id: u16, duenos: Vec<IdJugador>| Entidad {
-                id, nombre: format!("F{id}"), tipo: TipoEntidad::Jugador, parametros: vec![], cuerpo: Cuerpo::Pequenio, zona_id: 1,
+                id, nombre: format!("F{id}"), tipo: TipoEntidad::Jugador, parametros: vec![], variables: vec![], cuerpo: Cuerpo::Pequenio, zona_id: 1,
                 foto_url: None, miniatura_url: None, foto_encuadre: Default::default(), archivos_adjuntos: vec![], es_unico: false,
                 propietarios: duenos,
             };

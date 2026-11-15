@@ -975,7 +975,7 @@ mod tests {
         let ficha = |id, propietarios: Vec<IdJugador>| Entidad {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Jugador,
             parametros: parametros_por_defecto().iter().map(|d| Parametro { id_definicion: d.id, valor: d.valor_por_defecto.clone(), publico: true }).collect(),
-            cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
+            variables: vec![], cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
             archivos_adjuntos: vec![], es_unico: false, propietarios,
         };
         let instancia = |id, base: Entidad| Instancia {

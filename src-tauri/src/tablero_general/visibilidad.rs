@@ -41,6 +41,8 @@ pub fn vista_jugador(inst: &Instancia, definiciones: &[DefinicionParametro]) -> 
     let publicos: Vec<u16> = vista.base.parametros.iter().map(|p| p.id_definicion).collect();
     vista.valores_actuales.retain(|v| publicos.contains(&v.id_definicion));
     vista.base.archivos_adjuntos.clear();
+    // Las variables (Fuerza, Cordura...) solo las ven el host y los propietarios
+    vista.base.variables.clear();
     vista
 }
 
@@ -156,7 +158,7 @@ pub fn cambios_para(
     let visibles: Vec<CambioEntidad> = cambios
         .iter()
         .filter(|c| match c {
-            CambioEntidad::Adjuntos(_) => false,
+            CambioEntidad::Adjuntos(_) | CambioEntidad::Variable(_) => false,
             CambioEntidad::Parametro(p) => p.publico,
             _ => true,
         })
@@ -181,6 +183,7 @@ mod tests {
                 tipo: TipoEntidad::Enemigo,
                 // La vida es privada; armadura y velocidad, públicas
                 parametros: vec![param(ID_VIDA, 20, false), param(ID_ARMADURA, 12, true), param(ID_VELOCIDAD, 6, true)],
+                variables: vec![ValorVariable { id_definicion: 1, valor: 14 }],
                 cuerpo: Cuerpo::Pequenio,
                 zona_id: 1,
                 foto_url: None,
@@ -208,6 +211,7 @@ mod tests {
         assert_eq!(ids, vec![ID_ARMADURA, ID_VELOCIDAD]);
         assert!(v.valores_actuales.is_empty(), "la vida actual también es privada");
         assert!(v.base.archivos_adjuntos.is_empty());
+        assert!(v.base.variables.is_empty(), "las variables solo las ven el host y los propietarios");
         // Lo demás no cambia
         assert_eq!((v.id_instancia, v.id_mapa, v.rotacion, v.orden), (1, Some(2), 1, 5));
         assert!(v.espejo, "el aspecto no es privado");
@@ -346,6 +350,7 @@ mod tests {
             CambioEntidad::Parametro(privado),
             CambioEntidad::Parametro(publico.clone()),
             CambioEntidad::Adjuntos(vec![]),
+            CambioEntidad::Variable(ValorVariable { id_definicion: 1, valor: 16 }),
         ];
 
         assert_eq!(cambios_para(3, &ficha, false, &cambios), Some(cambios.clone()), "el propietario, todo");
@@ -356,6 +361,8 @@ mod tests {
             Some(vec![CambioEntidad::Nombre("Orco jefe".into()), CambioEntidad::Parametro(publico)])
         );
         assert_eq!(cambios_para(4, &ficha, true, &[CambioEntidad::Adjuntos(vec![])]), None, "nada que enviarle");
+        let variable = [CambioEntidad::Variable(ValorVariable { id_definicion: 1, valor: 16 })];
+        assert_eq!(cambios_para(4, &ficha, true, &variable), None, "las variables ajenas tampoco");
     }
 
     #[test]

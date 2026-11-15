@@ -24,7 +24,7 @@
     for (const i of partida.instanciasVisibles) miniaturas.asegurarFicha(i.base);
   });
 
-  const FORMA_TIPO = { Enemigo: "cuadrado", NPC: "rombo", Jugador: "circulo" } as const;
+  const FORMA_TIPO = { Enemigo: "cuadrado", NPC: "rombo", Jugador: "circulo", Objeto: "hexagono" } as const;
 
   // Parámetros que se resumen en la tarjeta, con su color
   const resumidos = $derived(
@@ -117,7 +117,19 @@
       title={ayuda("Clic: foco\nCtrl+clic: foco en varias\nDoble clic: ver la foto\nArrastrar: reordenar o llevar al tablero\nClic derecho: eliminar")}
     >
       <div class="foto {forma}">
-        {#if ficha.base.foto_url}
+        {#if forma === "hexagono"}
+          <!-- Hexágono: la capa de fuera es el borde gris y la de dentro lleva la foto -->
+          <div class="interior-hexagono">
+            {#if ficha.base.foto_url}
+              {@const mini = miniaturas.deFicha(ficha.base)}
+              {#if mini}
+                <img src={mini} alt="" draggable="false" />
+              {/if}
+            {:else}
+              <span class="inicial">{ficha.base.nombre.charAt(0).toUpperCase()}</span>
+            {/if}
+          </div>
+        {:else if ficha.base.foto_url}
           {@const mini = miniaturas.deFicha(ficha.base)}
           {#if mini}
             <img src={mini} alt="" draggable="false" />
@@ -248,6 +260,23 @@
     border-radius: 3px;
   }
   .foto.rombo img, .foto.rombo .inicial { transform: rotate(-45deg) scale(1.42); }
+  /* Hexágono gris (Objeto): el borde es el fondo de la capa de fuera, recortada igual que la de dentro */
+  .foto.hexagono {
+    padding: 2px;
+    border: none;
+    background: #6d6b65;
+    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  }
+  .interior-hexagono {
+    width: 100%;
+    height: 100%;
+    background: #3f3f46;
+    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 
   .texto { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .nombre { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: bold; }

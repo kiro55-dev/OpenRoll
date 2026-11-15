@@ -147,7 +147,7 @@ mod tests {
             nombre: format!("F{id}"),
             tipo: TipoEntidad::Jugador,
             parametros: vec![],
-            cuerpo: Cuerpo::Pequenio,
+            variables: vec![], cuerpo: Cuerpo::Pequenio,
             zona_id: 1,
             foto_url: None,
             miniatura_url: None,

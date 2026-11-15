@@ -6,6 +6,7 @@ pub enum TipoEntidad {
     Enemigo,
     NPC,
     Jugador,
+    Objeto,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -231,6 +232,35 @@ pub fn normalizar_parametros(defs: &[DefinicionParametro], parametros: &mut Vec<
 }
 
 // ========================================================
+// VARIABLES
+// ========================================================
+//
+// Dos niveles (la lógica está en `variables.rs`):
+//  * Partida -> `DefinicionVariable`: qué variables existen (Fuerza «f», neutro 10, escala 2...).
+//  * Ficha   -> `ValorVariable`: su valor (12). El resultado (+1) se calcula, no se guarda, y es lo que vale
+//               la variable en una tirada del chat (`2d6 + f`).
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct DefinicionVariable {
+    pub id: u16,
+    /// Nombre completo («Fuerza»); también vale en el chat.
+    pub nombre: String,
+    /// Abreviatura («f»): lo normal en el chat y lo que sale en el desglose de la tirada.
+    pub abreviatura: String,
+    /// Valor con el que el resultado es 0.
+    pub neutro: i16,
+    /// Cuántos puntos por encima (o por debajo) del neutro suman (o restan) 1. Siempre ≥ 1.
+    pub escala: i16,
+}
+
+/// Valor de una variable en una ficha.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ValorVariable {
+    pub id_definicion: u16,
+    pub valor: i16,
+}
+
+// ========================================================
 // JUGADORES
 // ========================================================
 
@@ -288,6 +318,9 @@ pub struct Entidad {
     pub tipo: TipoEntidad,
     /// Valores de los parámetros de la partida, en el orden de sus definiciones.
     pub parametros: Vec<Parametro>,
+    /// Valores de las variables de la partida, en el orden de sus definiciones (ver `variables.rs`). Solo los
+    /// ven el host y los propietarios.
+    pub variables: Vec<ValorVariable>,
     pub cuerpo: Cuerpo,
     pub zona_id: u16,
 
@@ -325,6 +358,8 @@ struct EntidadGuardada {
     tipo: TipoEntidad,
     #[serde(default)]
     parametros: Vec<Parametro>,
+    #[serde(default)]
+    variables: Vec<ValorVariable>,
     cuerpo: Cuerpo,
     zona_id: u16,
     #[serde(default)]
@@ -375,6 +410,7 @@ impl From<EntidadGuardada> for Entidad {
             nombre: g.nombre,
             tipo: g.tipo,
             parametros,
+            variables: g.variables,
             cuerpo: g.cuerpo,
             zona_id: g.zona_id,
             foto_url: g.foto_url,

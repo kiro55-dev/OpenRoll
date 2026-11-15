@@ -190,6 +190,55 @@ describe("guardar, cancelar y borrar", () => {
   });
 });
 
+describe("variables", () => {
+  const VARIABLES = [
+    { id: 1, nombre: "Fuerza", abreviatura: "f", neutro: 10, escala: 2 },
+    { id: 2, nombre: "Cordura", abreviatura: "cor", neutro: 7, escala: 3 }
+  ];
+
+  async function conVariables(e = entidad()) {
+    const ed = await nuevoEditor(e);
+    const { EditorFicha } = await import("$lib/editorFicha.svelte");
+    return new EditorFicha(ed.entidad, false, structuredClone(DEFINICIONES) as any, structuredClone(VARIABLES));
+  }
+
+  it("una ficha sin valores recibe el neutro de cada variable, en su orden", async () => {
+    const ed = await conVariables(entidad({ variables: [{ id_definicion: 2, valor: 9 }, { id_definicion: 99, valor: 1 }] }));
+    expect(ed.entidad.variables).toEqual([{ id_definicion: 1, valor: 10 }, { id_definicion: 2, valor: 9 }]);
+  });
+
+  it("el resultado se recalcula con el valor escrito y se redondea hacia abajo", async () => {
+    const ed = await conVariables();
+    ed.ponerValorVariable(1, 12);
+    expect(ed.resultadoVariable(VARIABLES[0])).toBe(1);
+    ed.ponerValorVariable(1, 9);
+    expect(ed.resultadoVariable(VARIABLES[0])).toBe(-1);
+    ed.ponerValorVariable(2, 9);
+    expect(ed.resultadoVariable(VARIABLES[1])).toBe(0);
+    ed.ponerValorVariable(1, null as any); // campo vacío
+    expect(ed.resultadoVariable(VARIABLES[0])).toBeNull();
+  });
+
+  it("un valor que no es un entero o se pasa del tope no llega a Rust", async () => {
+    const ed = await conVariables();
+    ed.ponerValorVariable(1, 12.5);
+    expect(await ed.guardar()).toBe(false);
+    expect(ed.error).toBe("Fuerza: debe ser un número entero");
+    ed.ponerValorVariable(1, 10000);
+    expect(await ed.guardar()).toBe(false);
+    expect(ed.error).toBe("Fuerza: no puede pasar de 9999");
+    ed.ponerValorVariable(1, -3); // negativo sí vale
+    expect(await ed.guardar()).toBe(true);
+    expect(partidaFalsa.guardarEntidad).toHaveBeenCalledOnce();
+  });
+
+  it("una ficha de antes de las variables no se rompe sin variables definidas", async () => {
+    const ed = await nuevoEditor();
+    expect(ed.variables).toEqual([]);
+    expect(ed.entidad.variables).toEqual([]);
+  });
+});
+
 describe("parámetros", () => {
   it("rellena los que faltan con su valor por defecto y en el orden de las definiciones", async () => {
     const ed = await nuevoEditor();

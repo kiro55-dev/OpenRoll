@@ -8,7 +8,8 @@
 // renombrado...). Al cancelar se descartan; al guardar se descarta lo que al final no se usó.
 // Rust nunca borra lo que la partida guardada referencia, así que pasarle de más no es peligroso.
 import { invoke } from "$lib/backend";
-import { partida, type DefinicionParametro, type Entidad, type Parametro } from "$lib/partida.svelte";
+import { partida, type DefinicionParametro, type DefinicionVariable, type Entidad, type Parametro } from "$lib/partida.svelte";
+import { LIMITE_VALOR_VARIABLE, modificadorVariable, normalizarVariables } from "$lib/variables";
 import { importarImagen, urlDeImagen } from "$lib/imagenes";
 import { cargarImagen, encuadreCentrado, miniaturaWebp, type Encuadre } from "$lib/recorteFoto";
 
@@ -62,6 +63,11 @@ export class EditorFicha {
   readonly entidad: Entidad;
   readonly esBorrador: boolean;
   readonly definiciones: DefinicionParametro[];
+  /** Las variables de la partida (pestaña «Variables»), en su orden. */
+  readonly variables: DefinicionVariable[];
+
+  /** Subpestaña de la ventana: lo de siempre («Ficha») o sus variables. */
+  seccion = $state<"ficha" | "variables">("ficha");
 
   /** true mientras se guarda o se borra: los botones se desactivan y no se puede cancelar. */
   guardando = $state(false);
@@ -86,13 +92,22 @@ export class EditorFicha {
     this.#encuadreTocado = true;
   }
 
-  constructor(entidad: Entidad, esBorrador: boolean, definiciones: DefinicionParametro[] = partida.definiciones) {
+  constructor(
+    entidad: Entidad,
+    esBorrador: boolean,
+    definiciones: DefinicionParametro[] = partida.definiciones,
+    variables: DefinicionVariable[] = partida.definicionesVariables ?? []
+  ) {
     this.entidad = entidad;
     this.esBorrador = esBorrador;
     this.definiciones = definiciones;
+    this.variables = variables;
     entidad.foto_encuadre ??= encuadreCentrado(); // fichas de antes del encuadre
     // Sin definiciones (no se pudieron leer) no se toca nada, para no perder los valores de la ficha
     if (definiciones.length > 0) entidad.parametros = normalizarParametros(definiciones, entidad.parametros ?? []);
+    // Las variables, igual (si no hay ninguna definida, las de la ficha se dejan como estén: Rust las ajusta)
+    entidad.variables ??= [];
+    if (variables.length > 0) entidad.variables = normalizarVariables(variables, entidad.variables);
     // La foto con la que nace un borrador (ficha creada arrastrando una imagen) es de esta sesión
     if (esBorrador && entidad.foto_url) this.#sesion.push(entidad.foto_url);
   }
@@ -138,6 +153,25 @@ export class EditorFicha {
   ponerPublico(id: number, publico: boolean) {
     const p = this.#parametro(id);
     if (p) p.publico = publico;
+  }
+
+  // ------------------------------------------------------------------
+  // Variables (Fuerza «f»...: las define el host; la ficha solo pone su valor)
+  // ------------------------------------------------------------------
+
+  valorVariable(id: number): number {
+    const v = this.entidad.variables.find((x) => x.id_definicion === id);
+    return v ? v.valor : 0; // tal cual (un campo vacío deja null): `guardar` lo valida
+  }
+  /** Guarda lo que haya en el campo tal cual (aunque esté vacío): `guardar` lo valida. */
+  ponerValorVariable(id: number, n: number) {
+    const v = this.entidad.variables.find((x) => x.id_definicion === id);
+    if (v) v.valor = n;
+  }
+  /** El resultado que vale en el chat con el valor escrito (`null` si el campo no es un número). */
+  resultadoVariable(d: DefinicionVariable): number | null {
+    const valor: unknown = this.valorVariable(d.id); // un campo vacío deja null
+    return typeof valor === "number" && Number.isFinite(valor) ? modificadorVariable(d, valor) : null;
   }
 
   /** Último error de la ventana (validación, archivos) o de Rust al guardar o borrar. */
@@ -326,6 +360,11 @@ export class EditorFicha {
     if (!e.nombre?.trim()) throw new Error("La ficha necesita un nombre");
     for (const d of this.definiciones.filter(esNumerico)) {
       this.ponerNumero(d.id, entero(this.numero(d.id), d.clave));
+    }
+    for (const d of this.variables) {
+      const n = entero(this.valorVariable(d.id), d.nombre, -LIMITE_VALOR_VARIABLE);
+      if (n > LIMITE_VALOR_VARIABLE) throw new Error(`${d.nombre}: no puede pasar de ${LIMITE_VALOR_VARIABLE}`);
+      this.ponerValorVariable(d.id, n);
     }
     this.#ponerCuerpo(this.cuerpoX, this.cuerpoY);
   }

@@ -31,6 +31,7 @@ function crearBackend() {
     definiciones: [
       { id: 1, clave: "Vida", valor_por_defecto: { Numero: 10 }, tiene_maximo: true, representar_mapa: null, visibilidad: "Variable", unidad: null, atenuar_si_negativo: false }
     ],
+    variables: [] as { id: number; nombre: string; abreviatura: string; neutro: number; escala: number }[],
     papelera: [] as { zonas: any[]; banco: any[] }[],
     partidas: ["A", "B"] as string[],
     actual: "A",
@@ -51,6 +52,16 @@ function crearBackend() {
           return clon(d);
         }
         case "modificar_definicion_parametro": b.definiciones = b.definiciones.map((d) => (d.id === args.definicion.id ? clon(args.definicion) : d)); return;
+        case "obtener_definiciones_variables": return clon(b.variables);
+        case "crear_definicion_variable": {
+          if (b.variables.some((v) => v.abreviatura === args.definicion.abreviatura)) throw "Ya hay una variable que se llama o se abrevia";
+          const v = { ...clon(args.definicion), id: Math.max(0, ...b.variables.map((x) => x.id)) + 1 };
+          b.variables.push(v);
+          return clon(v);
+        }
+        case "modificar_definicion_variable": b.variables = b.variables.map((v) => (v.id === args.definicion.id ? clon(args.definicion) : v)); return;
+        case "borrar_definicion_variable": b.variables = b.variables.filter((v) => v.id !== args.id); return;
+        case "reordenar_definiciones_variables": b.variables = args.ids.map((id: number) => b.variables.find((v) => v.id === id)!); return;
         case "obtener_partidas": return { actual: b.actual, partidas: [...b.partidas] };
         case "abrir_partida": case "crear_partida": {
           const existe = b.partidas.includes(args.nombre);

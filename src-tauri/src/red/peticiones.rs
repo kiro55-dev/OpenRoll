@@ -69,7 +69,12 @@ fn carpeta_y_nombre(ruta: &str) -> Result<(u16, &str), String> {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "cmd", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum Peticion {
-    TirarDado { comando: String },
+    /// `id_instancia`: la ficha con el foco, de la que salen las variables (`2d6 + f`). Solo vale una suya.
+    TirarDado {
+        comando: String,
+        #[serde(default)]
+        id_instancia: Option<u16>,
+    },
     /// Sus comandos de dados anteriores (las flechas ↑ ↓ al reconectar).
     ObtenerHistorialPersonal,
     MoverInstancia { id_instancia: u16, destino: Option<Destino> },
@@ -328,6 +333,7 @@ fn entidad_modificable(est: &EstadoPartida, jugador: IdJugador, e: &Entidad, sub
     let guardada = est.banco_entidades.iter().find(|x| x.id == e.id).ok_or("La ficha ya no existe")?;
     let mut nueva = e.clone();
     normalizar_parametros(&est.definiciones_parametros, &mut nueva.parametros);
+    crate::tablero_general::variables::normalizar_variables(&est.definiciones_variables, &mut nueva.variables);
     for c in cambios_entidad::entre(guardada, &nueva) {
         if !cambio_permitido(jugador, &c) {
             return Err("Eso de tu ficha solo lo puede cambiar el host".into());
@@ -382,7 +388,8 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
         serde_json::json!({ "entidades": true })
     };
     let resultado = match p {
-        Peticion::TirarDado { comando } => json(tirar_dado_de(state, jugador, &comando, true)?),
+        // Las variables, solo de una ficha suya (lo comprueba `tirar_dado_de`)
+        Peticion::TirarDado { comando, id_instancia } => json(tirar_dado_de(state, jugador, &comando, true, id_instancia)?),
         Peticion::ObtenerHistorialPersonal => unreachable!("se contesta antes"),
         Peticion::MoverInstancia { id_instancia, destino } => json(partida::mover_instancia_en(id_instancia, destino, state)?),
         Peticion::MoverInstancias { ids, id_mapa, dx, dy } => json(partida::mover_instancias_en(ids, id_mapa, dx, dy, state)?),
@@ -492,7 +499,7 @@ mod tests {
                 .iter()
                 .map(|d| Parametro { id_definicion: d.id, valor: d.valor_por_defecto.clone(), publico: true })
                 .collect(),
-            cuerpo: Cuerpo::Pequenio,
+            variables: vec![], cuerpo: Cuerpo::Pequenio,
             zona_id: 1,
             foto_url: Some("imagenes/vieja.png".into()),
             miniatura_url: None,
@@ -624,6 +631,25 @@ mod tests {
         assert!(ok(&e, 2, json!({ "cmd": "tirar_dado", "comando": "2d20adv + 3" })).is_ok());
         // `limpiar_chat` no está en la lista blanca; y `clean` como tirada lo rechaza `tirar_dado_de`
         assert!(decodificar(json!({ "cmd": "limpiar_chat", "comando": "clean" })).is_err());
+    }
+
+    #[test]
+    fn la_tirada_lleva_la_ficha_con_el_foco_para_sus_variables() {
+        assert!(matches!(
+            pet(json!({ "cmd": "tirar_dado", "comando": "2d6 + f", "idInstancia": 1 })),
+            Peticion::TirarDado { id_instancia: Some(1), .. }
+        ));
+        // Un navegador antiguo no la manda: sin foco
+        assert!(matches!(pet(json!({ "cmd": "tirar_dado", "comando": "1d6" })), Peticion::TirarDado { id_instancia: None, .. }));
+        // El propietario cambia los valores de las variables de su ficha (el host las define)
+        let mut e = estado();
+        e.definiciones_variables = vec![crate::tablero_general::variables::pruebas::var(1, "Fuerza", "f", 10, 2)];
+        e.ajustar_a_definiciones();
+        let mut nueva = e.banco_entidades[0].clone();
+        nueva.variables[0].valor = 14;
+        let peticion = json!({ "cmd": "modificar_entidad", "entidad": serde_json::to_value(&nueva).unwrap() });
+        assert!(ok(&e, 1, peticion.clone()).is_ok());
+        assert!(ok(&e, 2, peticion).is_err(), "la de otro, no");
     }
 
     fn ficha_editada(f: impl FnOnce(&mut Entidad)) -> Value {

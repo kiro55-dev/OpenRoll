@@ -18,6 +18,7 @@ use crate::tablero_general::cambios_entidad::{self, CambioEntidad};
 use crate::tablero_general::modelos::*;
 use crate::tablero_general::papelera::{self, Borrado, GrupoPapelera};
 use crate::tablero_general::tablero;
+use crate::tablero_general::variables::normalizar_variables;
 
 // ========================================================
 // 1. DELTAS (eventos de la partida)
@@ -53,6 +54,14 @@ pub enum DeltaPartida {
     ParametroBorrado(u16),
     /// Nuevo orden de los parámetros (ids). Las fichas lo siguen.
     ParametrosReordenados(Vec<u16>),
+    /// Define una variable nueva (o reemplaza la de ese id). Las fichas la reciben con su valor neutro.
+    VariableCreada(DefinicionVariable),
+    /// Cambia el nombre, la abreviatura, el neutro o la escala de una variable. Las fichas conservan sus valores.
+    VariableModificada(DefinicionVariable),
+    /// Quita una variable de la partida y su valor de todas las fichas.
+    VariableBorrada(u16),
+    /// Nuevo orden de las variables (ids). Las fichas lo siguen.
+    VariablesReordenadas(Vec<u16>),
     /// Instancia nueva (o reemplaza la de ese id). Las reglas para construirla están en `instancias.rs`.
     InstanciaCreada(Instancia),
     /// Instancia cambiada entera: movida, quitada del tablero o una ficha única reutilizada.
@@ -104,6 +113,9 @@ pub struct EstadoPartida {
     /// Parámetros comunes a todas las fichas. Las partidas anteriores a ellos arrancan con los de serie.
     #[serde(default = "parametros_por_defecto")]
     pub definiciones_parametros: Vec<DefinicionParametro>,
+    /// Variables de las fichas (Fuerza «f»...), usables en el chat de dados. Ver variables.rs.
+    #[serde(default)]
+    pub definiciones_variables: Vec<DefinicionVariable>,
     #[serde(default)]
     pub zonas: Vec<Zona>,
     #[serde(default)]
@@ -165,6 +177,7 @@ impl Default for EstadoPartida {
         Self {
             ultimo_seq: 0,
             definiciones_parametros: parametros_por_defecto(),
+            definiciones_variables: Vec::new(),
             zonas: Vec::new(),
             mapas: Vec::new(),
             banco_entidades: Vec::new(),
@@ -394,6 +407,22 @@ impl EstadoPartida {
                     .sort_by_key(|d| ids.iter().position(|i| *i == d.id).unwrap_or(usize::MAX));
                 self.ajustar_a_definiciones();
             }
+            DeltaPartida::VariableCreada(def) | DeltaPartida::VariableModificada(def) => {
+                match self.definiciones_variables.iter().position(|d| d.id == def.id) {
+                    Some(pos) => self.definiciones_variables[pos] = def.clone(),
+                    None => self.definiciones_variables.push(def.clone()),
+                }
+                self.ajustar_a_definiciones();
+            }
+            DeltaPartida::VariableBorrada(id) => {
+                self.definiciones_variables.retain(|d| d.id != *id);
+                self.ajustar_a_definiciones();
+            }
+            DeltaPartida::VariablesReordenadas(ids) => {
+                self.definiciones_variables
+                    .sort_by_key(|d| ids.iter().position(|i| *i == d.id).unwrap_or(usize::MAX));
+                self.ajustar_a_definiciones();
+            }
             DeltaPartida::EnviadoAPapelera(grupo) => papelera::aplicar_envio(self, grupo),
             DeltaPartida::RestauradoDePapelera(id) => papelera::aplicar_restauracion(self, *id),
             DeltaPartida::PapeleraVaciada => self.papelera.clear(),
@@ -434,11 +463,14 @@ impl EstadoPartida {
 
     pub fn ajustar_a_definiciones(&mut self) {
         let defs = self.definiciones_parametros.clone();
+        let vars = self.definiciones_variables.clone();
         for e in self.banco_entidades.iter_mut() {
             normalizar_parametros(&defs, &mut e.parametros);
+            normalizar_variables(&vars, &mut e.variables);
         }
         for i in self.instancias_activas.iter_mut() {
             normalizar_parametros(&defs, &mut i.base.parametros);
+            normalizar_variables(&vars, &mut i.base.variables);
             // Un valor actual por cada parámetro con máximo, en el orden de las definiciones. Uno que
             // gana el máximo después de crearse la instancia empieza lleno (en el valor de la ficha).
             let antes = std::mem::take(&mut i.valores_actuales);
@@ -578,7 +610,7 @@ mod tests {
                 nombre: "Orco".into(),
                 tipo: TipoEntidad::Enemigo,
                 parametros: vec![Parametro { id_definicion: ID_VIDA, valor: ValorParametro::Numero(20), publico: true }],
-                cuerpo: Cuerpo::Pequenio,
+                variables: vec![], cuerpo: Cuerpo::Pequenio,
                 zona_id: 1,
                 foto_url: None,
                 miniatura_url: None,
@@ -1002,6 +1034,36 @@ mod tests {
         // Y al borrarlo, desaparece
         e.aplicar_delta(&DeltaPartida::ParametroBorrado(5));
         assert_eq!(e.instancias_activas[0].valores_actuales.len(), 1);
+    }
+
+    #[test]
+    fn las_fichas_siguen_a_las_variables_definidas() {
+        use crate::tablero_general::variables::pruebas::var;
+        let mut e = EstadoPartida::default();
+        e.instancias_activas.push(instancia(1, 4));
+        e.banco_entidades.push(instancia(1, 4).base);
+
+        // Una variable nueva: todas la reciben con su valor neutro
+        e.aplicar_delta(&DeltaPartida::VariableCreada(var(1, "Fuerza", "f", 10, 2)));
+        e.aplicar_delta(&DeltaPartida::VariableCreada(var(2, "Cordura", "cor", 7, 3)));
+        let valores = |e: &EstadoPartida| e.instancias_activas[0].base.variables.iter().map(|v| (v.id_definicion, v.valor)).collect::<Vec<_>>();
+        assert_eq!(valores(&e), vec![(1, 10), (2, 7)]);
+        assert_eq!(e.banco_entidades[0].variables.len(), 2);
+
+        // Modificarla no toca los valores; reordenar los reordena; borrarla la quita de todas
+        e.instancias_activas[0].base.variables[0].valor = 14;
+        e.aplicar_delta(&DeltaPartida::VariableModificada(var(1, "Fuerza", "fu", 10, 3)));
+        assert_eq!(e.definiciones_variables[0].abreviatura, "fu");
+        assert_eq!(valores(&e), vec![(1, 14), (2, 7)]);
+        e.aplicar_delta(&DeltaPartida::VariablesReordenadas(vec![2, 1]));
+        assert_eq!(valores(&e), vec![(2, 7), (1, 14)]);
+        e.aplicar_delta(&DeltaPartida::VariableBorrada(2));
+        assert_eq!(valores(&e), vec![(1, 14)]);
+        assert_eq!(e.banco_entidades[0].variables.len(), 1);
+
+        // Una partida guardada antes de las variables carga sin ninguna
+        let vieja: EstadoPartida = serde_json::from_str("{}").unwrap();
+        assert!(vieja.definiciones_variables.is_empty());
     }
 
     #[test]

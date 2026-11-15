@@ -135,7 +135,42 @@ describe("fichas del tablero", () => {
   });
 
   it("cada tipo tiene su color", () => {
-    expect(fichas.COLOR_TIPO).toEqual({ Enemigo: "#ef4444", NPC: "#3b82f6", Jugador: "#22c55e" });
+    expect(fichas.COLOR_TIPO).toEqual({ Enemigo: "#ef4444", NPC: "#3b82f6", Jugador: "#22c55e", Objeto: "#6D6B65" });
+  });
+});
+
+describe("formas de los parámetros en el tablero", () => {
+  const rejilla = { columnas: 10, filas: 8, anchoCasilla: 10, altoCasilla: 10, ancho: 100, alto: 80 };
+  const cam = { x: 0, y: 0, zoom: 1 };
+  const definiciones: any[] = [
+    { id: 1, clave: "Rango", valor_por_defecto: { Numero: 2 }, tiene_maximo: false, representar_mapa: { Cuadrado: [255, 0, 0, 90] }, visibilidad: "Publico", unidad: null, atenuar_si_negativo: false },
+    { id: 2, clave: "Vida", valor_por_defecto: { Numero: 5 }, tiene_maximo: true, representar_mapa: { BarraVida: [0, 255, 0, 255] }, visibilidad: "Publico", unidad: null, atenuar_si_negativo: true }
+  ];
+  /** Un contexto de mentira que cuenta qué se ha dibujado */
+  const contexto = () => {
+    const llamadas: string[] = [];
+    const ctx: any = new Proxy({}, { get: (_t, nombre: string) => (nombre === "save" || nombre === "restore" ? () => {} : (...a: any[]) => void llamadas.push(nombre)), set: () => true });
+    return { ctx, llamadas };
+  };
+  const dibujar = (tipo: string) => {
+    const { ctx, llamadas } = contexto();
+    const instancia_ = instancia(1, 1, { x: 4, y: 4 });
+    instancia_.base.tipo = tipo;
+    fichas.dibujarFormas(ctx, cam, rejilla, { instancia: instancia_, casilla: { x: 4, y: 4 } }, definiciones, () => 3, () => 5);
+    return llamadas;
+  };
+
+  it("un Enemigo dibuja el rango y la barra de vida; un Objeto no dibuja nada", () => {
+    expect(dibujar("Enemigo")).toEqual(expect.arrayContaining(["rect", "fillRect"]));
+    expect(dibujar("Objeto")).toEqual([]);
+  });
+
+  it("la caja «Parámetros» oculta a un Objeto los de forma visual, pero no el Resumen ni los que no se representan", () => {
+    const [rango, vida] = definiciones;
+    const resumen = { ...rango, id: 3, representar_mapa: { Resumen: [255, 255, 255, 255] } };
+    const sinForma = { ...rango, id: 4, representar_mapa: null };
+    expect([rango, vida, resumen, sinForma].map((d) => fichas.parametroOculto("Objeto", d))).toEqual([true, true, false, false]);
+    expect([rango, vida].map((d) => fichas.parametroOculto("Enemigo", d))).toEqual([false, false]);
   });
 });
 

@@ -24,6 +24,7 @@ use crate::tablero_general::papelera;
 use crate::tablero_general::partidas;
 use crate::tablero_general::recursos;
 use crate::tablero_general::tablero::{self, AvisoTablero};
+use crate::tablero_general::variables::{self, normalizar_variables};
 use crate::tablero_general::visibilidad;
 
 pub struct AppState {
@@ -484,6 +485,88 @@ pub fn reordenar_definiciones_parametros(ids: Vec<u16>, state: State<'_, AppStat
         return Err("La lista de parámetros ha cambiado; vuelve a intentarlo".into());
     }
     registrar(&mut est, &state.almacen, DeltaPartida::ParametrosReordenados(ids));
+    Ok(())
+}
+
+// ------------------------------------------------------------------
+// Variables (Fuerza «f»...): solo el host las define. Ver variables.rs.
+// ------------------------------------------------------------------
+
+#[tauri::command]
+pub fn obtener_definiciones_variables(state: State<'_, AppState>) -> Vec<DefinicionVariable> {
+    state.lock().definiciones_variables.clone()
+}
+
+/// Nombre y abreviatura sin espacios de los lados (el nombre, con los de dentro reducidos a uno).
+fn limpiar_variable(d: DefinicionVariable) -> DefinicionVariable {
+    DefinicionVariable {
+        nombre: d.nombre.split_whitespace().collect::<Vec<_>>().join(" "),
+        abreviatura: d.abreviatura.trim().to_string(),
+        ..d
+    }
+}
+
+/// Crea una variable común a todas las fichas (el id lo pone Rust). Cada ficha la recibe con el valor neutro.
+#[tauri::command]
+pub fn crear_definicion_variable(definicion: DefinicionVariable, state: State<'_, AppState>) -> Result<DefinicionVariable, String> {
+    crear_definicion_variable_en(definicion, &state)
+}
+
+pub fn crear_definicion_variable_en(definicion: DefinicionVariable, state: &AppState) -> Result<DefinicionVariable, String> {
+    let mut est = state.lock();
+    let definicion = limpiar_variable(definicion);
+    variables::validar_definicion(&est.definiciones_variables, &definicion)?;
+    let id = est.definiciones_variables.iter().map(|d| d.id).max().unwrap_or(0) + 1;
+    let nueva = DefinicionVariable { id, ..definicion };
+    registrar(&mut est, &state.almacen, DeltaPartida::VariableCreada(nueva.clone()));
+    Ok(nueva)
+}
+
+/// Cambia el nombre, la abreviatura, el neutro o la escala de una variable. Los valores de las fichas no cambian
+/// (su resultado sí, si cambian el neutro o la escala).
+#[tauri::command]
+pub fn modificar_definicion_variable(definicion: DefinicionVariable, state: State<'_, AppState>) -> Result<(), String> {
+    modificar_definicion_variable_en(definicion, &state)
+}
+
+pub fn modificar_definicion_variable_en(definicion: DefinicionVariable, state: &AppState) -> Result<(), String> {
+    let mut est = state.lock();
+    let definicion = limpiar_variable(definicion);
+    let Some(actual) = est.definiciones_variables.iter().find(|d| d.id == definicion.id) else {
+        return Err("La variable ya no existe".into());
+    };
+    if *actual == definicion {
+        return Ok(());
+    }
+    let otras: Vec<DefinicionVariable> = est.definiciones_variables.iter().filter(|d| d.id != definicion.id).cloned().collect();
+    variables::validar_definicion(&otras, &definicion)?;
+    registrar(&mut est, &state.almacen, DeltaPartida::VariableModificada(definicion));
+    Ok(())
+}
+
+/// Borra una variable: desaparece de la lista y de todas las fichas.
+#[tauri::command]
+pub fn borrar_definicion_variable(id: u16, state: State<'_, AppState>) -> Result<(), String> {
+    let mut est = state.lock();
+    if !est.definiciones_variables.iter().any(|d| d.id == id) {
+        return Err("La variable ya no existe".into());
+    }
+    registrar(&mut est, &state.almacen, DeltaPartida::VariableBorrada(id));
+    Ok(())
+}
+
+/// Cambia el orden de las variables (el que siguen las fichas). `ids` debe tenerlas todas, una vez.
+#[tauri::command]
+pub fn reordenar_definiciones_variables(ids: Vec<u16>, state: State<'_, AppState>) -> Result<(), String> {
+    let mut est = state.lock();
+    let mut actuales: Vec<u16> = est.definiciones_variables.iter().map(|d| d.id).collect();
+    let mut pedidos = ids.clone();
+    actuales.sort_unstable();
+    pedidos.sort_unstable();
+    if actuales != pedidos {
+        return Err("La lista de variables ha cambiado; vuelve a intentarlo".into());
+    }
+    registrar(&mut est, &state.almacen, DeltaPartida::VariablesReordenadas(ids));
     Ok(())
 }
 
@@ -1017,12 +1100,15 @@ pub fn iniciar_borrador_entidad_en(zona_id: u16, foto_url: Option<String>, state
     // Sin valores todavía: normalizar pone el de por defecto de cada parámetro
     let mut parametros = Vec::new();
     normalizar_parametros(&est.definiciones_parametros, &mut parametros);
+    let mut variables = Vec::new();
+    normalizar_variables(&est.definiciones_variables, &mut variables);
 
     Ok(Entidad {
         id,
         nombre: "Nueva Ficha".into(),
         tipo: TipoEntidad::Enemigo,
         parametros,
+        variables,
         cuerpo: Cuerpo::Pequenio,
         zona_id,
         foto_url,
@@ -1110,6 +1196,7 @@ fn validar_entidad(est: &EstadoPartida, dir: &Path, e: &Entidad) -> Result<(), S
         return Err("Hay un archivo adjunto repetido".into());
     }
     validar_parametros(&est.definiciones_parametros, &e.parametros)?;
+    variables::validar_valores(&est.definiciones_variables, &e.variables)?;
     if let Cuerpo::Grande(dim) = &e.cuerpo {
         if dim.len() != 2 || dim.iter().any(|&d| d == 0) {
             return Err("El tamaño del cuerpo no es válido".into());
@@ -1149,6 +1236,7 @@ pub fn crear_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<Entida
         return Err("Esta ficha ya está guardada".into());
     }
     normalizar_parametros(&est.definiciones_parametros, &mut entidad.parametros);
+    normalizar_variables(&est.definiciones_variables, &mut entidad.variables);
     validar_entidad(&est, &state.almacen.dir(), &entidad)?;
     entidad.miniatura_url = None; // solo la pone `guardar_miniatura_ficha`
 
@@ -1180,6 +1268,7 @@ pub fn modificar_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<()
         entidad.miniatura_url = None;
     }
     normalizar_parametros(&est.definiciones_parametros, &mut entidad.parametros);
+    normalizar_variables(&est.definiciones_variables, &mut entidad.variables);
     validar_entidad(&est, &state.almacen.dir(), &entidad)?;
 
     let Some(delta) = delta_de_cambios(&est, &entidad) else { return Ok(()) };
@@ -1424,7 +1513,7 @@ mod tests {
             nombre: "Orco".into(),
             tipo: TipoEntidad::Enemigo,
             parametros,
-            cuerpo: Cuerpo::Pequenio,
+            variables: vec![], cuerpo: Cuerpo::Pequenio,
             zona_id: 1,
             foto_url: None,
             miniatura_url: None,

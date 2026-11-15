@@ -15,6 +15,7 @@
   import { alSoltarArchivos } from "$lib/soltarArchivos";
   import { moverVentana } from "$lib/moverVentana";
   import { esJugador } from "$lib/modo";
+  import { LIMITE_VALOR_VARIABLE, textoModificador } from "$lib/variables";
   import CajaFoto from "./ventana-ficha/CajaFoto.svelte";
   import CampoNumero from "./ventana-ficha/CampoNumero.svelte";
   import AdjuntosFicha from "./ventana-ficha/AdjuntosFicha.svelte";
@@ -83,6 +84,13 @@
   </div>
 
   <div class="cuerpo-ficha">
+    <div class="subpestanas" role="tablist" aria-label="Secciones de la ficha">
+      <button type="button" role="tab" aria-selected={editor.seccion === "ficha"} class:activa={editor.seccion === "ficha"} onclick={() => (editor.seccion = "ficha")}>Ficha</button>
+      <button type="button" role="tab" aria-selected={editor.seccion === "variables"} class:activa={editor.seccion === "variables"} onclick={() => (editor.seccion = "variables")}>Variables</button>
+    </div>
+
+    <!-- Las dos secciones siguen montadas (solo se oculta una): así no se pierde lo que se está escribiendo -->
+    <div class="seccion" style:display={editor.seccion === "ficha" ? null : "none"}>
     <div class="fila-superior">
       <CajaFoto foto={ficha.foto_url} bind:encuadre={ficha.foto_encuadre} onCambio={() => editor.encuadreCambiado()} onElegir={(origen) => editor.ponerFoto(origen)} />
 
@@ -148,6 +156,7 @@
             <option value="Enemigo">Enemigo</option>
             <option value="NPC">NPC</option>
             <option value="Jugador">Jugador</option>
+            <option value="Objeto">Objeto</option>
           </select>
 
           {#if !esJugador}
@@ -173,6 +182,45 @@
     </div>
 
     <AdjuntosFicha {editor} />
+    </div>
+
+    <!-- Variables: el host define cuáles hay (nombre, abreviatura, neutro y escala); aquí solo se pone el valor -->
+    <div class="seccion" style:display={editor.seccion === "variables" ? null : "none"}>
+      {#if editor.variables.length === 0}
+        <p class="vacio">
+          {esJugador ? "El host aún no ha definido variables." : "Aún no hay variables. Defínelas en ⚙ → «Editar parámetros de esta partida» → «Variables»."}
+        </p>
+      {:else}
+        <table class="tabla-variables">
+          <thead>
+            <tr><th>Nombre</th><th>Abreviatura</th><th>Valor</th><th>Resultado</th></tr>
+          </thead>
+          <tbody>
+            {#each editor.variables as d (d.id)}
+              {@const resultado = editor.resultadoVariable(d)}
+              <tr>
+                <td class="nombre">{d.nombre}</td>
+                <td class="abreviatura">{d.abreviatura}</td>
+                <td>
+                  <CampoNumero
+                    min={-LIMITE_VALOR_VARIABLE}
+                    max={LIMITE_VALOR_VARIABLE}
+                    titulo="Neutro {d.neutro}, escala {d.escala} (rueda del ratón para ajustar)"
+                    bind:value={() => editor.valorVariable(d.id), (v) => editor.ponerValorVariable(d.id, v)}
+                  />
+                </td>
+                <td class="resultado" class:positivo={resultado !== null && resultado > 0} class:negativo={resultado !== null && resultado < 0}>
+                  {resultado === null ? "—" : textoModificador(resultado)}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+        <p class="ayuda" title={ayuda("Si hay varias fichas con el foco, o ninguna, una tirada con variables da error")}>
+          En el chat, con el foco en una instancia de esta ficha: «2d6 + {editor.variables[0].abreviatura}» suma su resultado.
+        </p>
+      {/if}
+    </div>
 
     {#if editor.error}
       <p class="error" role="alert">{editor.error}</p>
@@ -210,6 +258,26 @@
   .btn-cerrar:hover { color: white; }
 
   .cuerpo-ficha { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .seccion { display: flex; flex-direction: column; gap: 8px; }
+
+  .subpestanas { display: flex; gap: 2px; border-bottom: 1px solid #27272a; margin: -2px 0 0; }
+  .subpestanas button {
+    background: none; border: none; border-bottom: 2px solid transparent; color: #a1a1aa;
+    padding: 3px 10px 4px; font-size: 11px; font-weight: 600; cursor: pointer;
+  }
+  .subpestanas button:hover { color: #f4f4f5; }
+  .subpestanas button.activa { color: white; border-bottom-color: #3b82f6; }
+
+  .tabla-variables { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .tabla-variables th { color: #71717a; font-size: 10px; font-weight: 600; text-align: left; padding: 2px 6px; border-bottom: 1px solid #27272a; }
+  .tabla-variables td { padding: 3px 6px; border-bottom: 1px solid #1f1f23; }
+  .tabla-variables .nombre { color: #f4f4f5; font-weight: 600; }
+  .tabla-variables .abreviatura { color: #a1a1aa; }
+  .tabla-variables .resultado { font-weight: bold; color: #d4d4d8; min-width: 40px; }
+  .tabla-variables .resultado.positivo { color: #4ade80; }
+  .tabla-variables .resultado.negativo { color: #f87171; }
+  .vacio { margin: 0; color: #71717a; font-size: 11px; padding: 16px 4px; text-align: center; }
+  .ayuda { margin: 0; color: #71717a; font-size: 10px; }
   .fila-superior { display: flex; gap: 10px; align-items: flex-start; }
   .columna-campos { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 
