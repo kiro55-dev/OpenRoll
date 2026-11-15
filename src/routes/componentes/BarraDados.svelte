@@ -72,10 +72,10 @@
   </div>
 
   <div class="bonif">
-    <span>+ Bonf:</span>
+    <span>Bonf:</span>
     <input
       type="text"
-      placeholder="0 o f"
+      placeholder=""
       title={ayuda("Un número o una variable (f, -fuerza...): se suma a la tirada como si lo escribieras en el chat")}
       bind:value={bonificador}
       onkeydown={(e) => e.key === "Enter" && onLanzarTirada(bonificador)}
