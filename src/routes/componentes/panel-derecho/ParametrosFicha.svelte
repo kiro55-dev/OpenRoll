@@ -3,13 +3,35 @@
      orden). Los que tienen máximo muestran «actual / máx» con − y + para cambiar el actual. -->
 <script lang="ts">
   import { ayuda } from "$lib/ajustesVista.svelte";
-  import { partida, numeroDe, veParametro, type Cuerpo } from "$lib/partida.svelte";
+  import { partida, numeroDe, veParametro, PASO_VALOR_MAX, type Cuerpo } from "$lib/partida.svelte";
   import { arrastreTirada } from "$lib/arrastreTirada.svelte";
   import { parametroOculto } from "$lib/fichasTablero";
 
   const textoCuerpo = (c: Cuerpo) => (typeof c === "object" ? `${c.Grande[0] ?? 1}×${c.Grande[1] ?? 1}` : "1×1");
 
   const ficha = $derived(partida.instanciaSeleccionada);
+
+  // El parámetro cuyo paso (lo que suman o restan − y +) se está editando, con lo escrito
+  // El paso es de la ENTIDAD (lo guarda Rust): lo comparten sus instancias y lo conserva una que se quite y se vuelva a poner
+  let editandoPaso = $state<{ id: number; texto: number | null } | null>(null);
+  const pasoDe = (id: number) => (ficha ? partida.pasoDe(ficha.base, id) : 1);
+
+  function empezarPaso(e: MouseEvent, id: number, paso: number) {
+    e.preventDefault();
+    editandoPaso = { id, texto: paso };
+  }
+
+  function confirmarPaso() {
+    const e = editandoPaso;
+    editandoPaso = null; // antes de guardar: el blur que provoca quitar el campo no vuelve a entrar aquí
+    if (e && e.texto !== null && ficha && partida.controla(ficha)) void partida.ponerPaso(ficha.base.id, e.id, e.texto);
+  }
+
+  /** Al aparecer el campo, ya con el foco y lo escrito seleccionado. */
+  function enfocar(el: HTMLInputElement) {
+    el.focus();
+    el.select();
+  }
 
   const parametros = $derived(
     ficha
@@ -46,12 +68,46 @@
           >
             <span class="label">{p.clave}</span>
             <div class="control">
-              {#if partida.controla(ficha)}
-                <button type="button" aria-label="Restar 1 a {p.clave}" onclick={() => partida.cambiarValorActual(ficha.id_instancia, p.id, -1)}>−</button>
-              {/if}
-              <span class="valor">{partida.valorMostrado(ficha, p.id)} / {numeroDe(ficha.base, p.id)}{p.unidad}</span>
-              {#if partida.controla(ficha)}
-                <button type="button" aria-label="Sumar 1 a {p.clave}" onclick={() => partida.cambiarValorActual(ficha.id_instancia, p.id, 1)}>+</button>
+              {#if editandoPaso?.id === p.id}
+                <!-- Clic derecho en − o +: cuánto suman o restan (se recuerda en este equipo, por parámetro) -->
+                <label class="editar-paso">
+                  <span>±</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max={PASO_VALOR_MAX}
+                    aria-label="Cuánto suman o restan − y + en {p.clave}"
+                    bind:value={editandoPaso.texto}
+                    use:enfocar
+                    onkeydown={(e) => {
+                      e.stopPropagation(); // Enter y Escape son de este campo, no de lo de fuera
+                      if (e.key === "Enter") confirmarPaso();
+                      else if (e.key === "Escape") editandoPaso = null;
+                    }}
+                    onblur={confirmarPaso}
+                  />
+                </label>
+              {:else}
+                {@const paso = pasoDe(p.id)}
+                {#if partida.controla(ficha)}
+                  <button
+                    type="button"
+                    aria-label="Restar {paso} a {p.clave}"
+                    title={ayuda("Click derecho: cambiar la variación")}
+                    onclick={() => partida.cambiarValorActual(ficha.id_instancia, p.id, -paso)}
+                    oncontextmenu={(e) => empezarPaso(e, p.id, paso)}>−{paso}</button
+                  >
+                {/if}
+                <span class="valor">{partida.valorMostrado(ficha, p.id)} / {numeroDe(ficha.base, p.id)}{p.unidad}</span>
+                {#if partida.controla(ficha)}
+                  <button
+                    type="button"
+                    aria-label="Sumar {paso} a {p.clave}"
+                    title={ayuda("Click derecho: cambiar la variación")}
+                    onclick={() => partida.cambiarValorActual(ficha.id_instancia, p.id, paso)}
+                    oncontextmenu={(e) => empezarPaso(e, p.id, paso)}>+{paso}</button
+                  >
+                {/if}
               {/if}
             </div>
           </div>
@@ -95,7 +151,11 @@
   .valor { font-size: 13px; font-weight: bold; color: #f4f4f5; overflow-wrap: anywhere; }
   .control { display: flex; align-items: center; gap: 6px; }
   .control button {
-    background: #3f3f46; color: white; border: none; width: 22px; height: 22px; border-radius: 3px; cursor: pointer; font-weight: bold;
+    background: #3f3f46; color: white; border: none; min-width: 22px; height: 22px; padding: 0 4px; border-radius: 3px; cursor: pointer; font-weight: bold;
+  }
+  .editar-paso { display: flex; align-items: center; gap: 3px; color: #a1a1aa; font-size: 12px; }
+  .editar-paso input {
+    width: 58px; background: #09090b; border: 1px solid #3b82f6; color: white; padding: 2px 4px; border-radius: 3px; font-size: 12px;
   }
   .control button:hover { background: #52525b; }
   .sin-seleccion { color: #71717a; text-align: center; margin: auto 0; font-size: 11px; }

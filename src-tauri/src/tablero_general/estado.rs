@@ -467,10 +467,12 @@ impl EstadoPartida {
         for e in self.banco_entidades.iter_mut() {
             normalizar_parametros(&defs, &mut e.parametros);
             normalizar_variables(&vars, &mut e.variables);
+            normalizar_pasos(&defs, &mut e.pasos_valor);
         }
         for i in self.instancias_activas.iter_mut() {
             normalizar_parametros(&defs, &mut i.base.parametros);
             normalizar_variables(&vars, &mut i.base.variables);
+            normalizar_pasos(&defs, &mut i.base.pasos_valor);
             // Un valor actual por cada parámetro con máximo, en el orden de las definiciones. Uno que
             // gana el máximo después de crearse la instancia empieza lleno (en el valor de la ficha).
             let antes = std::mem::take(&mut i.valores_actuales);
@@ -610,7 +612,7 @@ mod tests {
                 nombre: "Orco".into(),
                 tipo: TipoEntidad::Enemigo,
                 parametros: vec![Parametro { id_definicion: ID_VIDA, valor: ValorParametro::Numero(20), publico: true }],
-                variables: vec![], cuerpo: Cuerpo::Pequenio,
+                variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio,
                 zona_id: 1,
                 foto_url: None,
                 miniatura_url: None,

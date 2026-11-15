@@ -260,6 +260,28 @@ pub struct ValorVariable {
     pub valor: i16,
 }
 
+/// Cuánto suman o restan los botones − / + de un valor actual (vida...) en una ficha. Solo se guardan los que no son 1.
+/// Lo cambia quien controla la ficha (el host o su dueño) y es de la ENTIDAD: lo comparten todas sus instancias.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PasoValor {
+    pub id_definicion: u16,
+    pub paso: u16,
+}
+
+/// Tope del paso de − / +.
+pub const PASO_VALOR_MAX: u16 = 9999;
+
+/// Deja solo los pasos válidos: de un parámetro con máximo que exista, de 2 a `PASO_VALOR_MAX` (1 es el de serie y no se
+/// guarda), uno por parámetro y en el orden de las definiciones.
+pub fn normalizar_pasos(defs: &[DefinicionParametro], pasos: &mut Vec<PasoValor>) {
+    let anteriores = std::mem::take(pasos);
+    for d in defs.iter().filter(|d| d.tiene_maximo) {
+        if let Some(p) = anteriores.iter().find(|p| p.id_definicion == d.id && (2..=PASO_VALOR_MAX).contains(&p.paso)) {
+            pasos.push(p.clone());
+        }
+    }
+}
+
 // ========================================================
 // JUGADORES
 // ========================================================
@@ -321,6 +343,9 @@ pub struct Entidad {
     /// Valores de las variables de la partida, en el orden de sus definiciones (ver `variables.rs`). Solo los
     /// ven el host y los propietarios.
     pub variables: Vec<ValorVariable>,
+    /// Lo que suman o restan los botones − / + de cada valor de esta ficha (ver `PasoValor`). Lo cambia solo el delta
+    /// `EntidadCambiada { PasoValor }` (`poner_paso_valor`): lo que mande el front en `modificar_entidad` se ignora.
+    pub pasos_valor: Vec<PasoValor>,
     pub cuerpo: Cuerpo,
     pub zona_id: u16,
 
@@ -360,6 +385,8 @@ struct EntidadGuardada {
     parametros: Vec<Parametro>,
     #[serde(default)]
     variables: Vec<ValorVariable>,
+    #[serde(default)]
+    pasos_valor: Vec<PasoValor>,
     cuerpo: Cuerpo,
     zona_id: u16,
     #[serde(default)]
@@ -411,6 +438,7 @@ impl From<EntidadGuardada> for Entidad {
             tipo: g.tipo,
             parametros,
             variables: g.variables,
+            pasos_valor: g.pasos_valor,
             cuerpo: g.cuerpo,
             zona_id: g.zona_id,
             foto_url: g.foto_url,

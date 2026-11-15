@@ -90,6 +90,7 @@ export const PETICIONES = new Set([
   "espejar_instancia",
   "borrar_instancia",
   "modificar_valor_actual",
+  "poner_paso_valor",
   "instanciar_entidad",
   "instanciar_entidades",
   "modificar_entidad",

@@ -18,6 +18,8 @@ pub enum CambioEntidad {
     Parametro(Parametro),
     /// El valor de UNA variable, la de su `id_definicion`.
     Variable(ValorVariable),
+    /// El paso de − / + de UN parámetro; `paso` 1 = el de serie (se quita).
+    PasoValor(PasoValor),
     Cuerpo(Cuerpo),
     Zona(u16),
     /// Otra foto: la miniatura propia (recorte de la anterior) deja de valer.
@@ -47,6 +49,16 @@ pub fn entre(antes: &Entidad, despues: &Entidad) -> Vec<CambioEntidad> {
     for v in &despues.variables {
         if antes.variables.iter().find(|a| a.id_definicion == v.id_definicion) != Some(v) {
             cambios.push(CambioEntidad::Variable(v.clone()));
+        }
+    }
+    for p in &despues.pasos_valor {
+        if antes.pasos_valor.iter().find(|a| a.id_definicion == p.id_definicion) != Some(p) {
+            cambios.push(CambioEntidad::PasoValor(p.clone()));
+        }
+    }
+    for a in &antes.pasos_valor {
+        if !despues.pasos_valor.iter().any(|p| p.id_definicion == a.id_definicion) {
+            cambios.push(CambioEntidad::PasoValor(PasoValor { id_definicion: a.id_definicion, paso: 1 }));
         }
     }
     if antes.cuerpo != despues.cuerpo {
@@ -90,6 +102,12 @@ pub fn aplicar(e: &mut Entidad, cambios: &[CambioEntidad]) {
                     *actual = v.clone();
                 }
             }
+            CambioEntidad::PasoValor(p) => {
+                e.pasos_valor.retain(|a| a.id_definicion != p.id_definicion);
+                if p.paso != 1 {
+                    e.pasos_valor.push(p.clone());
+                }
+            }
             CambioEntidad::Cuerpo(c) => e.cuerpo = c.clone(),
             CambioEntidad::Zona(z) => e.zona_id = *z,
             CambioEntidad::Foto(f) => {
@@ -116,6 +134,7 @@ mod tests {
             tipo: TipoEntidad::Enemigo,
             parametros: vec![param(ID_VIDA, 20, false), param(ID_ARMADURA, 12, true)],
             variables: vec![ValorVariable { id_definicion: 1, valor: 10 }, ValorVariable { id_definicion: 2, valor: 8 }],
+            pasos_valor: vec![PasoValor { id_definicion: ID_VIDA, paso: 5 }],
             cuerpo: Cuerpo::Pequenio,
             zona_id: 1,
             foto_url: Some("imagenes/a.png".into()),
@@ -176,6 +195,29 @@ mod tests {
         let mut aplicada = antes.clone();
         aplicar(&mut aplicada, &cambios);
         assert_eq!(sin_miniatura(&aplicada), sin_miniatura(&despues));
+    }
+
+    #[test]
+    fn el_paso_de_un_parametro_viaja_solo_y_volver_a_1_lo_quita() {
+        let antes = ficha(); // vida con paso 5
+        let mut despues = ficha();
+        despues.pasos_valor = vec![PasoValor { id_definicion: ID_VIDA, paso: 3 }, PasoValor { id_definicion: ID_ARMADURA, paso: 2 }];
+        let cambios = entre(&antes, &despues);
+        assert_eq!(cambios, vec![
+            CambioEntidad::PasoValor(PasoValor { id_definicion: ID_VIDA, paso: 3 }),
+            CambioEntidad::PasoValor(PasoValor { id_definicion: ID_ARMADURA, paso: 2 }),
+        ]);
+        let mut e = antes.clone();
+        aplicar(&mut e, &cambios);
+        assert_eq!(e.pasos_valor.len(), 2);
+
+        // Quitar el de la vida: viaja como paso 1 y se borra al aplicar
+        let mut sin = despues.clone();
+        sin.pasos_valor.remove(0);
+        let cambios = entre(&despues, &sin);
+        assert_eq!(cambios, vec![CambioEntidad::PasoValor(PasoValor { id_definicion: ID_VIDA, paso: 1 })]);
+        aplicar(&mut e, &cambios);
+        assert_eq!(e.pasos_valor, sin.pasos_valor);
     }
 
     #[test]

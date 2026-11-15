@@ -43,6 +43,7 @@ pub fn vista_jugador(inst: &Instancia, definiciones: &[DefinicionParametro]) -> 
     vista.base.archivos_adjuntos.clear();
     // Las variables (Fuerza, Cordura...) solo las ven el host y los propietarios
     vista.base.variables.clear();
+    vista.base.pasos_valor.clear(); // preferencia de quien controla la ficha
     vista
 }
 
@@ -160,7 +161,7 @@ pub fn cambios_para(
     let visibles: Vec<CambioEntidad> = cambios
         .iter()
         .filter(|c| match c {
-            CambioEntidad::Adjuntos(_) | CambioEntidad::Variable(_) => false,
+            CambioEntidad::Adjuntos(_) | CambioEntidad::Variable(_) | CambioEntidad::PasoValor(_) => false,
             CambioEntidad::Parametro(p) => p.publico,
             _ => true,
         })
@@ -186,6 +187,7 @@ mod tests {
                 // La vida es privada; armadura y velocidad, públicas
                 parametros: vec![param(ID_VIDA, 20, false), param(ID_ARMADURA, 12, true), param(ID_VELOCIDAD, 6, true)],
                 variables: vec![ValorVariable { id_definicion: 1, valor: 14 }],
+                pasos_valor: vec![PasoValor { id_definicion: ID_VIDA, paso: 5 }],
                 cuerpo: Cuerpo::Pequenio,
                 zona_id: 1,
                 foto_url: None,
@@ -215,6 +217,7 @@ mod tests {
         assert!(v.valores_actuales.is_empty(), "la vida actual también es privada");
         assert!(v.base.archivos_adjuntos.is_empty());
         assert!(v.base.variables.is_empty(), "las variables solo las ven el host y los propietarios");
+        assert!(v.base.pasos_valor.is_empty(), "el paso de − y + es de quien controla la ficha");
         // Lo demás no cambia
         assert_eq!((v.id_instancia, v.id_mapa, v.rotacion, v.orden), (1, Some(2), 1, 5));
         assert!(v.espejo, "el aspecto no es privado");
@@ -366,6 +369,9 @@ mod tests {
         assert_eq!(cambios_para(4, &ficha, true, &[CambioEntidad::Adjuntos(vec![])]), None, "nada que enviarle");
         let variable = [CambioEntidad::Variable(ValorVariable { id_definicion: 1, valor: 16 })];
         assert_eq!(cambios_para(4, &ficha, true, &variable), None, "las variables ajenas tampoco");
+        let paso = [CambioEntidad::PasoValor(PasoValor { id_definicion: 1, paso: 5 })];
+        assert_eq!(cambios_para(4, &ficha, true, &paso), None, "ni el paso de − y +");
+        assert_eq!(cambios_para(3, &ficha, false, &paso), Some(paso.to_vec()), "el propietario sí");
     }
 
     #[test]

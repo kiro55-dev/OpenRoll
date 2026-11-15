@@ -5,8 +5,9 @@
 import type { AvisoTablero } from "$lib/avisosTablero";
 import type { DefinicionParametro, DefinicionVariable, Entidad, Instancia, Mapa, Zona } from "$lib/partida.svelte";
 
-/** 11: variables de las fichas (`definiciones_variables`, `Entidad.variables`, `idInstancia` en `tirar_dado`). */
-export const VERSION_PROTOCOLO = 11;
+/** 11: variables de las fichas (`definiciones_variables`, `Entidad.variables`, `idInstancia` en `tirar_dado`).
+ *  12: `Entidad.pasos_valor` y la acción `poner_paso_valor` (el paso de los botones − / +, por ficha). */
+export const VERSION_PROTOCOLO = 12;
 
 export interface Jugador {
   id: number;

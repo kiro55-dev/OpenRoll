@@ -283,6 +283,9 @@ su pantalla relee. Las peticiones de un jugador se ejecutan **en orden**, una a 
   vacía, `cambios_para` quita `CambioEntidad::Variable`); las definiciones van a todos en
   `VistaJugador.definiciones_variables` / `Cambios.definiciones_variables`. En el chat todos ven solo el resultado:
   «2d6 (3, 4) + f (+1) = 8».
+- **Paso de − / + (protocolo 12).** `poner_paso_valor { idEntidad, idDefinicion, paso }` está en la lista blanca: un jugador solo
+  lo cambia en una ficha suya (`ficha_suya`). Es un `EntidadCambiada { PasoValor }` normal, y solo llega al host y a los
+  propietarios (`Entidad.pasos_valor` se vacía en `vista_jugador`).
 - **Pantalla del host.** Tras una acción de un jugador el host emite `partida-cambiada` (`tiradas` o `entidades`)
   y su store relee (`partida.alCambiarPartida`); el ping y el recorrido de un jugador llegan al host como el
   evento `aviso-tablero` y a los demás jugadores como `Aviso`.

@@ -83,6 +83,8 @@ pub enum Peticion {
     EspejarInstancia { id_instancia: u16 },
     BorrarInstancia { id_instancia: u16 },
     ModificarValorActual { id_instancia: u16, id_definicion: u16, delta: i16 },
+    /// Cuánto suman o restan sus botones − / + (solo de una ficha suya).
+    PonerPasoValor { id_entidad: u16, id_definicion: u16, paso: u16 },
     InstanciarEntidad { id_entidad: u16, destino: Option<Destino> },
     InstanciarEntidades { ids: Vec<u16>, destino: Option<Destino> },
     ModificarEntidad { entidad: Entidad },
@@ -217,6 +219,7 @@ pub fn permitida_con(est: &EstadoPartida, jugador: IdJugador, p: &Peticion, subi
         | Peticion::EspejarInstancia { id_instancia }
         | Peticion::BorrarInstancia { id_instancia }
         | Peticion::ModificarValorActual { id_instancia, .. } => instancia_suya(est, jugador, *id_instancia),
+        Peticion::PonerPasoValor { id_entidad, .. } => ficha_suya(est, jugador, *id_entidad),
         Peticion::InstanciarEntidad { id_entidad, destino } => {
             ficha_suya(est, jugador, *id_entidad)?;
             destino_ok(est, destino)?;
@@ -334,6 +337,7 @@ fn entidad_modificable(est: &EstadoPartida, jugador: IdJugador, e: &Entidad, sub
     let mut nueva = e.clone();
     normalizar_parametros(&est.definiciones_parametros, &mut nueva.parametros);
     crate::tablero_general::variables::normalizar_variables(&est.definiciones_variables, &mut nueva.variables);
+    nueva.pasos_valor = guardada.pasos_valor.clone(); // los cambia `poner_paso_valor`, no el guardado de la ficha
     for c in cambios_entidad::entre(guardada, &nueva) {
         if !cambio_permitido(jugador, &c) {
             return Err("Eso de tu ficha solo lo puede cambiar el host".into());
@@ -398,6 +402,9 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
         Peticion::BorrarInstancia { id_instancia } => json(partida::borrar_instancia_en(id_instancia, state)?),
         Peticion::ModificarValorActual { id_instancia, id_definicion, delta } => {
             json(partida::modificar_valor_actual_en(id_instancia, id_definicion, delta, state)?)
+        }
+        Peticion::PonerPasoValor { id_entidad, id_definicion, paso } => {
+            json(partida::poner_paso_valor_en(id_entidad, id_definicion, paso, state)?)
         }
         Peticion::InstanciarEntidad { id_entidad, destino } => json(partida::instanciar_entidad_en(id_entidad, destino, false, state)?),
         Peticion::InstanciarEntidades { ids, destino } => json(partida::instanciar_entidades_en(ids, destino, false, state)?),
@@ -499,7 +506,7 @@ mod tests {
                 .iter()
                 .map(|d| Parametro { id_definicion: d.id, valor: d.valor_por_defecto.clone(), publico: true })
                 .collect(),
-            variables: vec![], cuerpo: Cuerpo::Pequenio,
+            variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio,
             zona_id: 1,
             foto_url: Some("imagenes/vieja.png".into()),
             miniatura_url: None,
@@ -604,6 +611,22 @@ mod tests {
         assert!(ok(&e, 1, json!({ "cmd": "mover_instancias", "ids": [1], "idMapa": 1, "dx": 2, "dy": 0 })).is_ok());
         assert!(ok(&e, 1, json!({ "cmd": "mover_instancias", "ids": [1, 2], "idMapa": 1, "dx": 2, "dy": 0 })).is_err());
         assert!(ok(&e, 1, json!({ "cmd": "mover_instancias", "ids": [1], "idMapa": 2, "dx": 2, "dy": 0 })).is_err());
+    }
+
+    #[test]
+    fn un_jugador_cambia_el_paso_de_sus_fichas_y_no_el_de_las_ajenas() {
+        let e = estado(); // jugador 1: ficha 10; la 11 es del host
+        let paso = |id: u16| json!({ "cmd": "poner_paso_valor", "idEntidad": id, "idDefinicion": 1, "paso": 5 });
+        assert!(ok(&e, 1, paso(10)).is_ok());
+        assert!(ok(&e, 1, paso(11)).is_err(), "la del host no");
+        assert!(ok(&e, 2, paso(10)).is_err(), "ni la de otro jugador");
+        assert!(ok(&e, ID_HOST, paso(11)).is_ok());
+        // Un paso negativo ni se decodifica
+        assert!(decodificar(json!({ "cmd": "poner_paso_valor", "idEntidad": 10, "idDefinicion": 1, "paso": -1 })).is_err());
+        // Guardar la ficha no puede cambiarlo: lo guardado manda
+        let mut mia = e.banco_entidades[0].clone();
+        mia.pasos_valor = vec![PasoValor { id_definicion: 1, paso: 9 }];
+        assert!(ok(&e, 1, json!({ "cmd": "modificar_entidad", "entidad": serde_json::to_value(&mia).unwrap() })).is_ok());
     }
 
     #[test]

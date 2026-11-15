@@ -717,6 +717,36 @@ pub fn espejar_instancia_en(id_instancia: u16, state: &AppState) -> Result<(), S
     Ok(())
 }
 
+/// Cuánto suman o restan los botones − / + del valor `id_definicion` de la ficha `id_entidad` (de 1 a `PASO_VALOR_MAX`; 1 =
+/// el de serie). Es de la ENTIDAD: lo comparten todas sus instancias y se conserva aunque se quiten. Lo cambia quien controla
+/// la ficha (el host o su dueño: `permitida`); un delta `EntidadCambiada { PasoValor }`, sin cambio no hay delta.
+#[tauri::command]
+pub fn poner_paso_valor(id_entidad: u16, id_definicion: u16, paso: u16, state: State<'_, AppState>) -> Result<(), String> {
+    poner_paso_valor_en(id_entidad, id_definicion, paso, &state)
+}
+
+/// Lo que hace `poner_paso_valor`, con el estado ya en la mano (así también lo ejecuta el host a petición de un jugador).
+pub fn poner_paso_valor_en(id_entidad: u16, id_definicion: u16, paso: u16, state: &AppState) -> Result<(), String> {
+    let mut est = state.lock();
+    if !(1..=PASO_VALOR_MAX).contains(&paso) {
+        return Err(format!("La variación debe estar entre 1 y {PASO_VALOR_MAX}"));
+    }
+    if !est.definiciones_parametros.iter().any(|d| d.id == id_definicion && d.tiene_maximo) {
+        return Err("Ese parámetro no tiene valor actual".into());
+    }
+    let ficha = est.banco_entidades.iter().find(|e| e.id == id_entidad).ok_or("La ficha ya no existe")?;
+    let actual = ficha.pasos_valor.iter().find(|p| p.id_definicion == id_definicion).map_or(1, |p| p.paso);
+    if actual == paso {
+        return Ok(());
+    }
+    let delta = DeltaPartida::EntidadCambiada {
+        id: id_entidad,
+        cambios: vec![cambios_entidad::CambioEntidad::PasoValor(PasoValor { id_definicion, paso })],
+    };
+    registrar(&mut est, &state.almacen, delta);
+    Ok(())
+}
+
 /// Oculta o muestra una instancia: oculta, solo el host la ve (a los jugadores no se les envía nada). Solo el host:
 /// no está en la lista blanca de los jugadores. `oculto` `None` = alternar.
 #[tauri::command]
@@ -1129,6 +1159,7 @@ pub fn iniciar_borrador_entidad_en(zona_id: u16, foto_url: Option<String>, state
         tipo: TipoEntidad::Enemigo,
         parametros,
         variables,
+        pasos_valor: vec![],
         cuerpo: Cuerpo::Pequenio,
         zona_id,
         foto_url,
@@ -1257,6 +1288,7 @@ pub fn crear_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<Entida
     }
     normalizar_parametros(&est.definiciones_parametros, &mut entidad.parametros);
     normalizar_variables(&est.definiciones_variables, &mut entidad.variables);
+    entidad.pasos_valor.clear(); // solo los cambia `poner_paso_valor`
     validar_entidad(&est, &state.almacen.dir(), &entidad)?;
     entidad.miniatura_url = None; // solo la pone `guardar_miniatura_ficha`
 
@@ -1289,6 +1321,8 @@ pub fn modificar_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<()
     }
     normalizar_parametros(&est.definiciones_parametros, &mut entidad.parametros);
     normalizar_variables(&est.definiciones_variables, &mut entidad.variables);
+    // Los pasos de − / + son de Rust (los cambia `poner_paso_valor`): se conservan los guardados
+    entidad.pasos_valor = est.banco_entidades.iter().find(|e| e.id == entidad.id).map(|e| e.pasos_valor.clone()).unwrap_or_default();
     validar_entidad(&est, &state.almacen.dir(), &entidad)?;
 
     let Some(delta) = delta_de_cambios(&est, &entidad) else { return Ok(()) };
@@ -1533,7 +1567,7 @@ mod tests {
             nombre: "Orco".into(),
             tipo: TipoEntidad::Enemigo,
             parametros,
-            variables: vec![], cuerpo: Cuerpo::Pequenio,
+            variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio,
             zona_id: 1,
             foto_url: None,
             miniatura_url: None,
@@ -1672,6 +1706,79 @@ mod tests_partidas {
 
     fn zonas(state: &AppState) -> Vec<u16> {
         state.lock().zonas.iter().map(|z| z.id).collect()
+    }
+
+    fn ficha_con_instancias(state: &AppState) {
+        procesar_delta(state, DeltaPartida::ZonaCreada(zona(1)));
+        let mut e = state.lock();
+        let ficha = |id: u16| Entidad {
+            id, nombre: format!("F{id}"), tipo: TipoEntidad::Enemigo,
+            parametros: parametros_por_defecto().iter().map(|d| Parametro { id_definicion: d.id, valor: d.valor_por_defecto.clone(), publico: true }).collect(),
+            variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None,
+            foto_encuadre: Default::default(), archivos_adjuntos: vec![], es_unico: false, propietarios: vec![],
+        };
+        e.aplicar_delta(&DeltaPartida::EntidadCreada(ficha(1)));
+        e.aplicar_delta(&DeltaPartida::EntidadCreada(ficha(2)));
+        for (i, id) in [(1u16, 1u16), (2, 1), (3, 2)] {
+            let d = instancias::instanciar(&e, id, None, false).unwrap();
+            e.aplicar_delta(&d);
+            assert_eq!(e.instancias_activas.last().unwrap().id_instancia, i);
+        }
+    }
+
+    #[test]
+    fn el_paso_de_menos_y_mas_es_de_la_ficha_y_no_de_la_instancia() {
+        let state = estado_en_a("paso_valor");
+        ficha_con_instancias(&state);
+        let paso = |state: &AppState, id: u16, def: u16| {
+            state.lock().banco_entidades.iter().find(|e| e.id == id).unwrap().pasos_valor.iter().find(|p| p.id_definicion == def).map_or(1, |p| p.paso)
+        };
+
+        poner_paso_valor_en(1, ID_VIDA, 5, &state).unwrap();
+        assert_eq!([paso(&state, 1, ID_VIDA), paso(&state, 2, ID_VIDA)], [5, 1], "solo la ficha 1");
+        // Las dos instancias de la ficha 1 lo comparten; la de la ficha 2, no
+        let est = state.lock();
+        let de = |id: u16| est.instancias_activas.iter().filter(|i| i.base.id == id).map(|i| i.base.pasos_valor.clone()).collect::<Vec<_>>();
+        let esperado = vec![PasoValor { id_definicion: ID_VIDA, paso: 5 }];
+        assert_eq!(de(1), vec![esperado.clone(), esperado]);
+        assert_eq!(de(2), vec![vec![]]);
+        drop(est);
+
+        // Quitar las instancias y poner otra: se conserva (es de la ficha del banco)
+        procesar_delta(&state, DeltaPartida::InstanciaBorrada(1));
+        procesar_delta(&state, DeltaPartida::InstanciaBorrada(2));
+        let nueva = instancias::instanciar(&state.lock(), 1, None, false).unwrap();
+        procesar_delta(&state, nueva);
+        assert_eq!(state.lock().instancias_activas.iter().find(|i| i.base.id == 1).unwrap().base.pasos_valor[0].paso, 5);
+
+        // Guardar la ficha desde el editor (que manda lo suyo, aunque esté viejo) no lo pisa
+        let mut ficha = state.lock().banco_entidades[0].clone();
+        ficha.pasos_valor = vec![PasoValor { id_definicion: ID_VIDA, paso: 77 }];
+        ficha.nombre = "Orco".into();
+        modificar_entidad_en(ficha, &state).unwrap();
+        assert_eq!(paso(&state, 1, ID_VIDA), 5);
+        assert_eq!(state.lock().banco_entidades[0].nombre, "Orco");
+
+        // Volver a 1 lo quita; sin cambio no hay delta; lo que no vale se rechaza
+        let seq = state.lock().ultimo_seq;
+        poner_paso_valor_en(1, ID_VIDA, 5, &state).unwrap();
+        assert_eq!(state.lock().ultimo_seq, seq, "mismo paso: nada");
+        poner_paso_valor_en(1, ID_VIDA, 1, &state).unwrap();
+        assert!(state.lock().banco_entidades[0].pasos_valor.is_empty());
+        for (id, def, p) in [(1u16, ID_VIDA, 0u16), (1, ID_VIDA, PASO_VALOR_MAX + 1), (9, ID_VIDA, 2), (1, ID_ARMADURA, 2), (1, 99, 2)] {
+            assert!(poner_paso_valor_en(id, def, p, &state).is_err(), "{id} {def} {p}");
+        }
+    }
+
+    #[test]
+    fn borrar_un_parametro_borra_su_paso() {
+        let state = estado_en_a("paso_valor_borrar");
+        ficha_con_instancias(&state);
+        poner_paso_valor_en(1, ID_VIDA, 5, &state).unwrap();
+        procesar_delta(&state, DeltaPartida::ParametroBorrado(ID_VIDA));
+        let e = state.lock();
+        assert!(e.banco_entidades.iter().all(|f| f.pasos_valor.is_empty()));
+        assert!(e.instancias_activas.iter().all(|i| i.base.pasos_valor.is_empty()));
     }
 
     #[test]

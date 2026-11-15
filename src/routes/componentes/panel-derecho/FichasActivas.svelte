@@ -145,20 +145,6 @@
         <span class="donde">{dondeEsta(ficha)}</span>
       </div>
 
-      {#if resumidos.length}
-        <div class="resumen">
-          {#each resumidos.filter((r) => veParametro(ficha, r.id)) as r (r.id)}
-            <!-- Una tirada soltada aquí cambia este valor (ver $lib/arrastreTirada) -->
-            <span
-              style:color={r.color}
-              title={ayuda(r.clave)}
-              data-valor="{ficha.id_instancia}:{r.id}"
-              class:destino-tirada={arrastreTirada.esDestino(ficha.id_instancia, r.id)}
-            >{partida.valorMostrado(ficha, r.id)}/{numeroDe(ficha.base, r.id)}</span>
-          {/each}
-        </div>
-      {/if}
-
       <!-- Solo el host: ojo abierto = la ven los jugadores; cerrado = oculta (solo la ve el host). Pulsarlo alterna. -->
       {#if !esJugador}
         <span
@@ -188,6 +174,22 @@
           </svg>
         </span>
       {/if}
+
+      {#if resumidos.length}
+        <div class="resumen">
+          {#each resumidos.filter((r) => veParametro(ficha, r.id)) as r (r.id)}
+            <!-- Una tirada soltada aquí cambia este valor (ver $lib/arrastreTirada) -->
+            <span
+              style:color={r.color}
+              title={ayuda(r.clave)}
+              data-valor="{ficha.id_instancia}:{r.id}"
+              class:destino-tirada={arrastreTirada.esDestino(ficha.id_instancia, r.id)}
+            >{partida.valorMostrado(ficha, r.id)}/{numeroDe(ficha.base, r.id)}</span>
+          {/each}
+        </div>
+      {/if}
+
+      
     </button>
   {/each}
 

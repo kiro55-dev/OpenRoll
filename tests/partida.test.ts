@@ -21,11 +21,11 @@ function crearBackend() {
     instancias: [
       {
         id_instancia: 1, id_mapa: 1, valores_actuales: [{ id_definicion: 1, valor: 10 }], orden: 0, rotacion: 0,
-        base: { nombre: "Orco", tipo: "Enemigo", parametros: [{ id_definicion: 1, valor: { Numero: 18 }, publico: false }] }
+        base: { id: 1, nombre: "Orco", tipo: "Enemigo", parametros: [{ id_definicion: 1, valor: { Numero: 18 }, publico: false }] }
       },
       {
         id_instancia: 2, id_mapa: 3, valores_actuales: [] as { id_definicion: number; valor: number }[], orden: 1, rotacion: 0,
-        base: { nombre: "Lobo", tipo: "Enemigo", parametros: [{ id_definicion: 1, valor: { Numero: 5 }, publico: false }] }
+        base: { id: 2, nombre: "Lobo", tipo: "Enemigo", parametros: [{ id_definicion: 1, valor: { Numero: 5 }, publico: false }] }
       }
     ],
     definiciones: [
@@ -52,6 +52,15 @@ function crearBackend() {
           return clon(d);
         }
         case "modificar_definicion_parametro": b.definiciones = b.definiciones.map((d) => (d.id === args.definicion.id ? clon(args.definicion) : d)); return;
+        case "poner_paso_valor": {
+          // Como Rust: el paso es de la ficha (banco e instancias) y 1 lo quita
+          for (const e of [...b.banco, ...b.instancias.map((i: any) => i.base)] as any[]) {
+            if (e.id !== args.idEntidad) continue;
+            e.pasos_valor = (e.pasos_valor ?? []).filter((p: any) => p.id_definicion !== args.idDefinicion);
+            if (args.paso !== 1) e.pasos_valor.push({ id_definicion: args.idDefinicion, paso: args.paso });
+          }
+          return;
+        }
         case "obtener_definiciones_variables": return clon(b.variables);
         case "crear_definicion_variable": {
           if (b.variables.some((v) => v.abreviatura === args.definicion.abreviatura)) throw "Ya hay una variable que se llama o se abrevia";
@@ -702,6 +711,39 @@ describe("fichas: selección y vida", () => {
     const lobo = partida.instancias[1]; // sin valor actual de vida: no la deduce el front
     expect(partida.estaCaida(lobo)).toBe(false);
     expect(partida.estaCaida({ ...lobo, atenuada: true })).toBe(true);
+  });
+
+  it("el paso de − y + es de la ficha (no de la instancia ni de todas): lo ven sus instancias, se conserva y 1 lo quita", async () => {
+    const partida = await nuevoStore();
+    const ficha1 = () => partida.banco.find((b) => b.id === 1)!;
+    expect(partida.pasoDe(ficha1(), 1)).toBe(1);
+
+    expect(await partida.ponerPaso(1, 1, 5)).toBe(5);
+    expect(llamadas("poner_paso_valor")[0].args).toEqual({ idEntidad: 1, idDefinicion: 1, paso: 5 });
+    // La de la ficha 1, en el banco y en su instancia; la de la ficha 2, no; y otro parámetro, tampoco
+    expect(partida.pasoDe(ficha1(), 1)).toBe(5);
+    expect(partida.pasoDe(partida.instancias[0].base, 1)).toBe(5);
+    expect(partida.pasoDe(partida.banco.find((b) => b.id === 2)!, 1)).toBe(1);
+    expect(partida.pasoDe(ficha1(), 2)).toBe(1);
+
+    // Pasados de rango o raros se acotan; 1 lo quita
+    expect(await partida.ponerPaso(1, 1, 999999)).toBe(9999);
+    expect(await partida.ponerPaso(1, 1, 3.9)).toBe(3);
+    expect(await partida.ponerPaso(1, 1, 0)).toBe(1); // no vale: sin llamada
+    expect(llamadas("poner_paso_valor")).toHaveLength(3);
+    expect(await partida.ponerPaso(1, 1, 1)).toBe(1);
+    expect(partida.pasoDe(ficha1(), 1)).toBe(1);
+  });
+
+  it("si Rust rechaza el paso (no es de su ficha), la pantalla vuelve al que hay", async () => {
+    const partida = await nuevoStore();
+    const original = backend.invoke;
+    backend.invoke = async (cmd: string, args?: Args) => {
+      if (cmd === "poner_paso_valor") throw "Esa ficha no es tuya";
+      return original(cmd, args);
+    };
+    await partida.ponerPaso(1, 1, 5);
+    expect(partida.pasoDe(partida.banco.find((b) => b.id === 1)!, 1)).toBe(1);
   });
 
   it("instanciar oculto manda `oculto` a Rust, y ocultar o mostrar una instancia se ve al momento y se confirma al releer", async () => {

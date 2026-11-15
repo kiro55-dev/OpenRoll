@@ -257,6 +257,7 @@ mod tests {
                 Parametro { id_definicion: ID_ARMADURA, valor: ValorParametro::Numero(12), publico: true },
             ],
             variables: vec![],
+            pasos_valor: vec![],
             cuerpo,
             zona_id: 1,
             foto_url: None,

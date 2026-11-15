@@ -379,6 +379,7 @@ mod tests {
         let ficha = |id: u16, propietarios: Vec<u16>, fuerza: i16| Entidad {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Jugador, parametros: vec![],
             variables: vec![ValorVariable { id_definicion: 1, valor: fuerza }, ValorVariable { id_definicion: 2, valor: 9 }],
+            pasos_valor: vec![],
             cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
             archivos_adjuntos: vec![], es_unico: false, propietarios,
         };

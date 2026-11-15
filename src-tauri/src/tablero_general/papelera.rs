@@ -338,7 +338,7 @@ mod tests {
     }
     fn ficha(id: u16, zona: u16, unica: bool) -> Entidad {
         Entidad {
-            id, nombre: format!("F{id}"), tipo: TipoEntidad::Enemigo, parametros: vec![], variables: vec![], cuerpo: Cuerpo::Pequenio,
+            id, nombre: format!("F{id}"), tipo: TipoEntidad::Enemigo, parametros: vec![], variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio,
             zona_id: zona, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
             archivos_adjuntos: vec![], es_unico: unica, propietarios: vec![],
         }

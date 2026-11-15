@@ -87,6 +87,15 @@ export interface DefinicionVariable {
   escala: number;
 }
 
+/** Paso de − / + de un parámetro en una ficha (`PasoValor` en Rust). */
+export interface PasoValor {
+  id_definicion: number;
+  paso: number;
+}
+
+/** Tope del paso (`PASO_VALOR_MAX` en Rust). */
+export const PASO_VALOR_MAX = 9999;
+
 /** Valor de una variable en una ficha. */
 export interface ValorVariable {
   id_definicion: number;
@@ -126,6 +135,8 @@ export interface Entidad {
   parametros: Parametro[];
   /** Una por variable de la partida, en su orden. Solo llegan al host y a los propietarios (a los demás, vacía). */
   variables: ValorVariable[];
+  /** Lo que suman o restan los botones − / + de cada valor (vida...) de esta ficha; solo los que no son 1. Lo guarda Rust. */
+  pasos_valor?: PasoValor[];
   cuerpo: Cuerpo;
   zona_id: number;
   foto_url: string | null;
@@ -840,6 +851,35 @@ class Partida {
   async instanciarVarias(idsEntidades: number[], destino: Destino | null, oculto = false) {
     const creadas = await this.#cambiarInstancias<Instancia[]>("instanciar_entidades", { ids: idsEntidades, destino, oculto });
     if (creadas?.length && destino === null) this.#cambiarFoco(creadas.map((i) => i.id_instancia));
+  }
+
+  /** Cuánto suman o restan − y + del valor `idDefinicion` de esa ficha (1 si no se ha cambiado). Es de la ENTIDAD. */
+  pasoDe(entidad: Entidad, idDefinicion: number): number {
+    return entidad.pasos_valor?.find((p) => p.id_definicion === idDefinicion)?.paso ?? 1;
+  }
+
+  /**
+   * Cambia el paso de − y + de ese valor en la ficha `idEntidad`, que comparten todas sus instancias. Lo guarda Rust
+   * (el host, o un jugador de una ficha suya). Se ve al momento y Rust lo confirma al releer. Devuelve el que queda.
+   */
+  async ponerPaso(idEntidad: number, idDefinicion: number, paso: number): Promise<number> {
+    const n = Math.trunc(Number(paso));
+    if (!Number.isFinite(n) || n < 1) return 1;
+    const valido = Math.min(n, PASO_VALOR_MAX);
+    const poner = (e: Entidad): Entidad =>
+      e.id !== idEntidad
+        ? e
+        : { ...e, pasos_valor: [...(e.pasos_valor ?? []).filter((p) => p.id_definicion !== idDefinicion), ...(valido === 1 ? [] : [{ id_definicion: idDefinicion, paso: valido }])] };
+    this.banco = this.banco.map(poner);
+    this.instancias = this.instancias.map((i) => ({ ...i, base: poner(i.base) }));
+    try {
+      await invoke("poner_paso_valor", { idEntidad, idDefinicion, paso: valido });
+    } catch (err) {
+      console.error("poner_paso_valor:", err);
+    } finally {
+      await this.recargarEntidades();
+    }
+    return valido;
   }
 
   /** Oculta o muestra una instancia (solo el host): oculta, a los jugadores no les llega nada de ella. */
