@@ -216,7 +216,7 @@
         use:vigilarVisibilidad={item.id}
         onpointerdown={(e) => alPulsarFila(e, item)}
         onclick={(e) => alHacerClicFila(e, item)}
-        title={ayuda("Clic: editar ficha\nCtrl+clic: seleccionar varias\nSupr: borrar las seleccionadas\nArrastrar: al tablero o a «Fichas activas»")}
+        title={ayuda("Clic: editar ficha\nCtrl+clic: seleccionar varias\nSupr: borrar las seleccionadas\nArrastrar: al tablero o a «Fichas activas»\nArrastrar con click derecho: La instancia nace oculta")}
       >
         {#if item.tipo === "NPC"}
           <div class="contenedor-rombo">
