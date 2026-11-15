@@ -80,7 +80,7 @@
 
 <button type="button" class="btn-crear" onclick={anadir}>+ Añadir variable</button>
 
-<ArrastreFlotante {lista}>
+<ArrastreFlotante {lista} recto>
   {#if lista.item}
     <div class="flotante">
       <span class="asa">⋮⋮</span>

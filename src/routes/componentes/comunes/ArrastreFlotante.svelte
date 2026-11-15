@@ -14,12 +14,14 @@
     alto: number;
   }
 
-  let { lista, children }: { lista: Arrastre; children: Snippet } = $props();
+  /** `recto`: sin el giro ni el aumento con los que se «levanta» la tarjeta (solo la sombra y la transparencia). */
+  let { lista, recto = false, children }: { lista: Arrastre; recto?: boolean; children: Snippet } = $props();
 </script>
 
 {#if lista.activo && lista.item}
   <div
     class="elemento-flotante"
+    class:recto
     style="
       left: {lista.x - lista.offsetX}px;
       top: {lista.y - lista.offsetY}px;
@@ -41,4 +43,5 @@
     opacity: 0.92;
     transition: transform 0.05s ease;
   }
+  .elemento-flotante.recto { transform: none; transition: none; }
 </style>

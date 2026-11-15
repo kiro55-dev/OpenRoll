@@ -275,7 +275,7 @@
   </div>
 </div>
 
-<ArrastreFlotante {lista}>
+<ArrastreFlotante {lista} recto>
   {#if lista.item}
     <div class="fila-param flotante">
       <span class="icono-drag">⋮⋮</span>
