@@ -704,12 +704,35 @@ describe("fichas: selección y vida", () => {
     expect(partida.estaCaida({ ...lobo, atenuada: true })).toBe(true);
   });
 
+  it("instanciar oculto manda `oculto` a Rust, y ocultar o mostrar una instancia se ve al momento y se confirma al releer", async () => {
+    const partida = await nuevoStore();
+    await partida.instanciar(1, { id_mapa: 1, casilla: { x: 3, y: 4 } }, true);
+    expect(llamadas("instanciar_entidad")[0].args).toMatchObject({ idEntidad: 1, oculto: true });
+    await partida.instanciarVarias([1, 2], null, true);
+    expect(llamadas("instanciar_entidades")[0].args).toMatchObject({ ids: [1, 2], oculto: true });
+
+    backend.invoke = ((original) => async (cmd: string, args?: Args) => {
+      if (cmd === "ocultar_instancia") {
+        backend.llamadas.push({ cmd, args: args! });
+        const i = backend.instancias.find((x) => x.id_instancia === args!.idInstancia) as any;
+        i.oculto = args!.oculto;
+        return;
+      }
+      return original(cmd, args);
+    })(backend.invoke);
+    await partida.ocultarInstancia(1, true);
+    expect(llamadas("ocultar_instancia")[0].args).toEqual({ idInstancia: 1, oculto: true });
+    expect(partida.instancias.find((i) => i.id_instancia === 1)?.oculto).toBe(true);
+    await partida.ocultarInstancia(1, false);
+    expect(partida.instancias.find((i) => i.id_instancia === 1)?.oculto).toBe(false);
+  });
+
   it("instanciar, mover, quitar del tablero y borrar llaman a Rust y vuelven a leer las instancias", async () => {
     const partida = await nuevoStore();
     const destino = { id_mapa: 1, casilla: { x: 3, y: 4 } };
 
     await partida.instanciar(1, destino);
-    expect(llamadas("instanciar_entidad")[0].args).toEqual({ idEntidad: 1, destino });
+    expect(llamadas("instanciar_entidad")[0].args).toEqual({ idEntidad: 1, destino, oculto: false });
     expect(partida.instancias).toHaveLength(3);
     expect(partida.idsSeleccionados).toEqual([]); // soltada en el tablero: sin foco (no se ven sus formas)
 

@@ -399,8 +399,8 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
         Peticion::ModificarValorActual { id_instancia, id_definicion, delta } => {
             json(partida::modificar_valor_actual_en(id_instancia, id_definicion, delta, state)?)
         }
-        Peticion::InstanciarEntidad { id_entidad, destino } => json(partida::instanciar_entidad_en(id_entidad, destino, state)?),
-        Peticion::InstanciarEntidades { ids, destino } => json(partida::instanciar_entidades_en(ids, destino, state)?),
+        Peticion::InstanciarEntidad { id_entidad, destino } => json(partida::instanciar_entidad_en(id_entidad, destino, false, state)?),
+        Peticion::InstanciarEntidades { ids, destino } => json(partida::instanciar_entidades_en(ids, destino, false, state)?),
         Peticion::ModificarEntidad { entidad } => json(partida::modificar_entidad_en(entidad, state)?),
         Peticion::GuardarMiniaturaFicha { id, datos } => json(partida::guardar_miniatura_ficha_en(id, datos, state)?),
         Peticion::LeerArchivoTexto { ruta_relativa } => json(partida::leer_archivo_texto_en(ruta_relativa, state)?),
@@ -514,7 +514,7 @@ mod tests {
         Instancia {
             id_instancia: id, id_mapa: Some(id_mapa), base, valores_actuales: vec![],
             coordenadas: Coordenada::Casilla(Casilla { x: 1, y: 1 }),
-            activo: true, rotacion: 0, espejo: false, orden: id, capa: 0, atenuada: false,
+            activo: true, rotacion: 0, espejo: false, orden: id, capa: 0, oculto: false, atenuada: false,
         }
     }
 
@@ -604,6 +604,20 @@ mod tests {
         assert!(ok(&e, 1, json!({ "cmd": "mover_instancias", "ids": [1], "idMapa": 1, "dx": 2, "dy": 0 })).is_ok());
         assert!(ok(&e, 1, json!({ "cmd": "mover_instancias", "ids": [1, 2], "idMapa": 1, "dx": 2, "dy": 0 })).is_err());
         assert!(ok(&e, 1, json!({ "cmd": "mover_instancias", "ids": [1], "idMapa": 2, "dx": 2, "dy": 0 })).is_err());
+    }
+
+    #[test]
+    fn un_jugador_no_toca_una_instancia_oculta_aunque_sea_de_su_ficha() {
+        let mut e = estado();
+        e.instancias_activas[0].oculto = true; // la 1, de la ficha 10 del jugador 1
+        for cmd in ["rotar_instancia", "espejar_instancia", "borrar_instancia"] {
+            assert!(ok(&e, 1, json!({ "cmd": cmd, "idInstancia": 1 })).is_err(), "{cmd}");
+        }
+        assert!(ok(&e, 1, json!({ "cmd": "mover_instancia", "idInstancia": 1, "destino": en(1) })).is_err());
+        assert!(ok(&e, 1, json!({ "cmd": "mover_instancias", "ids": [1], "idMapa": 1, "dx": 1, "dy": 0 })).is_err());
+        assert!(ok(&e, ID_HOST, json!({ "cmd": "mover_instancia", "idInstancia": 1, "destino": en(1) })).is_ok());
+        // `ocultar_instancia` no está en la lista blanca: un jugador no puede mostrarla ni ocultar otras
+        assert!(decodificar(json!({ "cmd": "ocultar_instancia", "idInstancia": 1, "oculto": false })).is_err());
     }
 
     #[test]

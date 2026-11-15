@@ -24,8 +24,8 @@ export type OrigenArrastre =
 export type ZonaDestino = "tablero" | "activas" | "banco";
 
 export type AccionArrastre =
-  | { tipo: "instanciar"; idEntidad: number; destino: Destino | null }
-  | { tipo: "instanciarVarias"; idsEntidades: number[]; destino: Destino | null }
+  | { tipo: "instanciar"; idEntidad: number; destino: Destino | null; oculto?: boolean }
+  | { tipo: "instanciarVarias"; idsEntidades: number[]; destino: Destino | null; oculto?: boolean }
   | { tipo: "mover"; idInstancia: number; destino: Destino }
   | { tipo: "moverVarias"; ids: number[]; idMapa: number; dx: number; dy: number }
   | { tipo: "quitarDelTablero"; idInstancia: number }
@@ -60,24 +60,26 @@ export function moverEnLista(ids: readonly number[], id: number, indice: number)
  * | instancia de activas   | mover ahí            | reordenar              | borrar       |
  *
  * Con un grupo, el desplazamiento es el de la ficha cogida: de su casilla a `casilla`.
+ * `oculto` (solo el host, arrastrando desde el banco con el botón derecho): lo que se instancia nace oculto.
  */
 export function accionAlSoltar(
   origen: OrigenArrastre,
   zona: ZonaDestino | null,
   casilla: Destino | null,
   orden: readonly number[] = [],
-  indice: number | null = null
+  indice: number | null = null,
+  oculto = false
 ): AccionArrastre | null {
   if ("entidad" in origen) {
     const idEntidad = origen.entidad.id;
-    if (zona === "tablero") return casilla ? { tipo: "instanciar", idEntidad, destino: casilla } : null;
-    if (zona === "activas") return { tipo: "instanciar", idEntidad, destino: null };
+    if (zona === "tablero") return casilla ? { tipo: "instanciar", idEntidad, destino: casilla, ...(oculto && { oculto }) } : null;
+    if (zona === "activas") return { tipo: "instanciar", idEntidad, destino: null, ...(oculto && { oculto }) };
     return null;
   }
   if ("entidades" in origen) {
     const idsEntidades = origen.entidades.map((e) => e.id);
-    if (zona === "tablero") return casilla ? { tipo: "instanciarVarias", idsEntidades, destino: casilla } : null;
-    if (zona === "activas") return { tipo: "instanciarVarias", idsEntidades, destino: null };
+    if (zona === "tablero") return casilla ? { tipo: "instanciarVarias", idsEntidades, destino: casilla, ...(oculto && { oculto }) } : null;
+    if (zona === "activas") return { tipo: "instanciarVarias", idsEntidades, destino: null, ...(oculto && { oculto }) };
     return null;
   }
   const { id_instancia: idInstancia, coordenadas } = origen.instancia;
@@ -127,9 +129,9 @@ export function ladosDe(origen: OrigenArrastre): Lados {
 export function ejecutarAccion(accion: AccionArrastre) {
   switch (accion.tipo) {
     case "instanciar":
-      return partida.instanciar(accion.idEntidad, accion.destino);
+      return partida.instanciar(accion.idEntidad, accion.destino, accion.oculto);
     case "instanciarVarias":
-      return partida.instanciarVarias(accion.idsEntidades, accion.destino);
+      return partida.instanciarVarias(accion.idsEntidades, accion.destino, accion.oculto);
     case "mover":
       return partida.moverInstancia(accion.idInstancia, accion.destino);
     case "moverVarias":
@@ -162,6 +164,8 @@ export interface ArrastreEnCurso {
   indice: number | null;
   /** Punto por el que se cogió la ficha, en fracción de su ancho y alto (0..1). Sin él, el centro. */
   agarre: { x: number; y: number } | null;
+  /** Se arrastra con el botón derecho desde el banco (solo el host): lo que se suelte nace oculto. */
+  oculto: boolean;
 }
 
 type ResolverCasilla = (clientX: number, clientY: number, lados: Lados, agarre: ArrastreEnCurso["agarre"]) => Destino | null;
@@ -185,9 +189,11 @@ class ArrastreFicha {
   /**
    * Llamar en el `pointerdown` de algo que se puede arrastrar. Si el ratón se mueve más del umbral
    * empieza el arrastre; si se suelta antes, es un clic y se llama a `alClic` (si se da).
+   * Con el botón DERECHO solo se arrastra una ficha (o varias) del banco, y solo el host: al soltarla nace oculta.
    */
   preparar(e: PointerEvent, pedido: OrigenArrastre, alClic?: () => void, agarre: ArrastreEnCurso["agarre"] = null) {
-    if (e.button !== 0 || this.actual) return;
+    const oculto = e.button === 2 && !esJugador && ("entidad" in pedido || "entidades" in pedido);
+    if ((e.button !== 0 && !oculto) || this.actual) return;
     let origen = pedido;
     if (esJugador && "instancia" in pedido) {
       if (!partida.controla(pedido.instancia)) {
@@ -213,16 +219,21 @@ class ArrastreFicha {
         if (Math.hypot(ev.clientX - inicio.x, ev.clientY - inicio.y) <= UMBRAL_ARRASTRE_PX) return;
         empezado = true;
       }
-      this.#actualizar(origen, base.foto_url, lados, agarre, ev.clientX, ev.clientY);
+      this.#actualizar(origen, base.foto_url, lados, agarre, ev.clientX, ev.clientY, oculto);
     };
+    // Con el botón derecho, al soltar el navegador abriría su menú: se tapa un instante
+    const sinMenu = (ev: Event) => ev.preventDefault();
+    if (oculto) window.addEventListener("contextmenu", sinMenu);
     const soltar = (_ev: PointerEvent) => {
       this.#terminar();
-      if (!empezado) return alClic?.();
-      this.#completar(origen);
+      if (oculto) setTimeout(() => window.removeEventListener("contextmenu", sinMenu), 150);
+      if (!empezado) return oculto ? undefined : alClic?.(); // un clic derecho suelto no hace nada
+      this.#completar(origen, oculto);
     };
     const cancelar = (ev: Event) => {
       if (ev instanceof KeyboardEvent && ev.key !== "Escape") return;
       this.#terminar();
+      if (oculto) setTimeout(() => window.removeEventListener("contextmenu", sinMenu), 150);
       this.actual = null;
     };
 
@@ -239,13 +250,13 @@ class ArrastreFicha {
   }
 
   // Pone el arrastre en (x, y) (px de la ventana): qué zona hay debajo y, en «Fichas activas», qué posición
-  #actualizar(origen: OrigenArrastre, foto: string | null, lados: Lados, agarre: ArrastreEnCurso["agarre"], x: number, y: number) {
+  #actualizar(origen: OrigenArrastre, foto: string | null, lados: Lados, agarre: ArrastreEnCurso["agarre"], x: number, y: number, oculto: boolean) {
     const zona = zonaEn(x, y);
-    this.actual = { origen, foto, lados, x, y, zona, indice: zona === "activas" ? indiceEn(x, y) : null, agarre };
+    this.actual = { origen, foto, lados, x, y, zona, indice: zona === "activas" ? indiceEn(x, y) : null, agarre, oculto };
   }
 
   // Termina el arrastre en curso: hace lo que toque donde se soltó
-  #completar(origen: OrigenArrastre) {
+  #completar(origen: OrigenArrastre, oculto: boolean) {
     const a = this.actual;
     this.actual = null;
     if (!a) return;
@@ -257,7 +268,7 @@ class ArrastreFicha {
     // `indice` es la posición en la lista que se VE (con el filtro de mapa puede faltar alguna): se reordena
     // ahí y luego se pasa al orden completo, que es el que guarda Rust
     const orden = partida.instanciasVisibles.map((i) => i.id_instancia);
-    const accion = accionAlSoltar(origen, a.zona, casilla, orden, a.indice);
+    const accion = accionAlSoltar(origen, a.zona, casilla, orden, a.indice, oculto);
     // El orden de «Fichas activas» es de todos: lo cambia el host
     if (esJugador && accion?.tipo === "reordenar") return;
     if (accion?.tipo === "reordenar") {

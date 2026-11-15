@@ -384,7 +384,7 @@ mod tests {
         };
         let inst = |id: u16, base: Entidad| Instancia {
             id_instancia: id, id_mapa: None, base, valores_actuales: vec![], coordenadas: Coordenada::NoPuesto,
-            activo: true, rotacion: 0, espejo: false, orden: 0, capa: 0, atenuada: false,
+            activo: true, rotacion: 0, espejo: false, orden: 0, capa: 0, oculto: false, atenuada: false,
         };
         e.jugadores = vec![Jugador { id: 3, nombre: "Ana".into() }];
         e.instancias_activas = vec![inst(1, ficha(1, vec![3], 12)), inst(2, ficha(2, vec![], 4))];

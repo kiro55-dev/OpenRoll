@@ -626,6 +626,7 @@ mod tests {
             espejo: false,
             orden: id,
             capa: 0,
+            oculto: false,
             atenuada: false,
         }
     }

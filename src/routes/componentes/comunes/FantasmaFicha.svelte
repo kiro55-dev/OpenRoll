@@ -21,7 +21,10 @@
     if (!a) return "";
     const esFicha = !("instancia" in a.origen);
     if (a.zona === "activas") {
-      if (esFicha) return cuantas > 1 ? `Activar las ${cuantas} sin colocar` : "Activar sin colocar";
+      if (esFicha) {
+        const base = cuantas > 1 ? `Activar las ${cuantas} sin colocar` : "Activar sin colocar";
+        return a.oculto ? `${base} (ocultas)` : base;
+      }
       return "desde" in a.origen && a.origen.desde === "activas" ? "" : "Quitar del tablero";
     }
     if (a.zona === "banco") return esFicha ? "" : "Eliminar instancia";
@@ -37,7 +40,7 @@
 {/if}
 
 {#if a && base && a.zona !== "tablero"}
-  <div class="fantasma" style:left="{a.x}px" style:top="{a.y}px" style:border-color={COLOR_TIPO[base.tipo]}>
+  <div class="fantasma" class:oculto={a.oculto} style:left="{a.x}px" style:top="{a.y}px" style:border-color={COLOR_TIPO[base.tipo]}>
     {#if base.foto_url}
       {#if mini}
         <img src={mini} alt="" draggable="false" />
@@ -99,6 +102,7 @@
     padding: 2px 4px;
     border-radius: 6px;
   }
+  .fantasma.oculto { opacity: 0.45; }
   .fantasma img { width: 100%; height: 100%; object-fit: cover; }
   .pista {
     position: fixed;

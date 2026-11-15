@@ -458,6 +458,11 @@ pub struct Instancia {
     #[serde(default)]
     pub capa: u32,
 
+    /// Oculta: solo la ve el host (al 50 % en el tablero y con un ojo cerrado en «Fichas activas»). A los jugadores
+    /// no les llega nada de ella, ni a los dueños de su ficha (ver `visibilidad::instancias_para`).
+    #[serde(default)]
+    pub oculto: bool,
+
     /// DERIVADO, nunca se guarda: solo lo pone `visibilidad::vista_jugador` cuando la instancia estaría gris (un
     /// parámetro con `atenuar_si_negativo` a 0 o menos) aunque ese parámetro sea privado y no llegue su valor.
     #[serde(default)]

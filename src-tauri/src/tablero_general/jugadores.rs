@@ -96,13 +96,14 @@ pub fn controla_entidad(est: &EstadoPartida, jugador: IdJugador, id_entidad: u16
     jugador == ID_HOST || est.banco_entidades.iter().any(|e| e.id == id_entidad && es_propietario(jugador, e))
 }
 
-/// Puede mover la instancia, girarla y quitarla del tablero.
+/// Puede mover la instancia, girarla y quitarla del tablero. Una instancia oculta no es de nadie más que del host
+/// (el jugador ni sabe que existe).
 pub fn controla_instancia(est: &EstadoPartida, jugador: IdJugador, id_instancia: u16) -> bool {
     jugador == ID_HOST
         || est
             .instancias_activas
             .iter()
-            .any(|i| i.id_instancia == id_instancia && es_propietario(jugador, &i.base))
+            .any(|i| i.id_instancia == id_instancia && !i.oculto && es_propietario(jugador, &i.base))
 }
 
 /// Qué cambios de su ficha puede hacer: el host todos; un propietario todos salvo los que organizan la
@@ -203,6 +204,7 @@ mod tests {
             espejo: false,
             orden: 0,
             capa: 0,
+            oculto: false,
             atenuada: false,
         }];
         e

@@ -1008,7 +1008,7 @@ mod tests {
         };
         let instancia = |id, base: Entidad| Instancia {
             id_instancia: id, id_mapa: Some(1), valores_actuales: vec![], base,
-            coordenadas: Coordenada::Casilla(Casilla { x: 1, y: 1 }), activo: true, rotacion: 0, espejo: false, orden: id, capa: 0, atenuada: false,
+            coordenadas: Coordenada::Casilla(Casilla { x: 1, y: 1 }), activo: true, rotacion: 0, espejo: false, orden: id, capa: 0, oculto: false, atenuada: false,
         };
         for (id, p) in [(10, vec![j]), (11, vec![])] {
             procesar_delta(e, DeltaPartida::EntidadCreada(ficha(id, p.clone())));

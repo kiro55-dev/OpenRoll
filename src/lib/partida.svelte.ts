@@ -165,6 +165,8 @@ export interface Instancia {
   rotacion: number;
   /** La imagen se dibuja en espejo (izquierda-derecha, en el eje de la propia ficha, antes de girar). Solo aspecto. */
   espejo?: boolean;
+  /** Oculta: solo la ve el host (al 50 % en el tablero, ojo cerrado en «Fichas activas»); a los jugadores no les llega. */
+  oculto?: boolean;
   /** Posición en «Fichas activas» */
   orden: number;
   /** Altura en el tablero (la mayor, encima). La pone Rust al poner o mover la ficha. */
@@ -825,8 +827,8 @@ class Partida {
    * única que ya tenía instancia la reutiliza (Rust decide). Soltada en «Fichas activas» queda
    * seleccionada; en el tablero no (así no se dibujan sus formas al soltarla).
    */
-  async instanciar(idEntidad: number, destino: Destino | null) {
-    const instancia = await this.#cambiarInstancias<Instancia>("instanciar_entidad", { idEntidad, destino });
+  async instanciar(idEntidad: number, destino: Destino | null, oculto = false) {
+    const instancia = await this.#cambiarInstancias<Instancia>("instanciar_entidad", { idEntidad, destino, oculto });
     if (instancia && destino === null) this.seleccionarInstancia(instancia);
   }
 
@@ -835,9 +837,16 @@ class Partida {
    * `destino` y las demás en cuadrícula a su lado (Rust); con null, todas activas sin colocar.
    * Como con una sola: en «Fichas activas» quedan todas con el foco; en el tablero, ninguna.
    */
-  async instanciarVarias(idsEntidades: number[], destino: Destino | null) {
-    const creadas = await this.#cambiarInstancias<Instancia[]>("instanciar_entidades", { ids: idsEntidades, destino });
+  async instanciarVarias(idsEntidades: number[], destino: Destino | null, oculto = false) {
+    const creadas = await this.#cambiarInstancias<Instancia[]>("instanciar_entidades", { ids: idsEntidades, destino, oculto });
     if (creadas?.length && destino === null) this.#cambiarFoco(creadas.map((i) => i.id_instancia));
+  }
+
+  /** Oculta o muestra una instancia (solo el host): oculta, a los jugadores no les llega nada de ella. */
+  async ocultarInstancia(idInstancia: number, oculto: boolean) {
+    // Se ve al momento; Rust lo confirma al releer
+    this.instancias = this.instancias.map((i) => (i.id_instancia === idInstancia ? { ...i, oculto } : i));
+    await this.#cambiarInstancias("ocultar_instancia", { idInstancia, oculto });
   }
 
   /** Pone una instancia en otra casilla (la casilla final la encaja Rust). */

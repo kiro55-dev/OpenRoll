@@ -60,12 +60,14 @@ pub fn instancias_para_el_master(instancias: &[Instancia], ocultar_privados: boo
 // Por jugador (FUTURA RED: lo que se envíe a cada uno pasará por aquí)
 // ------------------------------------------------------------------
 
-/// Las instancias tal como las ve `jugador`. El host, todas. Un jugador:
+/// Las instancias tal como las ve `jugador`. El host, todas (las ocultas también). Un jugador, ninguna instancia
+/// OCULTA (ni de sus propias fichas: es el host quien la oculta) y, de las demás:
 ///  * las de sus fichas, enteras y estén donde estén (las tiene activas aunque no estén en el tablero);
 ///  * las demás, filtradas con `vista_jugador`, solo si están puestas en un mapa compartido.
 pub fn instancias_para(jugador: IdJugador, instancias: &[Instancia], compartidos: &[u16], definiciones: &[DefinicionParametro]) -> Vec<Instancia> {
     instancias
         .iter()
+        .filter(|i| jugador == ID_HOST || !i.oculto)
         .filter_map(|i| {
             if es_propietario(jugador, &i.base) {
                 Some(i.clone())
@@ -200,6 +202,7 @@ mod tests {
             espejo: true,
             orden: 5,
             capa: 0,
+            oculto: false,
             atenuada: false,
         }
     }

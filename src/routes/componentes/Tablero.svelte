@@ -692,6 +692,7 @@
         marcadaParaMover: origenRecorrido === f.instancia.id_instancia && partida.controla(f.instancia),
         focoAjeno: partida.idsFocoAjeno.includes(f.instancia.id_instancia),
         apagada: partida.estaCaida(f.instancia),
+        oculta: !!f.instancia.oculto,
         fantasma: enTransito
       });
     }
@@ -733,10 +734,10 @@
       const origen = rectanguloFicha(cam, casillas, { instancia, casilla: casillaCogida });
       for (const f of otras) {
         const r = rectanguloFicha(cam, casillas, f);
-        dibujarFicha(ctx, cam, casillas, f, imagen(f.instancia.base), { en: { x: en.x + r.x - origen.x, y: en.y + r.y - origen.y }, sombra: true });
+        dibujarFicha(ctx, cam, casillas, f, imagen(f.instancia.base), { en: { x: en.x + r.x - origen.x, y: en.y + r.y - origen.y }, sombra: true, oculta: !!f.instancia.oculto });
       }
     }
-    dibujarFicha(ctx, cam, casillas, { instancia, casilla: { x: 0, y: 0 } }, imagen(instancia.base), { en, sombra: true });
+    dibujarFicha(ctx, cam, casillas, { instancia, casilla: { x: 0, y: 0 } }, imagen(instancia.base), { en, sombra: true, oculta: a.oculto || !!instancia.oculto });
   }
 
   // Una ficha del banco aún sin instancia, para poder dibujarla igual que una instancia

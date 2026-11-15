@@ -30,13 +30,15 @@ fn id_instancia_libre(est: &EstadoPartida) -> Option<u16> {
 ///  * Si es ÚNICA y ya tiene instancia, se reutiliza esa (mismo id y mismos valores actuales; solo
 ///    cambian el sitio y la copia de la ficha).
 ///  * Si no, nace una nueva con sus valores actuales al máximo.
-pub fn instanciar(est: &EstadoPartida, id_entidad: u16, destino: Option<Destino>) -> Result<DeltaPartida, String> {
+///  * `oculto`: la instancia nueva nace oculta (solo el host la ve). En una única reutilizada solo la oculta si es
+///    `true`; con `false` conserva el estado que tenía.
+pub fn instanciar(est: &EstadoPartida, id_entidad: u16, destino: Option<Destino>, oculto: bool) -> Result<DeltaPartida, String> {
     let entidad = est.banco_entidades.iter().find(|e| e.id == id_entidad).ok_or("Esa ficha no existe")?;
 
     if entidad.es_unico {
         if let Some(existente) = est.instancias_activas.iter().find(|i| i.base.id == id_entidad) {
             // Conserva su giro (y por tanto sus lados) al cambiar de sitio
-            let reutilizada = Instancia { base: entidad.clone(), activo: true, ..existente.clone() };
+            let reutilizada = Instancia { base: entidad.clone(), activo: true, oculto: oculto || existente.oculto, ..existente.clone() };
             let (id_mapa, coordenadas) = colocar(est, tablero::lados_instancia(&reutilizada), destino)?;
             let capa = capa_al_colocar(est, &reutilizada, destino);
             return Ok(DeltaPartida::InstanciaModificada(Instancia { id_mapa, coordenadas, capa, ..reutilizada }));
@@ -68,8 +70,16 @@ pub fn instanciar(est: &EstadoPartida, id_entidad: u16, destino: Option<Destino>
         orden: est.instancias_activas.iter().map(|i| i.orden.saturating_add(1)).max().unwrap_or(0),
         // En el tablero, encima de todas; sin colocar no importa
         capa: if destino.is_some() { capa_superior(est) } else { 0 },
+        oculto,
         atenuada: false,
     }))
+}
+
+/// Oculta o muestra una instancia (solo el host). `None` = alternar. Sin cambio no hay delta.
+pub fn ocultar(est: &EstadoPartida, id_instancia: u16, oculto: Option<bool>) -> Result<Option<DeltaPartida>, String> {
+    let inst = buscar(est, id_instancia)?;
+    let nuevo = oculto.unwrap_or(!inst.oculto);
+    Ok((nuevo != inst.oculto).then(|| DeltaPartida::InstanciaModificada(Instancia { oculto: nuevo, ..inst.clone() })))
 }
 
 /// Pone una instancia en otra casilla (o la quita del tablero con `None`); sigue activa.
@@ -283,18 +293,18 @@ mod tests {
     #[test]
     fn al_llegar_al_ultimo_id_se_reutiliza_el_menor_libre() {
         let mut e = estado();
-        hacer(&mut e, |e| instanciar(e, 1, None));
-        let DeltaPartida::InstanciaCreada(mut ultima) = instanciar(&e, 1, None).unwrap() else { panic!() };
+        hacer(&mut e, |e| instanciar(e, 1, None, false));
+        let DeltaPartida::InstanciaCreada(mut ultima) = instanciar(&e, 1, None, false).unwrap() else { panic!() };
         ultima.id_instancia = u16::MAX;
         e.aplicar_delta(&DeltaPartida::InstanciaCreada(ultima));
-        let DeltaPartida::InstanciaCreada(nueva) = instanciar(&e, 1, None).unwrap() else { panic!("debía crearla") };
+        let DeltaPartida::InstanciaCreada(nueva) = instanciar(&e, 1, None, false).unwrap() else { panic!("debía crearla") };
         assert_eq!(nueva.id_instancia, 2, "el 1 está ocupado y el 65535 también");
     }
 
     #[test]
     fn instanciar_crea_con_id_nuevo_y_valores_al_maximo() {
         let mut e = estado();
-        let d = hacer(&mut e, |e| instanciar(e, 1, en(1, 4, 5)));
+        let d = hacer(&mut e, |e| instanciar(e, 1, en(1, 4, 5), false));
         assert!(matches!(d, DeltaPartida::InstanciaCreada(_)));
 
         let i = &e.instancias_activas[0];
@@ -305,14 +315,14 @@ mod tests {
         assert!(i.activo);
 
         // Una ficha no única puede tener varias instancias
-        hacer(&mut e, |e| instanciar(e, 1, en(1, 0, 0)));
+        hacer(&mut e, |e| instanciar(e, 1, en(1, 0, 0), false));
         assert_eq!(e.instancias_activas.iter().map(|i| i.id_instancia).collect::<Vec<_>>(), vec![1, 2]);
     }
 
     #[test]
     fn instanciar_sin_destino_la_deja_activa_fuera_del_tablero() {
         let mut e = estado();
-        hacer(&mut e, |e| instanciar(e, 1, None));
+        hacer(&mut e, |e| instanciar(e, 1, None, false));
         let i = &e.instancias_activas[0];
         assert_eq!((i.id_mapa, i.coordenadas), (None, Coordenada::NoPuesto));
     }
@@ -320,11 +330,11 @@ mod tests {
     #[test]
     fn una_ficha_unica_se_reutiliza_conservando_sus_valores() {
         let mut e = estado();
-        hacer(&mut e, |e| instanciar(e, 2, en(1, 3, 3)));
+        hacer(&mut e, |e| instanciar(e, 2, en(1, 3, 3), false));
         hacer(&mut e, |e| cambiar_valor_actual(e, 1, ID_VIDA, -12).map(Option::unwrap));
 
         // Arrastrada otra vez desde el banco, a otro mapa
-        let d = hacer(&mut e, |e| instanciar(e, 2, en(2, 7, 1)));
+        let d = hacer(&mut e, |e| instanciar(e, 2, en(2, 7, 1), false));
         assert!(matches!(d, DeltaPartida::InstanciaModificada(_)));
         assert_eq!(e.instancias_activas.len(), 1);
         let i = &e.instancias_activas[0];
@@ -334,10 +344,54 @@ mod tests {
     }
 
     #[test]
+    fn una_instancia_nace_oculta_solo_si_se_pide_y_una_unica_reutilizada_no_se_muestra_sola() {
+        let mut e = estado();
+        hacer(&mut e, |e| instanciar(e, 1, en(1, 1, 1), false));
+        hacer(&mut e, |e| instanciar(e, 1, en(1, 2, 2), true));
+        assert_eq!(e.instancias_activas.iter().map(|i| i.oculto).collect::<Vec<_>>(), vec![false, true]);
+
+        // Una única oculta que se vuelve a arrastrar sin pedir nada sigue oculta; con `true`, también
+        hacer(&mut e, |e| instanciar(e, 2, en(1, 3, 3), true));
+        assert!(e.instancias_activas[2].oculto);
+        hacer(&mut e, |e| instanciar(e, 2, en(1, 4, 4), false));
+        assert!(e.instancias_activas[2].oculto, "arrastrarla con el izquierdo no cambia nada");
+        // Y una visible no se oculta sin pedirlo
+        hacer(&mut e, |e| instanciar(e, 1, None, false));
+        assert!(!e.instancias_activas[0].oculto);
+    }
+
+    #[test]
+    fn ocultar_y_mostrar_alternan_y_sin_cambio_no_hay_delta() {
+        let mut e = estado();
+        hacer(&mut e, |e| instanciar(e, 1, en(1, 1, 1), false));
+        let d = ocultar(&e, 1, None).unwrap().unwrap();
+        e.aplicar_delta(&d);
+        assert!(e.instancias_activas[0].oculto);
+        assert!(ocultar(&e, 1, Some(true)).unwrap().is_none(), "ya estaba oculta");
+        let d = ocultar(&e, 1, Some(false)).unwrap().unwrap();
+        e.aplicar_delta(&d);
+        assert!(!e.instancias_activas[0].oculto);
+        assert!(ocultar(&e, 9, None).is_err());
+        // Mover, girar o espejar no la muestran
+        let d = ocultar(&e, 1, Some(true)).unwrap().unwrap();
+        e.aplicar_delta(&d);
+        hacer(&mut e, |e| mover(e, 1, en(1, 5, 5)));
+        hacer(&mut e, |e| rotar(e, 1));
+        assert!(e.instancias_activas[0].oculto);
+        // Una instancia guardada antes de existir el campo es visible
+        let vieja: Instancia = {
+            let mut v = serde_json::to_value(&e.instancias_activas[0]).unwrap();
+            v.as_object_mut().unwrap().remove("oculto");
+            serde_json::from_value(v).unwrap()
+        };
+        assert!(!vieja.oculto);
+    }
+
+    #[test]
     fn el_destino_se_encaja_con_el_cuerpo_entero() {
         let mut e = estado();
         // 2×3 en la esquina inferior derecha (20×10): el centro queda en (18, 8)
-        hacer(&mut e, |e| instanciar(e, 3, en(1, 19, 9)));
+        hacer(&mut e, |e| instanciar(e, 3, en(1, 19, 9), false));
         assert_eq!(e.instancias_activas[0].coordenadas, Coordenada::Casilla(Casilla { x: 18, y: 8 }));
         // Y en la esquina superior izquierda, en (0, 1)
         hacer(&mut e, |e| mover(e, 1, en(1, 0, 0)));
@@ -347,8 +401,8 @@ mod tests {
     #[test]
     fn errores_de_ficha_mapa_o_instancia_inexistentes() {
         let e = estado();
-        assert!(instanciar(&e, 99, None).is_err());
-        assert!(instanciar(&e, 1, en(99, 0, 0)).is_err());
+        assert!(instanciar(&e, 99, None, false).is_err());
+        assert!(instanciar(&e, 1, en(99, 0, 0), false).is_err());
         assert!(mover(&e, 5, None).is_err());
         assert!(borrar(&e, 5).is_err());
         assert!(cambiar_valor_actual(&e, 5, ID_VIDA, 1).is_err());
@@ -357,8 +411,8 @@ mod tests {
     #[test]
     fn mover_quitar_del_tablero_y_borrar() {
         let mut e = estado();
-        hacer(&mut e, |e| instanciar(e, 1, None));
-        hacer(&mut e, |e| instanciar(e, 1, None));
+        hacer(&mut e, |e| instanciar(e, 1, None, false));
+        hacer(&mut e, |e| instanciar(e, 1, None, false));
 
         hacer(&mut e, |e| mover(e, 2, en(2, 5, 5)));
         assert_eq!(e.instancias_activas[1].id_mapa, Some(2));
@@ -370,7 +424,7 @@ mod tests {
         hacer(&mut e, |e| borrar(e, 1));
         assert_eq!(e.instancias_activas.iter().map(|i| i.id_instancia).collect::<Vec<_>>(), vec![2]);
         // El id de una instancia borrada no se reutiliza mientras haya una mayor
-        hacer(&mut e, |e| instanciar(e, 1, None));
+        hacer(&mut e, |e| instanciar(e, 1, None, false));
         assert_eq!(e.instancias_activas.last().unwrap().id_instancia, 3);
     }
 
@@ -378,7 +432,7 @@ mod tests {
     fn rotar_intercambia_los_lados_y_reencaja_junto_al_borde() {
         let mut e = estado();
         // 2×3 pegado a la derecha (20×10): centro (18, 5), ocupa x 18..19
-        hacer(&mut e, |e| instanciar(e, 3, en(1, 19, 5)));
+        hacer(&mut e, |e| instanciar(e, 3, en(1, 19, 5), false));
         assert_eq!(tablero::lados_instancia(&e.instancias_activas[0]), (2, 3));
 
         // Girado es 3×2: ocuparía x 17..19 con el mismo centro, cabe
@@ -406,7 +460,7 @@ mod tests {
     #[test]
     fn espejar_solo_cambia_el_aspecto_y_se_puede_deshacer_con_otro_espejo() {
         let mut e = estado();
-        hacer(&mut e, |e| instanciar(e, 3, en(1, 5, 5)));
+        hacer(&mut e, |e| instanciar(e, 3, en(1, 5, 5), false));
         let antes = e.instancias_activas[0].clone();
         assert!(!antes.espejo);
 
@@ -437,9 +491,9 @@ mod tests {
     fn una_unica_reutilizada_conserva_su_giro() {
         let mut e = estado();
         e.banco_entidades[1].cuerpo = Cuerpo::Grande(vec![1, 3]);
-        hacer(&mut e, |e| instanciar(e, 2, en(1, 5, 5)));
+        hacer(&mut e, |e| instanciar(e, 2, en(1, 5, 5), false));
         hacer(&mut e, |e| rotar(e, 1));
-        hacer(&mut e, |e| instanciar(e, 2, en(2, 0, 0)));
+        hacer(&mut e, |e| instanciar(e, 2, en(2, 0, 0), false));
         let i = &e.instancias_activas[0];
         assert_eq!(i.rotacion, 1);
         // 3×1 en la esquina: el centro en x=1
@@ -450,7 +504,7 @@ mod tests {
     fn el_orden_de_las_fichas_activas() {
         let mut e = estado();
         for _ in 0..3 {
-            hacer(&mut e, |e| instanciar(e, 1, None));
+            hacer(&mut e, |e| instanciar(e, 1, None, false));
         }
         assert_eq!(e.instancias_activas.iter().map(|i| i.orden).collect::<Vec<_>>(), vec![0, 1, 2]);
 
@@ -459,7 +513,7 @@ mod tests {
         assert_eq!((orden(&e, 3), orden(&e, 1), orden(&e, 2)), (0, 1, 2));
 
         // Una nueva va al final
-        hacer(&mut e, |e| instanciar(e, 1, None));
+        hacer(&mut e, |e| instanciar(e, 1, None, false));
         assert_eq!(orden(&e, 4), 3);
 
         // Faltan o sobran ids: no
@@ -478,8 +532,8 @@ mod tests {
     #[test]
     fn la_ficha_que_se_pone_o_se_mueve_queda_encima() {
         let mut e = estado();
-        hacer(&mut e, |e| instanciar(e, 1, en(1, 1, 1)));
-        hacer(&mut e, |e| instanciar(e, 1, en(1, 1, 1)));
+        hacer(&mut e, |e| instanciar(e, 1, en(1, 1, 1), false));
+        hacer(&mut e, |e| instanciar(e, 1, en(1, 1, 1), false));
         let capa = |e: &EstadoPartida, id: u16| e.instancias_activas.iter().find(|i| i.id_instancia == id).unwrap().capa;
         assert!(capa(&e, 2) > capa(&e, 1), "la última puesta, encima");
 
@@ -502,9 +556,9 @@ mod tests {
     #[test]
     fn un_grupo_se_mueve_conservando_distancias_y_apilado() {
         let mut e = estado(); // mapa 1: 20×10
-        hacer(&mut e, |e| instanciar(e, 1, en(1, 2, 2))); // 1
-        hacer(&mut e, |e| instanciar(e, 1, en(1, 5, 4))); // 2 (encima de la 1)
-        hacer(&mut e, |e| instanciar(e, 1, en(1, 9, 9))); // 3, no se mueve
+        hacer(&mut e, |e| instanciar(e, 1, en(1, 2, 2), false)); // 1
+        hacer(&mut e, |e| instanciar(e, 1, en(1, 5, 4), false)); // 2 (encima de la 1)
+        hacer(&mut e, |e| instanciar(e, 1, en(1, 9, 9), false)); // 3, no se mueve
 
         let deltas = mover_grupo(&e, &[2, 1], 1, 3, 1).unwrap();
         assert_eq!(deltas.len(), 2);
@@ -527,7 +581,7 @@ mod tests {
 
         // Errores: otro mapa, una sin colocar, una inexistente o repetida
         assert!(mover_grupo(&e, &[1], 2, 0, 0).is_err());
-        hacer(&mut e, |e| instanciar(e, 1, None)); // 4
+        hacer(&mut e, |e| instanciar(e, 1, None, false)); // 4
         assert!(mover_grupo(&e, &[1, 4], 1, 0, 0).is_err());
         assert!(mover_grupo(&e, &[1, 99], 1, 0, 0).is_err());
         assert!(mover_grupo(&e, &[1, 1], 1, 0, 0).is_err());
@@ -536,7 +590,7 @@ mod tests {
     #[test]
     fn el_valor_actual_puede_pasar_del_maximo_y_bajar_de_cero() {
         let mut e = estado();
-        hacer(&mut e, |e| instanciar(e, 1, None));
+        hacer(&mut e, |e| instanciar(e, 1, None, false));
         let vida = |e: &EstadoPartida| e.instancias_activas[0].valores_actuales[0].valor;
 
         // El máximo (30) es el valor por defecto: se puede tener más (vida extra)...

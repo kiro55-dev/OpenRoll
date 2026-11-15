@@ -600,15 +600,16 @@ pub fn obtener_instancias_activas(state: State<'_, AppState>) -> Vec<Instancia> 
 /// Una ficha única que ya tenía instancia la reutiliza. Devuelve la instancia resultante.
 #[tauri::command]
 pub fn instanciar_entidad(id_entidad: u16,
-    destino: Option<instancias::Destino>, state: State<'_, AppState>) -> Result<Instancia, String> {
-    instanciar_entidad_en(id_entidad, destino, &state)
+    destino: Option<instancias::Destino>, oculto: Option<bool>, state: State<'_, AppState>) -> Result<Instancia, String> {
+    instanciar_entidad_en(id_entidad, destino, oculto.unwrap_or(false), &state)
 }
 
 /// Lo que hace `instanciar_entidad`, con el estado ya en la mano (así también lo ejecuta el host a petición de un jugador).
+/// `oculto`: solo lo pone el host (arrastrar con el botón derecho); un jugador siempre pasa `false`.
 pub fn instanciar_entidad_en(id_entidad: u16,
-    destino: Option<instancias::Destino>, state: &AppState) -> Result<Instancia, String> {
+    destino: Option<instancias::Destino>, oculto: bool, state: &AppState) -> Result<Instancia, String> {
     let mut est = state.lock();
-    let delta = instancias::instanciar(&est, id_entidad, destino)?;
+    let delta = instancias::instanciar(&est, id_entidad, destino, oculto)?;
     let (DeltaPartida::InstanciaCreada(i) | DeltaPartida::InstanciaModificada(i)) = &delta else {
         unreachable!("instanciar solo crea o modifica")
     };
@@ -623,13 +624,13 @@ pub fn instanciar_entidad_en(id_entidad: u16,
 /// él, todas quedan activas sin colocar. Cada una es un delta normal, registrado en orden bajo el mismo lock.
 #[tauri::command]
 pub fn instanciar_entidades(ids: Vec<u16>,
-    destino: Option<instancias::Destino>, state: State<'_, AppState>) -> Result<Vec<Instancia>, String> {
-    instanciar_entidades_en(ids, destino, &state)
+    destino: Option<instancias::Destino>, oculto: Option<bool>, state: State<'_, AppState>) -> Result<Vec<Instancia>, String> {
+    instanciar_entidades_en(ids, destino, oculto.unwrap_or(false), &state)
 }
 
 /// Lo que hace `instanciar_entidades`, con el estado ya en la mano (así también lo ejecuta el host a petición de un jugador).
 pub fn instanciar_entidades_en(ids: Vec<u16>,
-    destino: Option<instancias::Destino>, state: &AppState) -> Result<Vec<Instancia>, String> {
+    destino: Option<instancias::Destino>, oculto: bool, state: &AppState) -> Result<Vec<Instancia>, String> {
     let mut est = state.lock();
     let mut destinos: Vec<Option<instancias::Destino>> = vec![None; ids.len()];
     if let Some(d) = destino {
@@ -649,7 +650,7 @@ pub fn instanciar_entidades_en(ids: Vec<u16>,
 
     let mut creadas = Vec::new();
     for (id, destino) in ids.into_iter().zip(destinos) {
-        let delta = instancias::instanciar(&est, id, destino)?;
+        let delta = instancias::instanciar(&est, id, destino, oculto)?;
         if let DeltaPartida::InstanciaCreada(i) | DeltaPartida::InstanciaModificada(i) = &delta {
             creadas.push(i.clone());
         }
@@ -713,6 +714,17 @@ pub fn espejar_instancia_en(id_instancia: u16, state: &AppState) -> Result<(), S
     let mut est = state.lock();
     let delta = instancias::espejar(&est, id_instancia)?;
     registrar(&mut est, &state.almacen, delta);
+    Ok(())
+}
+
+/// Oculta o muestra una instancia: oculta, solo el host la ve (a los jugadores no se les envía nada). Solo el host:
+/// no está en la lista blanca de los jugadores. `oculto` `None` = alternar.
+#[tauri::command]
+pub fn ocultar_instancia(id_instancia: u16, oculto: Option<bool>, state: State<'_, AppState>) -> Result<(), String> {
+    let mut est = state.lock();
+    if let Some(delta) = instancias::ocultar(&est, id_instancia, oculto)? {
+        registrar(&mut est, &state.almacen, delta);
+    }
     Ok(())
 }
 
@@ -1022,8 +1034,16 @@ pub fn borrar_mapa(mapa: Mapa, state: State<'_, AppState>) -> Result<(), String>
 /// emitirá al front el evento de Tauri "aviso-tablero" con el mismo contenido (src/lib/avisosTablero.ts).
 #[tauri::command]
 pub fn avisar_tablero(aviso: AvisoTablero, state: State<'_, AppState>) -> Result<(), String> {
+    let mut aviso = aviso;
     let compartidos = {
         let est = state.lock();
+        // Mover una instancia OCULTA no debe enseñar su camino a los jugadores
+        if let AvisoTablero::Arrastre { piezas, .. } = &mut aviso {
+            piezas.retain(|p| !est.instancias_activas.iter().any(|i| i.id_instancia == p.id_instancia && i.oculto));
+            if piezas.is_empty() {
+                return Ok(());
+            }
+        }
         match aviso.id_mapa() {
             Some(id) => aviso.validar(est.mapas.iter().find(|m| m.id == id).ok_or("Ese mapa no existe")?)?,
             None => {

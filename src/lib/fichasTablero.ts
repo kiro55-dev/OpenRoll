@@ -142,6 +142,8 @@ export function dibujarFicha(
     marcadaParaMover?: boolean;
     focoAjeno?: boolean;
     apagada?: boolean;
+    /** Instancia oculta (solo la ve el host): al 50 % de transparencia. */
+    oculta?: boolean;
     /** Otro la está arrastrando: se ve semitransparente por donde pasa */
     fantasma?: boolean;
     en?: { x: number; y: number };
@@ -161,6 +163,7 @@ export function dibujarFicha(
     ctx.filter = "grayscale(100%)";
   }
   if (opciones.fantasma) ctx.globalAlpha *= 0.65;
+  if (opciones.oculta) ctx.globalAlpha *= 0.5;
   if (opciones.sombra) {
     ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
     ctx.shadowBlur = 14;

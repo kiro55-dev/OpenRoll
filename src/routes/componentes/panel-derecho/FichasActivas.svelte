@@ -102,6 +102,7 @@
       class="tarjeta"
       class:seleccionado={partida.estaSeleccionada(ficha.id_instancia)}
       class:caida={partida.estaCaida(ficha)}
+      class:oculta={ficha.oculto}
       class:foco-ajeno={partida.idsFocoAjeno.includes(ficha.id_instancia) && !partida.estaSeleccionada(ficha.id_instancia)}
       class:arrastrada={idArrastrada === ficha.id_instancia}
       class:recibe-jugador={arrastreJugador.actual?.idEntidad === ficha.base.id}
@@ -156,6 +157,36 @@
             >{partida.valorMostrado(ficha, r.id)}/{numeroDe(ficha.base, r.id)}</span>
           {/each}
         </div>
+      {/if}
+
+      <!-- Solo el host: ojo abierto = la ven los jugadores; cerrado = oculta (solo la ve el host). Pulsarlo alterna. -->
+      {#if !esJugador}
+        <span
+          class="ojo"
+          class:cerrado={ficha.oculto}
+          role="button"
+          tabindex="-1"
+          aria-label={ficha.oculto ? "Mostrar a los jugadores" : "Ocultar a los jugadores"}
+          aria-pressed={!!ficha.oculto}
+          title={ayuda(ficha.oculto ? "Oculta: solo la ves tú. Pulsa para mostrarla a los jugadores" : "Visible para los jugadores. Pulsa para ocultarla")}
+          onpointerdown={(e) => e.stopPropagation()}
+          onclick={(e) => {
+            e.stopPropagation();
+            void partida.ocultarInstancia(ficha.id_instancia, !ficha.oculto);
+          }}
+          onkeydown={(e) => e.stopPropagation()}
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            {#if ficha.oculto}
+              <!-- Ojo cerrado: párpado y pestañas -->
+              <path d="M3 10c2.2 3.2 5.2 5 9 5s6.8-1.8 9-5" />
+              <path d="M5 13l-2 3M9.5 15.2L8.5 18.5M14.5 15.2l1 3.3M19 13l2 3" />
+            {:else}
+              <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+              <circle cx="12" cy="12" r="3" />
+            {/if}
+          </svg>
+        </span>
       {/if}
     </button>
   {/each}
@@ -281,6 +312,15 @@
   .texto { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .nombre { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: bold; }
   .donde { font-size: 10px; color: #71717a; }
+
+  /* Una oculta se ve algo apagada (el host la ve al 50 % también en el tablero) */
+  .tarjeta.oculta .foto, .tarjeta.oculta .texto { opacity: 0.55; }
+  .ojo {
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 4px; color: #a1a1aa; cursor: pointer;
+  }
+  .ojo:hover { background: #3f3f46; color: #f4f4f5; }
+  .ojo.cerrado { color: #f59e0b; }
 
   .resumen { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 12px; font-weight: bold; }
   .resumen span { padding: 0 3px; border-radius: 3px; }

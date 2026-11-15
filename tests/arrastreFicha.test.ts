@@ -41,6 +41,21 @@ describe("accionAlSoltar", () => {
     expect(accionAlSoltar(origen, "banco", null)).toBeNull();
   });
 
+  it("arrastrar desde el banco con el botón derecho instancia oculto; el resto de acciones no cambia", () => {
+    const una = { entidad: base(7) };
+    const varias = { entidades: [base(7), base(3)] };
+    expect(accionAlSoltar(una, "tablero", destino, [], null, true)).toEqual({ tipo: "instanciar", idEntidad: 7, destino, oculto: true });
+    expect(accionAlSoltar(una, "activas", null, [], null, true)).toEqual({ tipo: "instanciar", idEntidad: 7, destino: null, oculto: true });
+    expect(accionAlSoltar(varias, "tablero", destino, [], null, true)).toEqual({ tipo: "instanciarVarias", idsEntidades: [7, 3], destino, oculto: true });
+    expect(accionAlSoltar(varias, "activas", null, [], null, true)).toEqual({ tipo: "instanciarVarias", idsEntidades: [7, 3], destino: null, oculto: true });
+    // Sin pedirlo (botón izquierdo) la acción ni lleva el campo
+    expect(accionAlSoltar(una, "tablero", destino, [], null, false)).toEqual({ tipo: "instanciar", idEntidad: 7, destino });
+    expect(accionAlSoltar(una, "banco", null, [], null, true)).toBeNull();
+    // Mover una instancia nunca cambia si está oculta
+    const colocada = { instancia: instancia(4, 1, { x: 0, y: 0 }), desde: "tablero" as const };
+    expect(accionAlSoltar(colocada, "tablero", destino, [], null, true)).toEqual({ tipo: "mover", idInstancia: 4, destino });
+  });
+
   it("una instancia se mueve en el tablero, sale de él en «Fichas activas» y se elimina en el banco", () => {
     const colocada = { instancia: instancia(4, 1, { x: 0, y: 0 }), desde: "tablero" as const };
     expect(accionAlSoltar(colocada, "tablero", destino)).toEqual({ tipo: "mover", idInstancia: 4, destino });
@@ -171,6 +186,27 @@ describe("formas de los parámetros en el tablero", () => {
     const sinForma = { ...rango, id: 4, representar_mapa: null };
     expect([rango, vida, resumen, sinForma].map((d) => fichas.parametroOculto("Objeto", d))).toEqual([true, true, false, false]);
     expect([rango, vida].map((d) => fichas.parametroOculto("Enemigo", d))).toEqual([false, false]);
+  });
+});
+
+describe("instancias ocultas en el tablero", () => {
+  it("una oculta se dibuja al 50 % de transparencia y una visible, al 100 %", () => {
+    const alfas = (oculta: boolean | undefined) => {
+      const valores: number[] = [];
+      let alfa = 1;
+      const ctx: any = new Proxy({}, {
+        get: (_t, nombre: string) => {
+          if (nombre === "globalAlpha") return alfa;
+          return nombre === "save" || nombre === "restore" ? () => {} : () => { valores.push(alfa); };
+        },
+        set: (_t, nombre: string, v: any) => { if (nombre === "globalAlpha") alfa = v; return true; }
+      });
+      const rejilla = { columnas: 10, filas: 8, anchoCasilla: 10, altoCasilla: 10, ancho: 100, alto: 80 };
+      fichas.dibujarFicha(ctx, { x: 0, y: 0, zoom: 1 }, rejilla, { instancia: instancia(1, 1, { x: 4, y: 4 }), casilla: { x: 4, y: 4 } }, null, { oculta });
+      return new Set(valores);
+    };
+    expect(alfas(undefined)).toEqual(new Set([1]));
+    expect(alfas(true)).toEqual(new Set([0.5]));
   });
 });
 

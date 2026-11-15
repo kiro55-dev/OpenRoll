@@ -199,7 +199,7 @@ mod tests {
             id_instancia: id, id_mapa, base,
             valores_actuales: vec![ValorActual { id_definicion: ID_VIDA, valor: 15 }],
             coordenadas: if id_mapa.is_some() { Coordenada::Casilla(Casilla { x: 1, y: 1 }) } else { Coordenada::NoPuesto },
-            activo: true, rotacion: 0, espejo: false, orden: id, capa: 0, atenuada: false,
+            activo: true, rotacion: 0, espejo: false, orden: id, capa: 0, oculto: false, atenuada: false,
         }
     }
 
@@ -239,6 +239,30 @@ mod tests {
         assert_eq!(ids(&otro.instancias, |i| i.id_instancia), vec![2]);
         assert!(otro.entidades.is_empty());
         assert!(otro.definiciones.iter().all(|d| d.id != ID_VIDA), "ni el nombre de la vida privada");
+    }
+
+    #[test]
+    fn una_instancia_oculta_no_le_llega_a_ningun_jugador_ni_a_su_dueno_y_el_host_la_ve() {
+        let mut e = estado();
+        let antes = vista_para(1, &e);
+        assert_eq!(ids(&antes.instancias, |i| i.id_instancia), vec![1, 2]);
+
+        e.instancias_activas[0].oculto = true; // la de Ana
+        e.instancias_activas[1].oculto = true; // la del mapa compartido
+        let despues = vista_para(1, &e);
+        assert!(despues.instancias.is_empty(), "ni la suya");
+        assert!(vista_para(7, &e).instancias.is_empty());
+        assert_eq!(ids(&vista_para(ID_HOST, &e).instancias, |i| i.id_instancia), vec![1, 2], "el host las ve");
+        // Su ficha del banco sigue siendo suya, pero la foto de la oculta ya no se sirve por la instancia
+        assert_eq!(ids(&despues.entidades, |e| e.id), vec![10]);
+
+        // Al ocultarla, el jugador la recibe como quitada; al mostrarla, como nueva
+        let c = diferencias(&antes, &despues).unwrap();
+        assert_eq!(c.instancias_quitadas, vec![1, 2]);
+        assert!(c.instancias.is_empty());
+        e.instancias_activas[1].oculto = false;
+        let c = diferencias(&despues, &vista_para(1, &e)).unwrap();
+        assert_eq!(ids(&c.instancias, |i| i.id_instancia), vec![2]);
     }
 
     #[test]
