@@ -63,6 +63,9 @@ pub fn parece_variable(texto: &str) -> bool {
 /// La variable que nombra `texto` (por nombre o abreviatura, sin distinguir mayúsculas).
 pub fn buscar<'a>(defs: &'a [DefinicionVariable], texto: &str) -> Option<&'a DefinicionVariable> {
     let k = clave(texto);
+    if k.is_empty() {
+        return None;
+    }
     defs.iter().find(|d| clave(&d.nombre) == k || clave(&d.abreviatura) == k)
 }
 
@@ -73,9 +76,7 @@ pub fn validar_definicion(otras: &[DefinicionVariable], d: &DefinicionVariable) 
     if nombre.is_empty() {
         return Err("La variable necesita un nombre".into());
     }
-    if abreviatura.is_empty() {
-        return Err("La variable necesita una abreviatura".into());
-    }
+    // La abreviatura es opcional: sin ella se tira con el nombre completo
     if nombre.chars().count() > MAX_NOMBRE_VARIABLE {
         return Err(format!("El nombre de la variable no puede pasar de {MAX_NOMBRE_VARIABLE} caracteres"));
     }
@@ -88,7 +89,7 @@ pub fn validar_definicion(otras: &[DefinicionVariable], d: &DefinicionVariable) 
     if !abreviatura.chars().all(char::is_alphabetic) {
         return Err("La abreviatura solo puede llevar letras (sin espacios)".into());
     }
-    for texto in [nombre, abreviatura] {
+    for texto in [nombre, abreviatura].into_iter().filter(|t| !t.is_empty()) {
         if PALABRAS_RESERVADAS.contains(&clave(texto).as_str()) {
             return Err(format!("«{texto}» está reservado en el chat de dados"));
         }
@@ -164,7 +165,6 @@ pub mod pruebas {
         assert!(validar_definicion(&otras, &var(2, "Fuerza mágica", "fm", 10, 2)).is_ok(), "acentos y espacios en el nombre");
         for mala in [
             var(2, "", "x", 10, 2),
-            var(2, "Inteligencia", "", 10, 2),
             var(2, "Fuerza", "fz", 10, 2),
             var(2, "Fe", "F", 10, 2),
             var(2, "f", "x", 10, 2),
@@ -181,6 +181,11 @@ pub mod pruebas {
         ] {
             assert!(validar_definicion(&otras, &mala).is_err(), "{mala:?}");
         }
+        // La abreviatura es opcional, y varias variables pueden no tenerla
+        let sin = vec![var(1, "Fuerza", "", 10, 2)];
+        assert!(validar_definicion(&sin, &var(2, "Destreza", "", 10, 2)).is_ok());
+        assert!(buscar(&[var(1, "Fuerza", "", 10, 2)], "").is_none());
+        assert_eq!(buscar(&[var(1, "Fuerza", "", 10, 2)], "fuerza").unwrap().id, 1);
         let muchas: Vec<_> = (0..MAX_VARIABLES as u16).map(|i| var(i, &"a".repeat(i as usize + 1), &"b".repeat(i as usize % 9 + 1), 10, 2)).collect();
         assert!(validar_definicion(&muchas, &var(99, "Otra", "z", 10, 2)).unwrap_err().contains("más de"));
     }

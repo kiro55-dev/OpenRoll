@@ -27,7 +27,8 @@
     </button>
   {/if}
 </div>
-<div class="recuadro-chat-tiradas">
+<!-- data-conserva-foco: escribir o pulsar en el chat no quita el foco a la ficha (de ella salen las variables) -->
+<div class="recuadro-chat-tiradas" data-conserva-foco>
   <ListaTiradas />
   <EntradaComando />
 </div>

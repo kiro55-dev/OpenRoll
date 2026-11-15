@@ -30,13 +30,15 @@ fn resolver_variable(
 ) -> Result<(String, i32), String> {
     let def = variables::buscar(&est.definiciones_variables, texto)
         .ok_or_else(|| format!("«{}» no es una variable", texto.trim()))?;
-    let id = id_instancia.ok_or("Pon el foco en una ficha (solo una) para usar sus variables")?;
+    let id = id_instancia.ok_or("Elige primero una ficha (púlsala) para usar sus variables")?;
     let inst = est.instancias_activas.iter().find(|i| i.id_instancia == id).ok_or("Esa ficha ya no está activa")?;
     if !controla_instancia(est, jugador, id) {
         return Err("Solo puedes usar las variables de tus fichas".into());
     }
     let valor = inst.base.variables.iter().find(|v| v.id_definicion == def.id).map_or(def.neutro, |v| v.valor);
-    Ok((def.abreviatura.clone(), variables::modificador(def, valor)))
+    // En el desglose, la abreviatura que definió el host o, sin ella, el nombre
+    let nombre = if def.abreviatura.is_empty() { &def.nombre } else { &def.abreviatura };
+    Ok((nombre.clone(), variables::modificador(def, valor)))
 }
 
 // Resalta en negrita si es 1 (pifia) o el valor máximo de caras (crítico)
@@ -412,7 +414,12 @@ mod tests {
     #[test]
     fn las_variables_necesitan_foco_existir_y_ser_de_quien_tira() {
         let e = partida_con_variables();
-        assert!(tirar_con(&e, ID_HOST, None, "1d20 + f").unwrap_err().contains("foco"));
+        assert!(tirar_con(&e, ID_HOST, None, "1d20 + f").unwrap_err().contains("Elige primero una ficha"));
+        // Sin abreviatura se tira por el nombre y el desglose lo lleva
+        let mut sin = e.clone();
+        sin.definiciones_variables[0].abreviatura.clear();
+        assert_eq!(tirar_con(&sin, ID_HOST, Some(1), "fuerza").unwrap(), ("Fuerza (+1)".into(), 1));
+        assert!(tirar_con(&sin, ID_HOST, Some(1), "f").is_err());
         assert!(tirar_con(&e, ID_HOST, Some(9), "1d20 + f").unwrap_err().contains("ya no está activa"));
         assert!(tirar_con(&e, ID_HOST, Some(1), "1d20 + fu").unwrap_err().contains("no es una variable"));
         assert_eq!(tirar_con(&e, 3, Some(1), "1d1 + f").unwrap().1, 2, "Ana usa las de su ficha");

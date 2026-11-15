@@ -253,6 +253,34 @@ describe("arranque", () => {
   });
 });
 
+describe("ficha de la que salen las variables de una tirada", () => {
+  it("la que tiene el foco; sin él, la última que lo tuvo sola mientras exista", async () => {
+    const partida = await nuevoStore();
+    expect(partida.fichaParaVariables).toBeNull(); // nunca hubo foco
+
+    partida.seleccionarInstancia(partida.instancias[0]);
+    expect(partida.fichaParaVariables).toBe(1);
+
+    // Sin foco (se pulsó el tablero): sigue siendo la última
+    partida.seleccionarInstancia(null);
+    expect(partida.idsSeleccionados).toEqual([]);
+    expect(partida.fichaParaVariables).toBe(1);
+
+    // Con varias a la vez se usa la última que tuvo el foco sola; con otra sola, esa
+    partida.seleccionarInstancia(partida.instancias[0]);
+    partida.seleccionarInstancia(partida.instancias[1], true);
+    expect(partida.fichaParaVariables).toBe(1);
+    partida.seleccionarInstancia(partida.instancias[1]);
+    expect(partida.fichaParaVariables).toBe(2);
+
+    // Si esa instancia desaparece, no se usa
+    partida.seleccionarInstancia(null);
+    backend.instancias = backend.instancias.filter((i) => i.id_instancia !== 2);
+    await partida.recargarEntidades();
+    expect(partida.fichaParaVariables).toBeNull();
+  });
+});
+
 describe("punto 4: borrar la zona seleccionada", () => {
   it("pasa a la zona vecina y muestra SUS mapas (antes se quedaba con los de la zona borrada)", async () => {
     const partida = await nuevoStore();

@@ -269,6 +269,19 @@ describe("enviar y botón TIRAR", () => {
     expect(tiradas.comando).toBe("");
   });
 
+  it("el bonificador también puede ser texto del chat (variables)", async () => {
+    const { tiradas, comandoConBonificador } = await nuevoStore();
+    const casos: [string | number | null, string][] = [
+      ["f", "1d20 + f"], ["-f", "1d20 - f"], ["- fuerza", "1d20 - fuerza"], ["+ f", "1d20 + f"],
+      ["  2 ", "1d20 + 2"], ["-3", "1d20 - 3"], ["f + 2", "1d20 + f + 2"], ["", "1d20"], ["0", "1d20"], [null, "1d20"], [0, "1d20"]
+    ];
+    for (const [bonif, esperado] of casos) expect(comandoConBonificador("1d20", bonif), String(bonif)).toBe(esperado);
+
+    tiradas.comando = "1d20";
+    await tiradas.tirarConBonificador("-f");
+    expect(llamadas.find((l) => l.cmd === "tirar_dado")?.args.comando).toBe("1d20 - f");
+  });
+
   it("TIRAR con la caja vacía no hace nada", async () => {
     const { tiradas } = await nuevoStore();
     await tiradas.tirarConBonificador(3);

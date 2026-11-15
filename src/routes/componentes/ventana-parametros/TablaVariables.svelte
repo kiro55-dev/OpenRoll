@@ -28,14 +28,22 @@
 
   $effect(() => lista.sincronizar(partida.definicionesVariables.map((d, i) => ({ ...d, orden: i }))));
 
-  /** Hay una fila nueva abierta; `claveNueva` la renueva (vacía) tras crear una con Enter. */
-  let nueva = $state(partida.definicionesVariables.length === 0);
-  let claveNueva = $state(0);
+  // Filas nuevas a medias (borradores). Viven aquí, no en Rust: «Añadir» siempre vale, un borrador con nombre se
+  // crea al salir de su fila y uno sin nombre se queda sin más (y se pierde al cerrar la pestaña).
+  let borradores = $state<number[]>(partida.definicionesVariables.length === 0 ? [0] : []);
+  let siguiente = partida.definicionesVariables.length === 0 ? 1 : 0;
 
-  function alCrear(conEnter: boolean) {
-    if (conEnter) claveNueva++;
-    else nueva = false;
+  function anadir() {
+    borradores.push(siguiente++);
   }
+
+  /** El borrador ya es una variable de Rust (aparece en la lista): se quita; con Enter se deja otro vacío listo. */
+  function alCrear(clave: number, conEnter: boolean) {
+    borradores = borradores.filter((c) => c !== clave);
+    if (conEnter) anadir();
+  }
+
+  const descartar = (clave: number) => (borradores = borradores.filter((c) => c !== clave));
 </script>
 
 <p class="ayuda">
@@ -53,22 +61,24 @@
       <FilaVariable
         definicion={d}
         indice={i}
+        ejemplo={i === 0}
         arrastrando={lista.activo && lista.item?.id === d.id}
         onIniciarArrastre={(e) => lista.iniciar(d, i, e)}
         {onError}
       />
     </div>
   {/each}
-  {#if nueva}
-    {#key claveNueva}
-      <FilaVariable {onError} onCreada={alCrear} onDescartar={() => (nueva = false)} />
-    {/key}
-  {:else if lista.visuales.length === 0}
-    <div class="vacio">No hay variables.</div>
-  {/if}
+  {#each borradores as clave, k (clave)}
+    <FilaVariable
+      ejemplo={lista.visuales.length === 0 && k === 0}
+      {onError}
+      onCreada={(conEnter) => alCrear(clave, conEnter)}
+      onDescartar={() => descartar(clave)}
+    />
+  {/each}
 </div>
 
-<button type="button" class="btn-crear" onclick={() => (nueva = true)} disabled={nueva}>+ Añadir variable</button>
+<button type="button" class="btn-crear" onclick={anadir}>+ Añadir variable</button>
 
 <ArrastreFlotante {lista}>
   {#if lista.item}
@@ -87,13 +97,11 @@
     padding: 0 7px; color: #71717a; font-size: 10px; font-weight: 600;
   }
   .lista { display: flex; flex-direction: column; gap: 3px; max-height: 280px; overflow-y: auto; }
-  .vacio { color: #71717a; font-size: 10px; padding: 8px; text-align: center; }
   .btn-crear {
     padding: 6px; border-radius: 5px; cursor: pointer; font-size: 11px; font-weight: 600;
     background: transparent; border: 1px dashed #52525b; color: #a1a1aa;
   }
-  .btn-crear:hover:not(:disabled) { border-color: #3b82f6; color: white; }
-  .btn-crear:disabled { opacity: 0.4; cursor: default; }
+  .btn-crear:hover { border-color: #3b82f6; color: white; }
   .flotante {
     height: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 4px 8px;
     background: #27272a; border: 1px solid #3f3f46; border-radius: 5px; font-size: 11px; color: #f4f4f5;

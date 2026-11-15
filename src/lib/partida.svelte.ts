@@ -263,6 +263,16 @@ class Partida {
   idsFocoAjeno = $state<number[]>([]);
   /** Último foco propio avisado a los demás, para no repetirlo. */
   #focoAvisado: number[] = [];
+  /** La última instancia que tuvo el foco ELLA SOLA: de ella salen las variables de una tirada cuando ahora no hay foco. */
+  #ultimaConFoco: number | null = null;
+
+  /** La instancia de la que salen las variables de una tirada (`2d6 + f`): la que tiene el foco si es una sola; si no,
+   *  la última que lo tuvo, mientras siga existiendo. `null` si no hay ninguna. */
+  get fichaParaVariables(): number | null {
+    if (this.instanciaSeleccionada) return this.instanciaSeleccionada.id_instancia;
+    const ultima = this.#ultimaConFoco;
+    return ultima !== null && this.instancias.some((i) => i.id_instancia === ultima) ? ultima : null;
+  }
 
   valoresPendientes = $state<Record<string, number>>({});
   #temporizadorValores: ReturnType<typeof setTimeout> | null = null;
@@ -432,6 +442,7 @@ class Partida {
     this.zonaId = null;
     this.mapaActual = null;
     this.idsSeleccionados = [];
+    this.#ultimaConFoco = null;
     this.rejilla = { ...REJILLA_DEFECTO };
     miniaturas.limpiar(); // sus URLs llevan dentro la carpeta de la partida anterior
     await this.iniciar();
@@ -654,6 +665,7 @@ class Partida {
   // Cambia el foco propio, guarda lo pendiente de las fichas que lo pierden y avisa a los demás.
   #cambiarFoco(nuevos: number[]) {
     this.idsSeleccionados = nuevos;
+    if (nuevos.length === 1) this.#ultimaConFoco = nuevos[0];
     void this.guardarValoresPendientes();
     // El foco es solo de este momento: se avisa (por red, cuando la haya) pero no se guarda en disco
     const igual = nuevos.length === this.#focoAvisado.length && nuevos.every((id, i) => id === this.#focoAvisado[i]);
@@ -1233,5 +1245,5 @@ class Partida {
 
 export const partida = new Partida();
 
-// Las variables de una tirada (`2d6 + f`) salen de la ficha con el foco, si hay una sola
-tiradas.fichaConFoco = () => partida.instanciaSeleccionada?.id_instancia ?? null;
+// Las variables de una tirada (`2d6 + f`) salen de la ficha con el foco o, sin él, de la última que lo tuvo
+tiradas.fichaConFoco = () => partida.fichaParaVariables;

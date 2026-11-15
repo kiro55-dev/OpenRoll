@@ -200,7 +200,7 @@
               {@const resultado = editor.resultadoVariable(d)}
               <tr>
                 <td class="nombre">{d.nombre}</td>
-                <td class="abreviatura">{d.abreviatura}</td>
+                <td class="abreviatura">{d.abreviatura || "—"}</td>
                 <td>
                   <CampoNumero
                     min={-LIMITE_VALOR_VARIABLE}
@@ -217,7 +217,7 @@
           </tbody>
         </table>
         <p class="ayuda" title={ayuda("Si hay varias fichas con el foco, o ninguna, una tirada con variables da error")}>
-          En el chat, con el foco en una instancia de esta ficha: «2d6 + {editor.variables[0].abreviatura}» suma su resultado.
+          En el chat, con el foco en una instancia de esta ficha: «2d6 + {editor.variables[0].abreviatura || editor.variables[0].nombre}» suma su resultado.
         </p>
       {/if}
     </div>

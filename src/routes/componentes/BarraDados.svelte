@@ -3,7 +3,8 @@
   import { ayuda } from "$lib/ajustesVista.svelte";
   let { onSumarAlChat, onRestarDelChat, onLanzarTirada } = $props();
 
-  let bonificador = $state(0);
+  // Un número o texto del chat (f, -fuerza...): se pega al comando tal cual al tirar
+  let bonificador = $state("");
   let esVentaja = $state(false);
   let esDesventaja = $state(false);
 
@@ -40,7 +41,8 @@
   }
 </script>
 
-<div class="barra-dados">
+<!-- data-conserva-foco: pulsar aquí no quita el foco a la ficha (si no, no se podría tirar su bonificador) -->
+<div class="barra-dados" data-conserva-foco>
   <div class="zona-dados">
     {#each dados as d}
       <button
@@ -71,7 +73,13 @@
 
   <div class="bonif">
     <span>+ Bonf:</span>
-    <input type="number" bind:value={bonificador} />
+    <input
+      type="text"
+      placeholder="0 o f"
+      title={ayuda("Un número o una variable (f, -fuerza...): se suma a la tirada como si lo escribieras en el chat")}
+      bind:value={bonificador}
+      onkeydown={(e) => e.key === "Enter" && onLanzarTirada(bonificador)}
+    />
   </div>
 
   <button class="btn-tirar" onclick={() => onLanzarTirada(bonificador)}>
@@ -130,7 +138,7 @@
   }
 
   .bonif { display: flex; align-items: center; gap: 4px; font-size: 11px; }
-  .bonif input { width: 40px; background: #09090b; border: 1px solid #3f3f46; color: white; padding: 4px; border-radius: 3px; }
+  .bonif input { width: 64px; background: #09090b; border: 1px solid #3f3f46; color: white; padding: 4px; border-radius: 3px; }
   .btn-tirar {
     background: #00A2E8; color: white; border: none; font-weight: bold; padding: 6px 14px; border-radius: 4px; cursor: pointer;
   }

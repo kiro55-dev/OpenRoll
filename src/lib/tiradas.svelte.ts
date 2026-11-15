@@ -24,6 +24,17 @@ const MAX_TIRADAS = 20;
 const horaActual = () => new Date().toTimeString().slice(0, 5);
 
 /**
+ * Pega el bonificador de la barra de dados al comando: vacío o 0 no añade nada; con signo (`-2`, `- f`) se pega tal
+ * cual y sin signo (`2`, `f`) se suma. Es texto del chat: Rust lo valida igual que si se escribiera allí.
+ */
+export function comandoConBonificador(comando: string, bonificador: number | string | null): string {
+  const extra = String(bonificador ?? "").trim();
+  if (!extra || Number(extra) === 0) return comando;
+  const signo = extra[0];
+  return signo === "+" || signo === "-" ? `${comando} ${signo} ${extra.slice(1).trim()}` : `${comando} + ${extra}`;
+}
+
+/**
  * Añade (`esSuma`) o quita un dado al comando del chat, agrupando los iguales:
  * "1d20" + "1d6" -> "1d20 + 1d6"; otra vez "1d6" -> "1d20 + 2d6"; restando se va reduciendo
  * hasta desaparecer. Función pura (no toca el estado) para poder probarla.
@@ -155,12 +166,11 @@ class Tiradas {
     await this.tirar(cmd);
   }
 
-  /** Botón TIRAR de la barra de dados: lo escrito más el bonificador. */
-  async tirarConBonificador(bonificador: number | null) {
+  /** Botón TIRAR de la barra de dados: lo escrito más el bonificador, que puede ser un número o texto del chat
+   *  (`f`, `-fuerza`, `2 + f`). */
+  async tirarConBonificador(bonificador: number | string | null) {
     if (!this.comando.trim()) return;
-    const bonif = Number(bonificador) || 0; // un campo vacío (null) cuenta como 0
-    let final = this.comando;
-    if (bonif !== 0) final += bonif > 0 ? ` + ${bonif}` : ` - ${Math.abs(bonif)}`;
+    const final = comandoConBonificador(this.comando, bonificador);
     this.comando = "";
     this.#salirDelHistorial();
     await this.tirar(final);

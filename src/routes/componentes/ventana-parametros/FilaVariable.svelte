@@ -17,6 +17,7 @@
   let {
     definicion = null,
     indice = -1,
+    ejemplo = false,
     arrastrando = false,
     onIniciarArrastre,
     onError,
@@ -25,6 +26,8 @@
   }: {
     definicion?: DefinicionVariable | null;
     indice?: number;
+    /** Solo la primera fila de la tabla enseña un ejemplo («Fuerza», «f») como placeholder. */
+    ejemplo?: boolean;
     /** Es la que se está arrastrando (se ve tenue en su sitio). */
     arrastrando?: boolean;
     onIniciarArrastre?: (e: PointerEvent) => void;
@@ -47,6 +50,8 @@
   // svelte-ignore state_referenced_locally
   let escala = $state<number | null>(definicion?.escala ?? VARIABLE_NUEVA.escala);
   let guardando = false;
+  /** El borrador ya se creó en Rust: esta fila está a punto de sustituirse por la guardada y no debe crear otra. */
+  let creada = false;
 
   /** Vuelve a lo que tiene Rust (tras guardar, o al deshacer con Escape). */
   function deshacer() {
@@ -73,9 +78,10 @@
   });
 
   async function guardar(conEnter = false) {
-    if (guardando) return;
+    if (guardando || creada) return;
     const datos = { nombre: nombre.trim(), abreviatura: abreviatura.trim(), neutro: Number(neutro), escala: Number(escala) };
-    if (!definicion && (!datos.nombre || !datos.abreviatura)) return; // la fila nueva, aún a medias
+    // Un borrador sin nombre se queda como está, sin error y sin guardarse (la abreviatura es opcional)
+    if (!definicion && !datos.nombre) return;
     if (neutro === null || escala === null || !Number.isInteger(datos.neutro) || !Number.isInteger(datos.escala)) {
       onError("El valor neutro y la escala deben ser números enteros");
       return;
@@ -93,7 +99,14 @@
     try {
       if (definicion) await partida.modificarVariable({ ...datos, id: definicion.id });
       else {
-        await partida.crearVariable(datos);
+        // Se marca ANTES de esperar: nada (otro foco perdido, Enter...) puede crearla por segunda vez
+        creada = true;
+        try {
+          await partida.crearVariable(datos);
+        } catch (err) {
+          creada = false;
+          throw err;
+        }
         onCreada?.(conEnter);
       }
       onError("");
@@ -130,7 +143,13 @@
   }
 
   function alSalir(e: FocusEvent) {
-    if (!fila?.contains(e.relatedTarget as Node | null)) void guardar();
+    if (fila?.contains(e.relatedTarget as Node | null)) return;
+    // `relatedTarget` puede venir vacío aunque el foco pase a otro campo de la fila: se mira dónde queda el foco
+    // cuando termina el cambio, y si la fila ya no está en la página (se está quitando) no se guarda nada
+    setTimeout(() => {
+      if (!fila?.isConnected || fila.contains(document.activeElement)) return;
+      void guardar();
+    }, 0);
   }
 
   function alPulsar(e: PointerEvent) {
@@ -159,7 +178,7 @@
     type="text"
     class="campo"
     maxlength={MAX_NOMBRE_VARIABLE}
-    placeholder="Fuerza"
+    placeholder={ejemplo ? "Fuerza" : ""}
     aria-label="Nombre"
     bind:value={nombre}
     bind:this={campoNombre}
@@ -168,9 +187,9 @@
     type="text"
     class="campo"
     maxlength={MAX_ABREVIATURA_VARIABLE}
-    placeholder="f"
+    placeholder={ejemplo ? "f" : ""}
     aria-label="Abreviatura"
-    title={ayuda("Lo que se escribe en el chat: 2d6 + f. Solo letras")}
+    title={ayuda("Opcional. Lo que se escribe en el chat: 2d6 + f (sin ella, se usa el nombre). Solo letras")}
     bind:value={abreviatura}
   />
   <input
