@@ -259,7 +259,7 @@
                   {#each suyas as d (d.id)}
                     {@const resultado = editor.resultadoVariable(d) ?? 0}
                     <tr>
-                      <td class="nombre">{d.nombre}</td>
+                      <td class="nombre">{d.nombre} <span class="depende" title={ayuda("De qué variables base depende")}>({editor.dependeDe(d)})</span></td>
                       <td class="abreviatura">{d.abreviatura || "—"}</td>
                       <td>
                        <div class="opcionales">
@@ -375,6 +375,7 @@
   .tabla-variables td { padding: 3px 6px; border-bottom: 1px solid #1f1f23; }
   .tabla-variables .nombre { color: #f4f4f5; font-weight: 600; }
   .tabla-variables .abreviatura { color: #a1a1aa; }
+  .tabla-variables .depende { color: #71717a; font-weight: 400; margin-left: 2px; }
   .tabla-variables .resultado { font-weight: bold; color: #d4d4d8; min-width: 40px; }
   .tabla-variables .resultado.positivo { color: #4ade80; }
   .tabla-variables .resultado.negativo { color: #f87171; }

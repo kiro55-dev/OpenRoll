@@ -9,7 +9,7 @@
 // Rust nunca borra lo que la partida guardada referencia, así que pasarle de más no es peligroso.
 import { invoke } from "$lib/backend";
 import { partida, type DefinicionParametro, type DefinicionVariable, type Entidad, type GrupoVariables, type Parametro } from "$lib/partida.svelte";
-import { LIMITE_VALOR_VARIABLE, esDerivada, modificadorVariable, normalizarVariables, partesResultado, textoModificador } from "$lib/variables";
+import { LIMITE_VALOR_VARIABLE, esDerivada, etiquetaVariable, modificadorVariable, normalizarVariables, partesResultado, textoModificador } from "$lib/variables";
 import { importarImagen, urlDeImagen } from "$lib/imagenes";
 import { cargarImagen, encuadreCentrado, miniaturaWebp, type Encuadre } from "$lib/recorteFoto";
 
@@ -185,6 +185,15 @@ export class EditorFicha {
     if (esDerivada(d)) return partesResultado(this.variables, this.entidad.variables, d).reduce((s, p) => s + p.valor, 0);
     const valor: unknown = this.valorVariable(d.id); // un campo vacío deja null
     return typeof valor === "number" && Number.isFinite(valor) ? modificadorVariable(d, valor) : null;
+  }
+
+  /** De qué bases depende una derivada, como se enseña junto a su nombre: «des» o «des + fue» (la abreviatura de cada una o,
+   *  sin ella, su nombre). Vacío en una base. */
+  dependeDe(d: DefinicionVariable): string {
+    return d.bases
+      .map((id) => this.variables.find((v) => v.id === id))
+      .flatMap((b) => (b ? [etiquetaVariable(b)] : []))
+      .join(" + ");
   }
 
   /** De dónde sale el resultado de una derivada, para el `title`: «des (+3) + com (+2)». */

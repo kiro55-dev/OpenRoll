@@ -236,6 +236,9 @@ describe("variables", () => {
     expect(ed.opcionalMarcada(4, 3)).toBe(true);
     expect(ed.resultadoVariable(acrobacias)).toBe(5);
     expect(ed.desgloseVariable(acrobacias)).toBe("des (+3) + com (+2)");
+    // Junto al nombre, de qué bases depende (sus abreviaturas); una base no depende de nada
+    expect(ed.dependeDe(acrobacias)).toBe("des");
+    expect(ed.dependeDe(ed.variables[0])).toBe("");
     ed.ponerValorVariable(1, 18); // cambia la base: la derivada la sigue
     expect(ed.resultadoVariable(acrobacias)).toBe(6);
     ed.alternarOpcional(4, 3);
