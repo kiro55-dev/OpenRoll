@@ -279,20 +279,24 @@ class Partida {
   /** La última instancia que tuvo el foco ELLA SOLA: de ella salen las variables de una tirada cuando ahora no hay foco. */
   #ultimaConFoco: number | null = null;
 
-  /** La instancia de la que salen las variables de una tirada (`2d6 + f`): la que tiene el foco si es una sola; si no,
-   *  la última que lo tuvo, mientras siga existiendo. Solo cuentan las fichas que controlas (el host, todas; un jugador, las
-   *  suyas): mirar la de otro (para ver su rango, por ejemplo) no cambia de qué ficha salen tus variables. `null` si no hay. */
+  /**
+   * La instancia de la que salen las variables de una tirada (`2d6 + f`), por orden de prioridad:
+   *  1. La que tiene el foco, si es UNA sola y sea de quien sea: si un jugador tiene seleccionada una ficha que no es suya,
+   *     la tirada con variables va contra ella y el host la rechaza («tirada no válida»).
+   *  2. Sin ninguna enfocada, la última que tuvo el foco, mientras siga existiendo. Esa solo se recuerda si la controlas
+   *     (el host, todas; un jugador, las suyas): mirar la de otro no la cambia.
+   *  3. Si un jugador solo tiene UNA ficha asignada, una instancia de ella (las variables son de la ficha, vale cualquiera).
+   * `null` si no hay ninguna.
+   */
   get fichaParaVariables(): number | null {
-    // Un jugador con UNA sola ficha asignada: siempre la suya (las variables son de la ficha, así que vale cualquiera de sus
-    // instancias), sin depender del foco. Si aún no la ha puesto en juego, se sigue con la regla de siempre.
-    if (esJugador && this.banco.length === 1) {
-      const suya = this.instanciasOrdenadas.find((i) => i.base.id === this.banco[0].id);
-      if (suya) return suya.id_instancia;
-    }
     const enfocada = this.instanciaSeleccionada;
-    if (enfocada && this.controla(enfocada)) return enfocada.id_instancia;
+    if (enfocada) return enfocada.id_instancia;
     const ultima = this.instancias.find((i) => i.id_instancia === this.#ultimaConFoco);
-    return ultima && this.controla(ultima) ? ultima.id_instancia : null;
+    if (ultima && this.controla(ultima)) return ultima.id_instancia;
+    if (esJugador && this.banco.length === 1) {
+      return this.instanciasOrdenadas.find((i) => i.base.id === this.banco[0].id)?.id_instancia ?? null;
+    }
+    return null;
   }
 
   valoresPendientes = $state<Record<string, number>>({});
