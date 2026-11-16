@@ -8,8 +8,19 @@
 // renombrado...). Al cancelar se descartan; al guardar se descarta lo que al final no se usó.
 // Rust nunca borra lo que la partida guardada referencia, así que pasarle de más no es peligroso.
 import { invoke } from "$lib/backend";
-import { partida, type DefinicionParametro, type DefinicionVariable, type Entidad, type Parametro } from "$lib/partida.svelte";
-import { LIMITE_VALOR_VARIABLE, modificadorVariable, normalizarVariables } from "$lib/variables";
+import { partida, type DefinicionParametro, type DefinicionVariable, type Entidad, type GrupoVariables, type Parametro } from "$lib/partida.svelte";
+import {
+  LIMITE_VALOR_VARIABLE,
+  calcularParametro,
+  desgloseResultado,
+  esDerivada,
+  etiquetaVariable,
+  modificadorVariable,
+  normalizarVariables,
+  resultadoVariable as resultadoDe,
+  textoCalculo,
+  textoModificador
+} from "$lib/variables";
 import { importarImagen, urlDeImagen } from "$lib/imagenes";
 import { cargarImagen, encuadreCentrado, miniaturaWebp, type Encuadre } from "$lib/recorteFoto";
 
@@ -65,9 +76,18 @@ export class EditorFicha {
   readonly definiciones: DefinicionParametro[];
   /** Las variables de la partida (pestaña «Variables»), en su orden. */
   readonly variables: DefinicionVariable[];
+  /** Sus grupos: cada uno es una sección de la pestaña «Variables». */
+  readonly gruposVariables: GrupoVariables[];
 
   /** Subpestaña de la ventana: lo de siempre («Ficha») o sus variables. */
   seccion = $state<"ficha" | "variables">("ficha");
+  /** Qué grupo de variables se ve en la pestaña «Variables»: `null` = «Todos» (todas las secciones, una tras otra). */
+  grupoVista = $state<number | null>(null);
+
+  /** El grupo que se ve de verdad: el elegido si sigue existiendo y, si no, «Todos». */
+  get grupoVistaEfectivo(): number | null {
+    return this.gruposVariables.some((g) => g.id === this.grupoVista) ? this.grupoVista : null;
+  }
 
   /** true mientras se guarda o se borra: los botones se desactivan y no se puede cancelar. */
   guardando = $state(false);
@@ -96,12 +116,14 @@ export class EditorFicha {
     entidad: Entidad,
     esBorrador: boolean,
     definiciones: DefinicionParametro[] = partida.definiciones,
-    variables: DefinicionVariable[] = partida.definicionesVariables ?? []
+    variables: DefinicionVariable[] = partida.definicionesVariables ?? [],
+    gruposVariables: GrupoVariables[] = partida.gruposVariables ?? []
   ) {
     this.entidad = entidad;
     this.esBorrador = esBorrador;
     this.definiciones = definiciones;
     this.variables = variables;
+    this.gruposVariables = gruposVariables;
     entidad.foto_encuadre ??= encuadreCentrado(); // fichas de antes del encuadre
     // Sin definiciones (no se pudieron leer) no se toca nada, para no perder los valores de la ficha
     if (definiciones.length > 0) entidad.parametros = normalizarParametros(definiciones, entidad.parametros ?? []);
@@ -129,8 +151,20 @@ export class EditorFicha {
   }
 
   numero(id: number): number {
+    // Un parámetro calculado no se escribe: sale de las variables de la ficha, y se ve cambiar al tocarlas
+    const calculo = this.definiciones.find((d) => d.id === id)?.calculo;
+    if (calculo) return calcularParametro(calculo, this.variables, this.entidad.variables);
     const v = this.#parametro(id)?.valor;
     return v && "Numero" in v ? v.Numero : 0;
+  }
+  /** ¿Se calcula con las variables (y por tanto no se puede escribir)? */
+  esCalculado(id: number): boolean {
+    return !!this.definiciones.find((d) => d.id === id)?.calculo;
+  }
+  /** Cómo se calcula, para el título del campo: «Se calcula con (con + tam) ÷10». `undefined` si se escribe a mano. */
+  descripcionCalculo(id: number): string | undefined {
+    const calculo = this.definiciones.find((d) => d.id === id)?.calculo;
+    return calculo ? `Se calcula con las variables: ${textoCalculo(calculo, this.variables)}` : undefined;
   }
   /** Guarda lo que haya en el campo tal cual (aunque esté vacío): `guardar` lo valida. */
   ponerNumero(id: number, n: number) {
@@ -168,10 +202,53 @@ export class EditorFicha {
     const v = this.entidad.variables.find((x) => x.id_definicion === id);
     if (v) v.valor = n;
   }
-  /** El resultado que vale en el chat con el valor escrito (`null` si el campo no es un número). */
+  /** El resultado que vale en el chat con lo escrito (`null` si el campo de una base no es un número). Una derivada se
+   *  recalcula sola al cambiar sus bases o sus checks. */
   resultadoVariable(d: DefinicionVariable): number | null {
+    if (esDerivada(d)) return resultadoDe(this.variables, this.entidad.variables, d);
     const valor: unknown = this.valorVariable(d.id); // un campo vacío deja null
     return typeof valor === "number" && Number.isFinite(valor) ? modificadorVariable(d, valor) : null;
+  }
+
+  /** De qué bases depende una derivada, como se enseña junto a su nombre: «des» o «des + fue» (la abreviatura de cada una o,
+   *  sin ella, su nombre). Vacío en una base. */
+  dependeDe(d: DefinicionVariable): string {
+    return d.bases
+      .map((id) => this.variables.find((v) => v.id === id))
+      .flatMap((b) => (b ? [etiquetaVariable(b)] : []))
+      .join(" + ");
+  }
+
+  /** De dónde sale el resultado de una derivada, para el `title`: «des (+3) + com (+2)». */
+  desgloseVariable(d: DefinicionVariable): string {
+    return desgloseResultado(this.variables, this.entidad.variables, d);
+  }
+
+  /** El rango que esta ficha ha elegido en una derivada con rangos (su posición en `opciones`). */
+  eleccion(idDerivada: number): number {
+    return this.entidad.variables.find((x) => x.id_definicion === idDerivada)?.eleccion ?? 0;
+  }
+  elegirOpcion(idDerivada: number, indice: number) {
+    const v = this.entidad.variables.find((x) => x.id_definicion === idDerivada);
+    if (v) v.eleccion = indice;
+  }
+
+  /** Las variables de un grupo, en su orden. */
+  variablesDe(grupo: GrupoVariables): DefinicionVariable[] {
+    return this.variables.filter((d) => d.grupo === grupo.id);
+  }
+
+  /** ¿Tiene esta ficha marcada la opcional `idOpcional` en la derivada `idDerivada`? */
+  opcionalMarcada(idDerivada: number, idOpcional: number): boolean {
+    return this.entidad.variables.find((x) => x.id_definicion === idDerivada)?.opcionales?.includes(idOpcional) ?? false;
+  }
+
+  /** Marca o desmarca una opcional («+ com») de una derivada en esta ficha. */
+  alternarOpcional(idDerivada: number, idOpcional: number) {
+    const v = this.entidad.variables.find((x) => x.id_definicion === idDerivada);
+    if (!v) return;
+    const actuales = v.opcionales ?? [];
+    v.opcionales = actuales.includes(idOpcional) ? actuales.filter((o) => o !== idOpcional) : [...actuales, idOpcional];
   }
 
   /** Último error de la ventana (validación, archivos) o de Rust al guardar o borrar. */
@@ -361,7 +438,8 @@ export class EditorFicha {
     for (const d of this.definiciones.filter(esNumerico)) {
       this.ponerNumero(d.id, entero(this.numero(d.id), d.clave));
     }
-    for (const d of this.variables) {
+    // Las derivadas no tienen valor propio: se calculan
+    for (const d of this.variables.filter((v) => !esDerivada(v))) {
       const n = entero(this.valorVariable(d.id), d.nombre, -LIMITE_VALOR_VARIABLE);
       if (n > LIMITE_VALOR_VARIABLE) throw new Error(`${d.nombre}: no puede pasar de ${LIMITE_VALOR_VARIABLE}`);
       this.ponerValorVariable(d.id, n);

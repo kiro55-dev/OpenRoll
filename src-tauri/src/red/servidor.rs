@@ -575,7 +575,9 @@ mod tests {
         mandar(&mut c, &MensajeCliente::Unirse { nombre: "Ana".into(), contrasena: Some("dragón".into()), entrar_igualmente: false }).await;
         let MensajeHost::Bienvenido { yo, token: Some(token), .. } = leer(&mut c).await else { panic!("sin bienvenida") };
         assert_eq!(yo, Jugador { id: 1, nombre: "Ana".into() });
-        assert_eq!(leer(&mut c).await, MensajeHost::Vista { vista: VistaJugador::default() });
+        // Una partida nueva: vacía, salvo el grupo de variables de serie
+        let vacia = VistaJugador { grupos_variables: crate::tablero_general::modelos::grupos_por_defecto(), ..VistaJugador::default() };
+        assert_eq!(leer(&mut c).await, MensajeHost::Vista { vista: vacia });
         assert_eq!(red.estado_partida().jugadores, vec![yo.clone()], "queda registrado en la partida");
         assert_eq!(red.conectados(), vec![1]);
 

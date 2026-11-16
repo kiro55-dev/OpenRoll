@@ -18,7 +18,7 @@ use crate::tablero_general::cambios_entidad::{self, CambioEntidad};
 use crate::tablero_general::modelos::*;
 use crate::tablero_general::papelera::{self, Borrado, GrupoPapelera};
 use crate::tablero_general::tablero;
-use crate::tablero_general::variables::normalizar_variables;
+use crate::tablero_general::variables::{self, normalizar_variables};
 
 // ========================================================
 // 1. DELTAS (eventos de la partida)
@@ -59,9 +59,32 @@ pub enum DeltaPartida {
     /// Cambia el nombre, la abreviatura, el neutro o la escala de una variable. Las fichas conservan sus valores.
     VariableModificada(DefinicionVariable),
     /// Quita una variable de la partida y su valor de todas las fichas.
+    /// Quita una variable de la partida y su valor de todas las fichas, EN CASCADA: sale de las bases y opcionales de las
+    /// derivadas, y las que se quedan sin bases también se borran (`variables::aplicar_borrado`).
     VariableBorrada(u16),
+    /// Un grupo de variables nuevo (o reemplaza el de ese id).
+    GrupoVariablesCreado(GrupoVariables),
+    /// Otro nombre para un grupo de variables.
+    GrupoVariablesRenombrado { id: u16, nombre: String },
+    /// Se borra un grupo con todas sus variables (en cascada, como `VariableBorrada`).
+    GrupoVariablesBorrado(u16),
+    /// La partida guarda un conjunto de parámetros más (importado o copia de uno de serie), con su contenido entero.
+    ConjuntoAnadido(ConjuntoGuardado),
+    /// Pasa a usarse ese conjunto: el que se deja guarda lo editado, se cargan las definiciones del elegido y las fichas
+    /// empiezan de cero (ver `conjuntos.rs`).
+    ConjuntoActivado(u16),
+    /// Otro nombre para un conjunto.
+    ConjuntoRenombrado { id: u16, nombre: String },
+    /// Se borra un conjunto guardado (nunca el activo).
+    ConjuntoBorrado(u16),
     /// Nuevo orden de las variables (ids). Las fichas lo siguen.
     VariablesReordenadas(Vec<u16>),
+    /// Se crea o cambia una lista de rangos (ya validada): las variables que la usan reciben sus opciones.
+    ListaRangosGuardada(ListaRangos),
+    /// Se borra una lista de rangos: las variables que la usaban se quedan sin rangos.
+    ListaRangosBorrada(u16),
+    /// La escala de resultados del conjunto activo (o ninguna). Ya validada.
+    EscalaResultadoCambiada(Option<EscalaResultado>),
     /// Instancia nueva (o reemplaza la de ese id). Las reglas para construirla están en `instancias.rs`.
     InstanciaCreada(Instancia),
     /// Instancia cambiada entera: movida, quitada del tablero o una ficha única reutilizada.
@@ -116,6 +139,23 @@ pub struct EstadoPartida {
     /// Variables de las fichas (Fuerza «f»...), usables en el chat de dados. Ver variables.rs.
     #[serde(default)]
     pub definiciones_variables: Vec<DefinicionVariable>,
+    /// Los grupos de esas variables (bases o derivadas), en su orden. Las partidas anteriores nacen con el de serie.
+    #[serde(default = "grupos_por_defecto")]
+    pub grupos_variables: Vec<GrupoVariables>,
+    /// Las listas de rangos de las variables derivadas (ver rangos.rs). Son las «vivas» del conjunto activo, como las definiciones.
+    #[serde(default)]
+    pub listas_rangos: Vec<ListaRangos>,
+    /// Cómo se nombra el resultado de una comparación del chat (ver escalas.rs). Es la «viva» del conjunto activo, como las
+    /// definiciones de arriba. `None` = solo «Éxito» o «Fallo».
+    #[serde(default)]
+    pub escala_resultado: Option<EscalaResultado>,
+    /// Los conjuntos de parámetros que guarda la partida (ver conjuntos.rs). Las definiciones de arriba son las del ACTIVO.
+    /// Las partidas anteriores a los conjuntos lo reciben al cargar (`conjuntos::asegurar`).
+    #[serde(default)]
+    pub conjuntos_parametros: Vec<ConjuntoGuardado>,
+    /// El conjunto que se está usando (`ConjuntoGuardado.id`).
+    #[serde(default)]
+    pub conjunto_activo: u16,
     #[serde(default)]
     pub zonas: Vec<Zona>,
     #[serde(default)]
@@ -178,6 +218,11 @@ impl Default for EstadoPartida {
             ultimo_seq: 0,
             definiciones_parametros: parametros_por_defecto(),
             definiciones_variables: Vec::new(),
+            grupos_variables: grupos_por_defecto(),
+            listas_rangos: Vec::new(),
+            escala_resultado: None,
+            conjuntos_parametros: crate::tablero_general::conjuntos::conjuntos_iniciales(),
+            conjunto_activo: 1,
             zonas: Vec::new(),
             mapas: Vec::new(),
             banco_entidades: Vec::new(),
@@ -393,6 +438,7 @@ impl EstadoPartida {
             }
             DeltaPartida::InstanciaBorrada(id) => {
                 self.instancias_activas.retain(|i| i.id_instancia != *id);
+                self.podar_valores_guardados(); // su id puede reutilizarse: la nueva no hereda lo de la vieja en otros conjuntos
             }
             DeltaPartida::InstanciasReordenadas(ids) => {
                 for inst in self.instancias_activas.iter_mut() {
@@ -415,7 +461,52 @@ impl EstadoPartida {
                 self.ajustar_a_definiciones();
             }
             DeltaPartida::VariableBorrada(id) => {
-                self.definiciones_variables.retain(|d| d.id != *id);
+                variables::aplicar_borrado(&mut self.definiciones_variables, &[*id]);
+                self.ajustar_a_definiciones();
+            }
+            DeltaPartida::GrupoVariablesCreado(grupo) => {
+                match self.grupos_variables.iter().position(|g| g.id == grupo.id) {
+                    Some(pos) => self.grupos_variables[pos] = grupo.clone(),
+                    None => self.grupos_variables.push(grupo.clone()),
+                }
+            }
+            DeltaPartida::GrupoVariablesRenombrado { id, nombre } => {
+                if let Some(g) = self.grupos_variables.iter_mut().find(|g| g.id == *id) {
+                    g.nombre = nombre.clone();
+                }
+            }
+            DeltaPartida::GrupoVariablesBorrado(id) => {
+                let suyas: Vec<u16> = self.definiciones_variables.iter().filter(|d| d.grupo == *id).map(|d| d.id).collect();
+                variables::aplicar_borrado(&mut self.definiciones_variables, &suyas);
+                self.grupos_variables.retain(|g| g.id != *id);
+                self.ajustar_a_definiciones();
+            }
+            DeltaPartida::ConjuntoAnadido(c) => match self.conjuntos_parametros.iter().position(|g| g.id == c.id) {
+                Some(pos) => self.conjuntos_parametros[pos] = c.clone(),
+                None => self.conjuntos_parametros.push(c.clone()),
+            },
+            DeltaPartida::ConjuntoActivado(id) => self.activar_conjunto(*id),
+            DeltaPartida::ConjuntoRenombrado { id, nombre } => {
+                // El activo guarda sus definiciones vivas en otro sitio, pero el nombre sí está en su ficha
+                if let Some(c) = self.conjuntos_parametros.iter_mut().find(|c| c.id == *id) {
+                    c.contenido.nombre = nombre.clone();
+                }
+            }
+            DeltaPartida::ConjuntoBorrado(id) => {
+                if *id != self.conjunto_activo {
+                    self.conjuntos_parametros.retain(|c| c.id != *id);
+                }
+            }
+            DeltaPartida::EscalaResultadoCambiada(escala) => self.escala_resultado = escala.clone(),
+            DeltaPartida::ListaRangosGuardada(lista) => {
+                match self.listas_rangos.iter().position(|l| l.id == lista.id) {
+                    Some(pos) => self.listas_rangos[pos] = lista.clone(),
+                    None => self.listas_rangos.push(lista.clone()),
+                }
+                self.ajustar_a_definiciones();
+            }
+            DeltaPartida::ListaRangosBorrada(id) => {
+                self.listas_rangos.retain(|l| l.id != *id);
                 self.ajustar_a_definiciones();
             }
             DeltaPartida::VariablesReordenadas(ids) => {
@@ -425,7 +516,10 @@ impl EstadoPartida {
             }
             DeltaPartida::EnviadoAPapelera(grupo) => papelera::aplicar_envio(self, grupo),
             DeltaPartida::RestauradoDePapelera(id) => papelera::aplicar_restauracion(self, *id),
-            DeltaPartida::PapeleraVaciada => self.papelera.clear(),
+            DeltaPartida::PapeleraVaciada => {
+                self.papelera.clear();
+                self.podar_valores_guardados(); // las fichas y instancias que se iban a restaurar ya no existen
+            }
             DeltaPartida::JugadorRegistrado(jugador) => match self.jugadores.iter().position(|j| j.id == jugador.id) {
                 Some(pos) => self.jugadores[pos] = jugador.clone(),
                 None => self.jugadores.push(jugador.clone()),
@@ -462,16 +556,24 @@ impl EstadoPartida {
     }
 
     pub fn ajustar_a_definiciones(&mut self) {
-        let defs = self.definiciones_parametros.clone();
+        // Las variables sin grupo (de antes de los grupos) pasan al primero de bases
+        variables::asegurar_grupos(&mut self.grupos_variables, &mut self.definiciones_variables);
+        // Cada variable con una lista de rangos lleva una copia de sus opciones (y una lista que ya no existe se quita)
+        crate::tablero_general::rangos::normalizar_rangos(&mut self.listas_rangos, &mut self.definiciones_variables);
         let vars = self.definiciones_variables.clone();
+        // Un parámetro calculado no puede usar variables que ya no existen
+        variables::limpiar_calculos(&mut self.definiciones_parametros, &vars);
+        let defs = self.definiciones_parametros.clone();
         for e in self.banco_entidades.iter_mut() {
             normalizar_parametros(&defs, &mut e.parametros);
             normalizar_variables(&vars, &mut e.variables);
+            variables::recalcular_parametros(&defs, &vars, e);
             normalizar_pasos(&defs, &mut e.pasos_valor);
         }
         for i in self.instancias_activas.iter_mut() {
             normalizar_parametros(&defs, &mut i.base.parametros);
             normalizar_variables(&vars, &mut i.base.variables);
+            variables::recalcular_parametros(&defs, &vars, &mut i.base);
             normalizar_pasos(&defs, &mut i.base.pasos_valor);
             // Un valor actual por cada parámetro con máximo, en el orden de las definiciones. Uno que
             // gana el máximo después de crearse la instancia empieza lleno (en el valor de la ficha).
@@ -516,15 +618,19 @@ pub fn cargar(almacen: &Almacen) -> Result<(EstadoPartida, InformeCarga), String
     {
         None => {
             informe.partida_nueva = true;
-            EstadoPartida::default()
+            EstadoPartida::para_partida_nueva()
         }
         Some(json) => match serde_json::from_str::<EstadoPartida>(&json) {
-            Ok(e) => e,
+            Ok(mut e) => {
+                // Una partida de antes de los conjuntos recibe uno con lo que ya tenía (antes de reproducir el log)
+                crate::tablero_general::conjuntos::asegurar(&mut e);
+                e
+            }
             Err(err) => {
                 eprintln!("[partida] partida.json ilegible ({err}); se aparta y se empieza vacío");
                 informe.partida_corrupta_respaldada_en = almacen.respaldar_partida_corrupta();
                 informe.partida_nueva = true;
-                EstadoPartida::default()
+                EstadoPartida::para_partida_nueva()
             }
         },
     };
@@ -643,6 +749,7 @@ mod tests {
             visibilidad: Visibilidad::Variable,
             unidad: None,
             atenuar_si_negativo: false,
+            calculo: None,
         }
     }
 
@@ -1064,9 +1171,43 @@ mod tests {
         assert_eq!(valores(&e), vec![(1, 14)]);
         assert_eq!(e.banco_entidades[0].variables.len(), 1);
 
-        // Una partida guardada antes de las variables carga sin ninguna
+        // Una partida guardada antes de las variables carga sin ninguna, con el grupo de serie
         let vieja: EstadoPartida = serde_json::from_str("{}").unwrap();
         assert!(vieja.definiciones_variables.is_empty());
+        assert_eq!(vieja.grupos_variables, grupos_por_defecto());
+    }
+
+    #[test]
+    fn grupos_de_variables_y_borrado_en_cascada() {
+        use crate::tablero_general::variables::pruebas::{derivada, grupos, var};
+        let mut e = EstadoPartida::default();
+        e.banco_entidades.push(instancia(1, 4).base);
+        e.aplicar_delta(&DeltaPartida::GrupoVariablesCreado(grupos()[1].clone())); // «Habilidades», derivadas
+        e.aplicar_delta(&DeltaPartida::VariableCreada(var(1, "Destreza", "des", 10, 2)));
+        e.aplicar_delta(&DeltaPartida::VariableCreada(var(2, "Fuerza", "fue", 10, 2)));
+        e.aplicar_delta(&DeltaPartida::VariableCreada(var(3, "Competencia", "com", 0, 1)));
+        e.aplicar_delta(&DeltaPartida::VariableCreada(derivada(4, "Acrobacias", "acro", &[1], &[3])));
+        e.aplicar_delta(&DeltaPartida::VariableCreada(derivada(5, "Atletismo", "atl", &[2, 1], &[3])));
+        e.aplicar_delta(&DeltaPartida::GrupoVariablesRenombrado { id: 2, nombre: "Pericias".into() });
+        assert_eq!(e.grupos_variables[1].nombre, "Pericias");
+
+        // La ficha marca la competencia en Acrobacias; normalizar la conserva
+        e.banco_entidades[0].variables[3].opcionales = vec![3];
+        e.ajustar_a_definiciones();
+        assert_eq!(e.banco_entidades[0].variables[3].opcionales, vec![3]);
+
+        // Borrar Destreza: Acrobacias se queda sin bases y se va; Atletismo solo la pierde
+        e.aplicar_delta(&DeltaPartida::VariableBorrada(1));
+        let ids = |e: &EstadoPartida| e.definiciones_variables.iter().map(|d| d.id).collect::<Vec<_>>();
+        assert_eq!(ids(&e), vec![2, 3, 5]);
+        assert_eq!(e.definiciones_variables[2].bases, vec![2]);
+        assert_eq!(e.banco_entidades[0].variables.len(), 3, "la ficha sigue a las definiciones");
+
+        // Borrar el grupo de bases borra sus variables y, en cascada, la derivada que dependía de ellas
+        e.aplicar_delta(&DeltaPartida::GrupoVariablesBorrado(1));
+        assert!(e.definiciones_variables.is_empty());
+        assert_eq!(e.grupos_variables.iter().map(|g| g.id).collect::<Vec<_>>(), vec![2]);
+        assert!(e.banco_entidades[0].variables.is_empty());
     }
 
     #[test]

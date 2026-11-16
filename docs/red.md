@@ -283,6 +283,19 @@ su pantalla relee. Las peticiones de un jugador se ejecutan **en orden**, una a 
   vacía, `cambios_para` quita `CambioEntidad::Variable`); las definiciones van a todos en
   `VistaJugador.definiciones_variables` / `Cambios.definiciones_variables`. En el chat todos ven solo el resultado:
   «2d6 (3, 4) + f (+1) = 8».
+- **Grupos de variables (protocolo 13).** `VistaJugador.grupos_variables` / `Cambios.grupos_variables` (la lista entera si
+  cambia); `DefinicionVariable` lleva `grupo`, `bases` y `opcionales`, y `ValorVariable.opcionales` los checks de una
+  ficha (solo llegan a host y propietarios, como los valores). Definir grupos y variables sigue siendo solo del host.
+- **Fórmulas, rangos, parámetros calculados y tiradas `vs` (protocolo 14).** `DefinicionVariable` lleva `multiplicador`/`divisor`/`constante`/`rangos` (la lista de rangos que usa) y `opciones` (una copia de las de su lista, que deja el host: el jugador no necesita las listas)
+  (de una derivada), `ValorVariable.eleccion` es el rango que ha elegido cada ficha (solo llega a host y propietarios, como los demás
+  valores), `DefinicionParametro.calculo` hace que el valor de un parámetro lo calcule el host con las variables de la ficha (el jugador
+  recibe ya el resultado, y al guardar su ficha el host lo recalcula: lo que mande en ese parámetro se ignora) y `Tiradas.veredicto` es el
+  resultado de una comparación del chat (`1d100 <= acro`, `1d20 >= 12`, `vs`), con el nombre que le da la escala de resultados del conjunto activo
+  (la define el host; `acierta` y `especial` dicen cómo pintarlo). Una comparación usa el mismo `tirar_dado` (mismo permiso y mismos
+  topes de longitud) y el host la valora: el jugador no recibe la escala, solo el veredicto dentro de `Tiradas`.
+- **Conjuntos de parámetros.** Importar, exportar y cambiar de conjunto son solo del host (no están en la lista blanca). Al activar
+  otro, los jugadores reciben el diff de siempre (`definiciones`, `grupos_variables`, sus fichas reiniciadas); no hay mensajes
+  nuevos ni cambio de protocolo.
 - **Paso de − / + (protocolo 12).** `poner_paso_valor { idEntidad, idDefinicion, paso }` está en la lista blanca: un jugador solo
   lo cambia en una ficha suya (`ficha_suya`). Es un `EntidadCambiada { PasoValor }` normal, y solo llega al host y a los
   propietarios (`Entidad.pasos_valor` se vacía en `vista_jugador`).

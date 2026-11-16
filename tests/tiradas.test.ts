@@ -361,3 +361,158 @@ describe("historial de comandos con ↑ y ↓", () => {
     expect(tiradas.comando).toBe("");
   });
 });
+
+describe("el veredicto de una comparación (`1d100 <= 45`)", () => {
+  it("se pinta según haya acertado y si salió de una regla del dado natural", async () => {
+    const { claseVeredicto } = await nuevoStore();
+    expect(claseVeredicto(true, false)).toBe("exito");
+    expect(claseVeredicto(false, false)).toBe("fallo");
+    expect(claseVeredicto(true, true)).toBe("critico");
+    expect(claseVeredicto(false, true)).toBe("pifia");
+    // Una tirada normal (sin comparación) no se pinta
+    expect(claseVeredicto(null, false)).toBe("");
+    expect(claseVeredicto(undefined, undefined)).toBe("");
+  });
+
+  it("el historial trae el nombre y si acertó; el de una tirada normal queda vacío", async () => {
+    const { tiradas } = await nuevoStore();
+    chat = [
+      { hora: "10:00", comando: "1d100 (30) <= acro (60)", total: 30, autor: "", veredicto: "Éxito difícil", acierta: true, especial: false },
+      { hora: "10:01", comando: "1d6 (3)", total: 3, autor: "" }
+    ] as any;
+    await tiradas.cargar();
+    expect(tiradas.historial[0]).toMatchObject({ veredicto: "Éxito difícil", acierta: true, especial: false });
+    expect(tiradas.historial[1]).toMatchObject({ veredicto: "", acierta: null, especial: false });
+  });
+});
+
+describe("barra de dados: ventaja y desventaja sobre el último dado", () => {
+  it("un dado sin modificador va aparte del que ya lo tiene, y Vent sobre ese último los junta", async () => {
+    const { aplicarDadoAlComando: f, aplicarModificadorAlDado: m } = await nuevoStore();
+    // Con un 1d20adv en el chat, otro d20 es un grupo aparte, sin ventaja
+    expect(f("1d20adv", "1d20", true)).toBe("1d20adv + 1d20");
+    expect(f("1d20adv + 1d20", "1d20", true)).toBe("1d20adv + 2d20");
+    expect(f("1d20adv + 2d20", "1d20", false)).toBe("1d20adv + 1d20");
+    expect(f("1d20adv", "1d20desv", true)).toBe("1d20adv + 1d20desv");
+    // Vent sobre el último grupo (el que no la tiene) lo junta con el que ya existe
+    expect(m("1d20adv + 1d20", "adv", "20")).toBe("2d20adv");
+    expect(m("1d20adv + 2d20", "adv", "20")).toBe("3d20adv");
+    expect(m("2d20desv + 1d20desv + 1d6", "desv", "20")).toBe("2d20desv + 1d20 + 1d6"); // quitarla del último no junta con el desv
+    // Quitar el modificador a un grupo puede juntarlo con el que no lo tiene
+    expect(m("1d20 + 1d20adv", "adv", "20")).toBe("2d20");
+    // Los términos que no son dados se conservan, también los negativos
+    expect(m("1d20adv + 1d20 + 3 - f", "adv", "20")).toBe("2d20adv + 3 - f");
+    expect(m("- 1d6adv - 1d6", "adv", "6")).toBe("- 2d6adv");
+    expect(m("1d20adv + 1d20 - 1d20", "adv", "20")).toBe("1d20adv + 1d20 - 1d20adv");
+  });
+
+  it("Vent y Desv se ponen, se cambian y se quitan en el último dado", async () => {
+    const { aplicarModificadorAlDado: f } = await nuevoStore();
+    expect(f("5d20", "adv", "20")).toBe("5d20adv");
+    expect(f("5d20adv", "adv", "20")).toBe("5d20"); // el mismo otra vez lo quita
+    expect(f("5d20adv", "desv", "20")).toBe("5d20desv"); // el contrario lo sustituye
+    expect(f("5d20desv", "adv", "20")).toBe("5d20adv");
+    expect(f("5d20dis", "desv", "20")).toBe("5d20"); // `dis` es otra forma de desv
+    // Solo el dado afectado: el último de ese tipo, y sin tipo, el último del texto
+    expect(f("1d20 + 1d6", "adv", "20")).toBe("1d20adv + 1d6");
+    expect(f("1d20 + 1d6", "adv", "6")).toBe("1d20 + 1d6adv");
+    expect(f("1d20 + 1d6", "adv", null)).toBe("1d20 + 1d6adv");
+    expect(f("1d20 + 1d6", "adv", "12")).toBe("1d20 + 1d6adv"); // ese dado ya no está: el último
+    expect(f("2*3d20 + 5", "desv", null)).toBe("2*3d20desv + 5");
+    // Sin dados, o con algo que se le parece, no hace nada
+    expect(f("", "adv", null)).toBe("");
+    expect(f("5 + f", "adv", null)).toBe("5 + f");
+    expect(f("1d20adx", "adv", null)).toBe("1d20adx");
+  });
+
+  it("con una comparación solo mira la tirada, no el objetivo", async () => {
+    const { aplicarModificadorAlDado: f, modificadorDelDado: m, aplicarDadoAlComando: g } = await nuevoStore();
+    expect(f("1d20 >= 1d20", "adv", "20")).toBe("1d20adv >= 1d20");
+    expect(f("1d20 >=", "adv", null)).toBe("1d20adv >= ");
+    expect(m("1d20desv >= 1d20adv", "20")).toBe("desv");
+    expect(m("1d20", null)).toBeNull();
+    expect(m("1d20adv", null)).toBe("adv");
+    // Un dado nuevo entra en la tirada, no detrás del operador
+    expect(g("1d20 >= ", "1d6", true)).toBe("1d20 + 1d6 >= ");
+    expect(g("1d20 >= 12", "1d20", true)).toBe("2d20 >= 12");
+    // Quitar el último dado deja el chat vacío: una comparación sin tirada no sirve
+    expect(g("1d20 >= 12", "1d20", false)).toBe("");
+    // Mal escrito (dos comparaciones): no se toca
+    expect(f("1d20 >= 5 <= 6", "adv", null)).toBe("1d20 >= 5 <= 6");
+    expect(g("1d20 >= 5 <= 6", "1d6", true)).toBe("1d20 >= 5 <= 6");
+  });
+});
+
+describe("barra de dados: comparar", () => {
+  it("dividirComparacion reconoce los cuatro operadores y vs (igual que <=)", async () => {
+    const { dividirComparacion: d } = await nuevoStore();
+    expect(d("1d20 >= 12")).toEqual({ izq: "1d20 ", texto: ">=", op: ">=", der: " 12" });
+    expect(d("1d20>12")?.op).toBe(">");
+    expect(d("1d100 < 45")?.op).toBe("<");
+    expect(d("1d100 <= acro")?.der).toBe(" acro");
+    expect(d("1d100 VS acro")).toEqual({ izq: "1d100 ", texto: "VS", op: "<=", der: " acro" });
+    expect(d("1d20 + avs")).toBeNull(); // vs pegado a letras es un nombre
+    expect(d("1d20")).toBeNull();
+    expect(d("1d20 <= 3 >= 1")).toBeNull(); // dos: no se toca
+  });
+
+  it("pulsar <= o >= la escribe, la otra la sustituye y la misma la quita", async () => {
+    const { ponerComparacion: p } = await nuevoStore();
+    expect(p("5d20adv", ">=")).toBe("5d20adv >= ");
+    expect(p("5d20adv >= ", "<=")).toBe("5d20adv <= ");
+    expect(p("5d20adv >= 12", "<=")).toBe("5d20adv <= 12"); // conserva el objetivo escrito
+    expect(p("5d20adv >= 12", ">=")).toBe("5d20adv"); // la misma otra vez: fuera, y su objetivo con ella
+    expect(p("1d20 > 12", ">=")).toBe("1d20 >= 12"); // un estricto escrito a mano se cambia
+    expect(p("1d100 vs 45", "<=")).toBe("1d100 <= 45");
+    expect(p("1d100 vs 45", ">=")).toBe("1d100 >= 45");
+    expect(p("", ">=")).toBe(""); // antes hace falta un dado
+    expect(p("1d20 >= 5 <= 6", "<=")).toBe("1d20 >= 5 <= 6");
+  });
+
+  it("al tirar, el bonificador va a la tirada (izquierda) y el objetivo de la barra a la derecha solo si está vacía", async () => {
+    const { comandoParaTirar: c } = await nuevoStore();
+    expect(c("1d20 >= ", 3, 12)).toBe("1d20 + 3 >= 12");
+    expect(c("1d20 >=", "-f", "")).toBe("1d20 - f >=");
+    expect(c("1d20 >= 15", 3, 12)).toBe("1d20 + 3 >= 15"); // lo escrito a mano gana
+    expect(c("1d100 vs ", "", "acro")).toBe("1d100 vs acro");
+    expect(c("1d20 <", 0, 5)).toBe("1d20 < 5");
+    // Sin comparación, el objetivo no se usa
+    expect(c("1d20", 3, 12)).toBe("1d20 + 3");
+    expect(c("2d6", "", 12)).toBe("2d6");
+  });
+
+  it("el store lleva el último dado, marca los botones y manda el comando entero a Rust", async () => {
+    const { tiradas } = await nuevoStore();
+    expect(tiradas.modificadorActivo).toBeNull();
+    for (let i = 0; i < 5; i++) tiradas.sumarDado("1d20");
+    tiradas.sumarDado("1d6");
+    expect(tiradas.comando).toBe("5d20 + 1d6");
+    tiradas.sumarDado("1d20"); // el último pulsado vuelve a ser el d20, aunque el d6 esté detrás
+    tiradas.alternarModificador("adv");
+    expect(tiradas.comando).toBe("6d20adv + 1d6");
+    tiradas.sumarDado("1d20"); // otro d20: va aparte, sin ventaja
+    expect(tiradas.comando).toBe("6d20adv + 1d6 + 1d20");
+    expect(tiradas.modificadorActivo).toBeNull(); // el último grupo de d20 no la tiene
+    tiradas.alternarModificador("adv"); // ahora sí: se junta con el que ya existe
+    expect(tiradas.comando).toBe("7d20adv + 1d6");
+    expect(tiradas.modificadorActivo).toBe("adv");
+    tiradas.alternarModificador("desv");
+    expect(tiradas.modificadorActivo).toBe("desv");
+    tiradas.alternarComparacion(">=");
+    expect(tiradas.comando).toBe("7d20desv + 1d6 >= ");
+    expect(tiradas.comparacionActiva).toBe(">=");
+    tiradas.alternarComparacion("<=");
+    expect(tiradas.comparacionActiva).toBe("<=");
+
+    llamadas.length = 0;
+    await tiradas.tirarConBonificador("3", "12");
+    expect(llamadas.find((l) => l.cmd === "tirar_dado")?.args).toMatchObject({ comando: "7d20desv + 1d6 + 3 <= 12" });
+    // Tras tirar, el chat y el dado afectado se limpian
+    expect(tiradas.comando).toBe("");
+    tiradas.sumarDado("1d8");
+    tiradas.alternarModificador("adv");
+    expect(tiradas.comando).toBe("1d8adv");
+    tiradas.comando = "1d20 vs 12"; // escrito a mano también se marca
+    expect(tiradas.comparacionActiva).toBe("<=");
+  });
+});

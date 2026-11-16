@@ -79,7 +79,8 @@ describe("FormularioParametro", () => {
       representar_mapa: { Circulo: [255, 0, 0, 90] },
       visibilidad: "SiemprePrivado",
       unidad: "pts",
-      atenuar_si_negativo: false
+      atenuar_si_negativo: false,
+      calculo: null
     });
   });
 
@@ -114,7 +115,8 @@ describe("FormularioParametro", () => {
   it("cargar y aDefinicion son inversos, y el id queda para saber que se edita", () => {
     const d = {
       id: 3, clave: "Velocidad", valor_por_defecto: { Numero: 6 }, tiene_maximo: false,
-      representar_mapa: { Rombo: [59, 130, 246, 90] }, visibilidad: "SiemprePublico" as const, unidad: "m", atenuar_si_negativo: false
+      representar_mapa: { Rombo: [59, 130, 246, 90] }, visibilidad: "SiemprePublico" as const, unidad: "m", atenuar_si_negativo: false,
+      calculo: null
     };
     const f = new FormularioParametro();
     f.cargar(d);
@@ -133,6 +135,49 @@ describe("FormularioParametro", () => {
     f.forma = "Cuadrado";
     f.reiniciar();
     expect([f.clave, f.tipo, f.forma, f.visibilidad]).toEqual(["", "Numero", "ninguna", "Variable"]);
+  });
+});
+
+describe("parámetro calculado con variables", () => {
+  const cargada = {
+    id: 1, clave: "Vida", valor_por_defecto: { Numero: 10 }, tiene_maximo: true, representar_mapa: null,
+    visibilidad: "Variable" as const, unidad: null, atenuar_si_negativo: true,
+    calculo: { variables: [1, 2], multiplicador: 1, divisor: 10, constante: 0 }
+  };
+
+  it("cargar lo recoge y aDefinicion lo devuelve igual", () => {
+    const f = new FormularioParametro();
+    f.cargar(cargada);
+    expect(f.calcular).toBe(true);
+    expect(f.calculoVariables).toEqual([1, 2]);
+    const { id: _, ...sinId } = cargada;
+    expect(f.aDefinicion()).toEqual(sinId);
+  });
+
+  it("sin marcar no hay cálculo, y marcado necesita al menos una variable", () => {
+    const f = new FormularioParametro();
+    f.clave = "Vida";
+    expect(f.aDefinicion().calculo).toBeNull();
+    f.calcular = true;
+    expect(() => f.aDefinicion()).toThrow(/al menos una variable/);
+    f.calculoVariables = [3];
+    f.calculoDivisor = 2;
+    expect(f.aDefinicion().calculo).toEqual({ variables: [3], multiplicador: 1, divisor: 2, constante: 0 });
+    // Un texto no se calcula, aunque estuviera marcado
+    f.tipo = "Texto";
+    expect(f.aDefinicion().calculo).toBeNull();
+  });
+
+  it("reiniciar lo deja como nuevo, y huella cambia al tocarlo; el resumen lo dice", () => {
+    const f = new FormularioParametro();
+    f.cargar(cargada);
+    const h = f.huella();
+    f.calculoDivisor = 5;
+    expect(f.huella()).not.toBe(h);
+    f.reiniciar();
+    expect(f.calcular).toBe(false);
+    expect(f.calculoVariables).toEqual([]);
+    expect(resumenDefinicion(cargada)).toContain("calculado");
   });
 });
 

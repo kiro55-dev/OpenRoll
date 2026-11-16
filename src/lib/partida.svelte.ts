@@ -65,6 +65,23 @@ export interface DefinicionParametro {
   unidad: string | null;
   /** Solo con máximo: si el valor actual llega a 0 o menos, la ficha se ve atenuada (como la vida) */
   atenuar_si_negativo: boolean;
+  /** Si lo hay, el valor NO se escribe: lo calcula Rust con las variables de la ficha (`CalculoParametro`). */
+  calculo?: CalculoParametro | null;
+}
+
+/** `floor(suma · multiplicador / divisor) + constante`, con `suma` = el valor de cada variable (en una base, el valor escrito;
+ *  en una derivada, su resultado). */
+export interface CalculoParametro {
+  variables: number[];
+  multiplicador: number;
+  divisor: number;
+  constante: number;
+}
+
+/** Un rango de una derivada (Entrenado +2...): cada ficha elige uno y su bono se suma. */
+export interface OpcionVariable {
+  nombre: string;
+  bonus: number;
 }
 
 export interface Parametro {
@@ -85,6 +102,100 @@ export interface DefinicionVariable {
   abreviatura: string;
   neutro: number;
   escala: number;
+  /** Su grupo (`GrupoVariables.id`). */
+  grupo: number;
+  /** Solo derivadas: las variables base cuyos resultados se suman (al menos una). */
+  bases: number[];
+  /** Solo derivadas: variables base que cada ficha puede sumar o no (un check «+ com»). */
+  opcionales: number[];
+  /** Solo derivadas: `floor(suma · multiplicador / divisor) + constante (+ el bono del rango elegido)`. Sin tocar: 1, 1 y 0. */
+  multiplicador?: number;
+  divisor?: number;
+  constante?: number;
+  /** Solo derivadas: la lista de rangos (`ListaRangos.id`) de la que cada ficha elige uno (`ValorVariable.eleccion`) y cuyo bono se suma. */
+  rangos?: number | null;
+  /** Una copia de las opciones de su lista (la deja Rust al día: no se escribe a mano). */
+  opciones?: OpcionVariable[];
+}
+
+/** Una lista de rangos con nombre («Competencia»: Sin entrenar +0, Entrenado +2...) que comparten las variables derivadas. */
+export interface ListaRangos {
+  id: number;
+  nombre: string;
+  opciones: OpcionVariable[];
+}
+
+/** Los dos tipos de grupo de variables (`TipoGrupoVariables` en Rust). */
+export type TipoGrupoVariables = "Base" | "Derivadas";
+
+/** Un grupo de variables («Características», «Habilidades»...). */
+export interface GrupoVariables {
+  id: number;
+  nombre: string;
+  tipo: TipoGrupoVariables;
+}
+
+/** Un conjunto de parámetros guardado en la partida, en resumen (`ResumenConjunto` en Rust). */
+export interface ResumenConjunto {
+  id: number;
+  nombre: string;
+  descripcion: string;
+  /** La clave del conjunto de serie del que viene; `null` si es propio o importado. */
+  origen: string | null;
+  parametros: number;
+  variables: number;
+  grupos: number;
+}
+
+/** Un conjunto que trae el programa (definido en código). `ya_anadido`: la partida ya tiene una copia. */
+export interface ResumenDeSerie {
+  clave: string;
+  nombre: string;
+  descripcion: string;
+  ya_anadido: boolean;
+}
+
+/** Cómo se nombra el resultado de una comparación del chat (`EscalaResultado` en Rust; del conjunto activo). */
+export interface EscalaResultado {
+  nombre_exito: string;
+  nombre_fallo: string;
+  /** Solo con `<=`: niveles de acierto (`total <= objetivo · numerador / denominador`), del más estricto al más laxo. */
+  tramos: TramoEscala[];
+  /** Críticos y pifias: reglas sobre la cara de un dado suelto. La primera que casa gana. */
+  naturales: ReglaNatural[];
+}
+
+export interface TramoEscala {
+  nombre: string;
+  numerador: number;
+  denominador: number;
+}
+
+export type EfectoNatural = "SoloSiAcierta" | "SoloSiFalla" | "ForzarAcierto" | "ForzarFallo";
+
+export interface ReglaNatural {
+  nombre: string;
+  /** Solo en un dado de estas caras; `null` = en cualquiera. */
+  dado: number | null;
+  desde: number;
+  hasta: number;
+  efecto: EfectoNatural;
+  /** Solo si el objetivo es menor que esto; `null` = siempre. */
+  umbral_menor_que: number | null;
+}
+
+/** Una escala de ejemplo (Cthulhu, D&D...) con la que rellenar el editor: se copia, la partida no depende de ella. */
+export interface EjemploEscala {
+  clave: string;
+  nombre: string;
+  descripcion: string;
+  escala: EscalaResultado;
+}
+
+export interface ListaConjuntos {
+  activo: number;
+  guardados: ResumenConjunto[];
+  de_serie: ResumenDeSerie[];
 }
 
 /** Paso de − / + de un parámetro en una ficha (`PasoValor` en Rust). */
@@ -99,7 +210,12 @@ export const PASO_VALOR_MAX = 9999;
 /** Valor de una variable en una ficha. */
 export interface ValorVariable {
   id_definicion: number;
+  /** El valor escrito (solo en las bases: una derivada se calcula). */
   valor: number;
+  /** Solo en una derivada: las opcionales que esta ficha tiene marcadas. */
+  opcionales?: number[];
+  /** Solo en una derivada con rangos: el que ha elegido esta ficha (su posición en `DefinicionVariable.opciones`). */
+  eleccion?: number;
 }
 
 /** Ids de los parámetros de serie (fijos en Rust: `ID_VIDA`...). */
@@ -252,6 +368,16 @@ class Partida {
   definiciones = $state<DefinicionParametro[]>([]);
   /** Variables de las fichas (Fuerza «f»...), usables en el chat de dados. */
   definicionesVariables = $state<DefinicionVariable[]>([]);
+  /** Sus grupos (bases o derivadas), en su orden. */
+  gruposVariables = $state<GrupoVariables[]>([]);
+  /** Los conjuntos de parámetros de la partida y los de serie (solo el host: el jugador no los ve ni los cambia). */
+  conjuntos = $state<ListaConjuntos>({ activo: 0, guardados: [], de_serie: [] });
+  /** Las listas de rangos del conjunto activo (solo el host las lee: el jugador recibe en cada variable la copia de sus opciones). */
+  listasRangos = $state<ListaRangos[]>([]);
+  /** La escala de resultados del conjunto activo (`null` = solo «Éxito» o «Fallo»). Solo la lee el host: el jugador recibe ya el veredicto. */
+  escala = $state<EscalaResultado | null>(null);
+  /** Escalas de ejemplo (Cthulhu, D&D...) con las que rellenar el editor. */
+  ejemplosEscala = $state<EjemploEscala[]>([]);
 
   /** «Fichas activas» de arriba abajo. */
   instanciasOrdenadas = $derived([...this.instancias].sort((a, b) => a.orden - b.orden || a.id_instancia - b.id_instancia));
@@ -279,12 +405,24 @@ class Partida {
   /** La última instancia que tuvo el foco ELLA SOLA: de ella salen las variables de una tirada cuando ahora no hay foco. */
   #ultimaConFoco: number | null = null;
 
-  /** La instancia de la que salen las variables de una tirada (`2d6 + f`): la que tiene el foco si es una sola; si no,
-   *  la última que lo tuvo, mientras siga existiendo. `null` si no hay ninguna. */
+  /**
+   * La instancia de la que salen las variables de una tirada (`2d6 + f`), por orden de prioridad:
+   *  1. La que tiene el foco, si es UNA sola y sea de quien sea: si un jugador tiene seleccionada una ficha que no es suya,
+   *     la tirada con variables va contra ella y el host la rechaza («tirada no válida»).
+   *  2. Sin ninguna enfocada, la última que tuvo el foco, mientras siga existiendo. Esa solo se recuerda si la controlas
+   *     (el host, todas; un jugador, las suyas): mirar la de otro no la cambia.
+   *  3. Si un jugador solo tiene UNA ficha asignada, una instancia de ella (las variables son de la ficha, vale cualquiera).
+   * `null` si no hay ninguna.
+   */
   get fichaParaVariables(): number | null {
-    if (this.instanciaSeleccionada) return this.instanciaSeleccionada.id_instancia;
-    const ultima = this.#ultimaConFoco;
-    return ultima !== null && this.instancias.some((i) => i.id_instancia === ultima) ? ultima : null;
+    const enfocada = this.instanciaSeleccionada;
+    if (enfocada) return enfocada.id_instancia;
+    const ultima = this.instancias.find((i) => i.id_instancia === this.#ultimaConFoco);
+    if (ultima && this.controla(ultima)) return ultima.id_instancia;
+    if (esJugador && this.banco.length === 1) {
+      return this.instanciasOrdenadas.find((i) => i.base.id === this.banco[0].id)?.id_instancia ?? null;
+    }
+    return null;
   }
 
   valoresPendientes = $state<Record<string, number>>({});
@@ -499,14 +637,51 @@ class Partida {
   // Parámetros de la partida (comunes a todas las fichas)
   // ------------------------------------------------------------------
 
-  /** Los parámetros y las variables de la partida. */
+  /** Los parámetros y las variables (con sus grupos) de la partida. */
   async recargarDefiniciones() {
-    const [definiciones, variables] = await Promise.all([
+    const [definiciones, variables, grupos] = await Promise.all([
       invoke<DefinicionParametro[]>("obtener_definiciones_parametros"),
-      invoke<DefinicionVariable[]>("obtener_definiciones_variables")
+      invoke<DefinicionVariable[]>("obtener_definiciones_variables"),
+      invoke<GrupoVariables[]>("obtener_grupos_variables")
     ]);
     this.definiciones = definiciones;
     this.definicionesVariables = variables ?? [];
+    this.gruposVariables = grupos ?? [];
+    if (!esJugador) {
+      this.conjuntos = await invoke<ListaConjuntos>("obtener_conjuntos_parametros");
+      this.escala = (await invoke<EscalaResultado | null>("obtener_escala_resultado")) ?? null;
+      this.listasRangos = (await invoke<ListaRangos[]>("obtener_listas_rangos")) ?? [];
+    }
+  }
+
+  /** Crea una lista de rangos. Cambiar una lista cambia las variables que la usan, y con ellas las fichas: se vuelve a leer todo. */
+  async crearListaRangos(lista: Omit<ListaRangos, "id">): Promise<ListaRangos> {
+    let creada = { ...lista, id: 0 } as ListaRangos;
+    await this.#cambiarDefiniciones("crear_lista_rangos", { lista: { ...lista, id: 0 } }, (r) => (creada = r as ListaRangos));
+    return creada;
+  }
+
+  modificarListaRangos(lista: ListaRangos) {
+    return this.#cambiarDefiniciones("modificar_lista_rangos", { lista });
+  }
+
+  /** Borra una lista: las variables que la usaban se quedan sin rangos. */
+  borrarListaRangos(id: number) {
+    return this.#cambiarDefiniciones("borrar_lista_rangos", { id });
+  }
+
+  /** Guarda (o quita, con `null`) la escala de resultados del conjunto activo. Rust la valida entera y da el motivo si falla. */
+  async guardarEscala(escala: EscalaResultado | null) {
+    try {
+      await invoke("guardar_escala_resultado", { escala });
+    } finally {
+      this.escala = (await invoke<EscalaResultado | null>("obtener_escala_resultado")) ?? null;
+    }
+  }
+
+  /** Lee las escalas de ejemplo (una vez). */
+  async cargarEjemplosEscala() {
+    if (this.ejemplosEscala.length === 0) this.ejemplosEscala = (await invoke<EjemploEscala[]>("obtener_ejemplos_escala")) ?? [];
   }
 
   /** Crear, borrar o reordenar un parámetro cambia también las fichas: se vuelve a leer todo.
@@ -555,9 +730,78 @@ class Partida {
     return this.#cambiarDefiniciones("modificar_definicion_variable", { definicion });
   }
 
-  /** Desaparece de la lista y de todas las fichas. */
+  /** Desaparece de la lista y de todas las fichas, en cascada (ver `efectoDeBorrar` en $lib/variables). */
   borrarVariable(id: number) {
     return this.#cambiarDefiniciones("borrar_definicion_variable", { id });
+  }
+
+  // ------------------------------------------------------------------
+  // Conjuntos de parámetros: varios guardados, uno en uso, exportar e importar (solo el host)
+  // ------------------------------------------------------------------
+
+  /** ¿Hay una ficha NUEVA abierta en el editor? Entonces no se puede cambiar de conjunto (su borrador es del anterior). */
+  get hayFichaNuevaAbierta(): boolean {
+    return !!this.entidadEnEdicion && this.editorEsBorrador;
+  }
+
+  /**
+   * Pasa a usar el conjunto `id`. Las fichas pasan a los valores que tenían con ese conjunto (o a los de por defecto si es la
+   * primera vez) y lo de ahora se guarda en el que se deja: la pantalla avisa ANTES. Lo que estaba pendiente de mandar (cambios del
+   * valor actual de un parámetro con máximo...) era del conjunto anterior y se descarta, y la ficha abierta en el editor se cierra
+   * sin guardar.
+   */
+  async usarConjunto(id: number) {
+    if (this.#temporizadorValores) clearTimeout(this.#temporizadorValores);
+    this.#temporizadorValores = null;
+    this.valoresPendientes = {};
+    this.valoresEnVuelo = {};
+    this.pasosEnVuelo = {};
+    if (this.entidadEnEdicion && !this.editorEsBorrador) this.cerrarEditorEntidad();
+    await this.#cambiarDefiniciones("usar_conjunto", { id });
+  }
+
+  /** Copia un conjunto de serie a la partida (sin usarlo) y devuelve su id. */
+  async anadirConjuntoDeSerie(clave: string): Promise<number> {
+    let id = 0;
+    await this.#cambiarDefiniciones("anadir_conjunto_de_serie", { clave }, (r) => (id = r as number));
+    return id;
+  }
+
+  /** Importa el archivo `ruta` (sin usarlo) y devuelve el id del conjunto nuevo. Rust lo valida entero y da el motivo si falla. */
+  async importarConjunto(ruta: string): Promise<number> {
+    let id = 0;
+    await this.#cambiarDefiniciones("importar_conjunto", { ruta }, (r) => (id = r as number));
+    return id;
+  }
+
+  /** Escribe el conjunto en `ruta` (la del diálogo «Guardar como»). */
+  exportarConjunto(id: number, ruta: string) {
+    return invoke("exportar_conjunto", { id, ruta });
+  }
+
+  renombrarConjunto(id: number, nombre: string) {
+    return this.#cambiarDefiniciones("renombrar_conjunto", { id, nombre });
+  }
+
+  /** Borra un conjunto guardado (no el que se usa). No toca las fichas. */
+  borrarConjunto(id: number) {
+    return this.#cambiarDefiniciones("borrar_conjunto", { id });
+  }
+
+  /** Crea un grupo de variables (bases o derivadas) y lo devuelve con el id que le puso Rust. */
+  async crearGrupoVariables(nombre: string, tipo: TipoGrupoVariables): Promise<GrupoVariables> {
+    let creado: GrupoVariables | null = null;
+    await this.#cambiarDefiniciones("crear_grupo_variables", { nombre, tipo }, (r) => (creado = r as GrupoVariables));
+    return creado!;
+  }
+
+  renombrarGrupoVariables(id: number, nombre: string) {
+    return this.#cambiarDefiniciones("renombrar_grupo_variables", { id, nombre });
+  }
+
+  /** Borra el grupo y sus variables, en cascada. */
+  borrarGrupoVariables(id: number) {
+    return this.#cambiarDefiniciones("borrar_grupo_variables", { id });
   }
 
   /** `ids` = todas las variables en el orden nuevo (el que seguirán las fichas). */
@@ -684,7 +928,11 @@ class Partida {
   // Cambia el foco propio, guarda lo pendiente de las fichas que lo pierden y avisa a los demás.
   #cambiarFoco(nuevos: number[]) {
     this.idsSeleccionados = nuevos;
-    if (nuevos.length === 1) this.#ultimaConFoco = nuevos[0];
+    // Solo se recuerda una ficha que controlas: tocar la de otro no cambia de qué ficha salen tus variables
+    if (nuevos.length === 1) {
+      const instancia = this.instancias.find((i) => i.id_instancia === nuevos[0]);
+      if (instancia && this.controla(instancia)) this.#ultimaConFoco = nuevos[0];
+    }
     void this.guardarValoresPendientes();
     // El foco es solo de este momento: se avisa (por red, cuando la haya) pero no se guarda en disco
     const igual = nuevos.length === this.#focoAvisado.length && nuevos.every((id, i) => id === this.#focoAvisado[i]);

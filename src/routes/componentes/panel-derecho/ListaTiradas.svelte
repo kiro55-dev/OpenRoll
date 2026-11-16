@@ -1,7 +1,7 @@
 <!-- src/routes/componentes/panel-derecho/ListaTiradas.svelte -->
 <script lang="ts">
   import { ayuda } from "$lib/ajustesVista.svelte";
-  import { tiradas, desgloseSeguro } from "$lib/tiradas.svelte";
+  import { tiradas, desgloseSeguro, claseVeredicto } from "$lib/tiradas.svelte";
   import { arrastreTirada } from "$lib/arrastreTirada.svelte";
 </script>
 
@@ -19,6 +19,10 @@
     >
       {#if t.total !== null}
         <strong class="total">= {t.total}</strong>
+      {/if}
+      {#if t.total !== null && t.veredicto}
+        <!-- El nombre lo define el host en la escala del conjunto: se pinta como texto de Svelte, nunca como HTML -->
+        <strong class="veredicto {claseVeredicto(t.acierta, t.especial)}">{t.veredicto}</strong>
       {/if}
       {#if t.total !== null}<span class="hora">{t.autor || "rollmaster"}{t.publica === false ? " · p" : ""}</span>{/if}
       <!-- @html a propósito: Rust devuelve el desglose con <b> para resaltar el dado ganador. Lo genera
@@ -57,6 +61,12 @@
     padding: 1px 0 1px 4ch;
     text-indent: -4ch;
   }
+
+  .veredicto { float: right; margin-right: 6px; font-size: 10px; text-indent: 0; letter-spacing: 0.3px; }
+  .veredicto.exito { color: #4ade80; }
+  .veredicto.fallo { color: #a1a1aa; }
+  .veredicto.critico { color: #facc15; }
+  .veredicto.pifia { color: #f87171; }
 
   .hora {
     text-indent: 0; /* el inline-block heredaría la sangría negativa y se cortaría por la izquierda */

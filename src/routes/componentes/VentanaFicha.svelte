@@ -15,7 +15,7 @@
   import { alSoltarArchivos } from "$lib/soltarArchivos";
   import { moverVentana } from "$lib/moverVentana";
   import { esJugador } from "$lib/modo";
-  import { LIMITE_VALOR_VARIABLE, textoModificador } from "$lib/variables";
+  import { LIMITE_VALOR_VARIABLE, etiquetaVariable, textoModificador } from "$lib/variables";
   import CajaFoto from "./ventana-ficha/CajaFoto.svelte";
   import CampoNumero from "./ventana-ficha/CampoNumero.svelte";
   import AdjuntosFicha from "./ventana-ficha/AdjuntosFicha.svelte";
@@ -41,8 +41,8 @@
       if (objetivo?.tagName === "TEXTAREA") return;
       e.preventDefault();
       // En el valor de una variable, Enter no guarda: pasa a la fila siguiente y, en la última, suelta el foco
-      if (objetivo instanceof HTMLInputElement && objetivo.closest(".tabla-variables")) {
-        const campos = [...(ventana?.querySelectorAll<HTMLInputElement>(".tabla-variables input") ?? [])];
+      if (objetivo instanceof HTMLInputElement && objetivo.type === "number" && objetivo.closest(".tabla-variables")) {
+        const campos = [...(ventana?.querySelectorAll<HTMLInputElement>(".tabla-variables input[type='number']") ?? [])];
         const siguiente = campos[campos.indexOf(objetivo) + 1];
         if (siguiente) {
           siguiente.focus();
@@ -121,6 +121,8 @@
               <CampoNumero
                 etiqueta="{d.clave}{d.tiene_maximo ? ' max' : ''}:"
                 sufijo={d.unidad ?? ""}
+                soloLectura={editor.esCalculado(d.id)}
+                titulo={editor.descripcionCalculo(d.id) ?? "Rueda del ratón para subir/bajar"}
                 bind:value={() => editor.numero(d.id), (v) => editor.ponerNumero(d.id, v)}
               />
             {/each}
@@ -198,37 +200,114 @@
     </div>
 
     <!-- Variables: el host define cuáles hay (nombre, abreviatura, neutro y escala); aquí solo se pone el valor -->
-    <div class="seccion" style:display={editor.seccion === "variables" ? null : "none"}>
+    <div class="seccion seccion-variables" style:display={editor.seccion === "variables" ? null : "none"}>
       {#if editor.variables.length === 0}
         <p class="vacio">
           {esJugador ? "El host aún no ha definido variables." : "Aún no hay variables. Defínelas en ⚙ → «Editar parámetros de esta partida» → «Variables»."}
         </p>
       {:else}
-        <table class="tabla-variables">
-          <thead>
-            <tr><th>Nombre</th><th>Abreviatura</th><th>Valor</th><th>Resultado</th></tr>
-          </thead>
-          <tbody>
-            {#each editor.variables as d (d.id)}
-              {@const resultado = editor.resultadoVariable(d)}
-              <tr>
-                <td class="nombre">{d.nombre}</td>
-                <td class="abreviatura">{d.abreviatura || "—"}</td>
-                <td>
-                  <CampoNumero
-                    min={-LIMITE_VALOR_VARIABLE}
-                    max={LIMITE_VALOR_VARIABLE}
-                    titulo="Neutro {d.neutro}, escala {d.escala} (rueda del ratón para ajustar)"
-                    bind:value={() => editor.valorVariable(d.id), (v) => editor.ponerValorVariable(d.id, v)}
-                  />
-                </td>
-                <td class="resultado" class:positivo={resultado !== null && resultado > 0} class:negativo={resultado !== null && resultado < 0}>
-                  {resultado === null ? "—" : textoModificador(resultado)}
-                </td>
-              </tr>
+        <!-- Arriba, los grupos como en su definición: «Todos» (por defecto) enseña una sección por grupo y cada grupo, solo el suyo -->
+        {#if editor.gruposVariables.length > 1}
+          <div class="grupos-ficha" role="tablist" aria-label="Grupos de variables">
+            <button type="button" role="tab" class="grupo-ficha" class:activo={editor.grupoVistaEfectivo === null} aria-selected={editor.grupoVistaEfectivo === null} onclick={() => (editor.grupoVista = null)}>Todos</button>
+            {#each editor.gruposVariables as grupo (grupo.id)}
+              <button type="button" role="tab" class="grupo-ficha" class:activo={editor.grupoVistaEfectivo === grupo.id} aria-selected={editor.grupoVistaEfectivo === grupo.id} onclick={() => (editor.grupoVista = grupo.id)}>
+                {grupo.nombre}{#if grupo.tipo === "Derivadas"}<span class="marca" aria-hidden="true">ƒ</span>{/if}
+              </button>
             {/each}
-          </tbody>
-        </table>
+          </div>
+        {/if}
+
+        <!-- Una sección por grupo: las bases con su valor y las derivadas ya calculadas, con los checks de sus opcionales -->
+        {#each editor.gruposVariables as grupo (grupo.id)}
+          {@const suyas = editor.variablesDe(grupo)}
+          {#if editor.grupoVistaEfectivo !== null && editor.grupoVistaEfectivo === grupo.id && suyas.length === 0}
+            <p class="vacio">Este grupo aún no tiene variables.</p>
+          {/if}
+          {#if suyas.length > 0 && (editor.grupoVistaEfectivo === null || editor.grupoVistaEfectivo === grupo.id)}
+            {#if editor.grupoVistaEfectivo === null && editor.gruposVariables.length > 1}
+              <h4 class="titulo-grupo">{grupo.nombre}</h4>
+            {/if}
+            <table class="tabla-variables">
+              {#if grupo.tipo === "Base"}
+                <thead>
+                  <tr><th>Nombre</th><th>Abreviatura</th><th>Valor</th><th>Resultado</th></tr>
+                </thead>
+                <tbody>
+                  {#each suyas as d (d.id)}
+                    {@const resultado = editor.resultadoVariable(d)}
+                    <tr>
+                      <td class="nombre">{d.nombre}</td>
+                      <td class="abreviatura">{d.abreviatura || "—"}</td>
+                      <td>
+                        <CampoNumero
+                          min={-LIMITE_VALOR_VARIABLE}
+                          max={LIMITE_VALOR_VARIABLE}
+                          titulo="Neutro {d.neutro}, escala {d.escala} (rueda del ratón para ajustar)"
+                          bind:value={() => editor.valorVariable(d.id), (v) => editor.ponerValorVariable(d.id, v)}
+                        />
+                      </td>
+                      <td class="resultado" class:positivo={resultado !== null && resultado > 0} class:negativo={resultado !== null && resultado < 0}>
+                        {resultado === null ? "—" : textoModificador(resultado)}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              {:else}
+                <thead>
+                  <tr><th>Nombre</th><th>Abreviatura</th><th>Opcionales</th><th>Resultado</th></tr>
+                </thead>
+                <tbody>
+                  {#each suyas as d (d.id)}
+                    {@const resultado = editor.resultadoVariable(d) ?? 0}
+                    <tr>
+                      <td class="nombre">{d.nombre} <span class="depende" title={ayuda("De qué variables base depende")}>({editor.dependeDe(d)})</span></td>
+                      <td class="abreviatura">{d.abreviatura || "—"}</td>
+                      <td>
+                       <div class="opcionales">
+                        {#each d.opcionales as idOpcional (idOpcional)}
+                          {@const opcional = editor.variables.find((v) => v.id === idOpcional)}
+                          {#if opcional}
+                            <!-- Check redondo: si está marcado, se suma «+ <abreviatura o nombre de la opcional>» -->
+                            <label class="opcional" title={ayuda(`Sumar ${opcional.nombre} a ${d.nombre}`)}>
+                              <input
+                                type="checkbox"
+                                class="redondo"
+                                checked={editor.opcionalMarcada(d.id, idOpcional)}
+                                onchange={() => editor.alternarOpcional(d.id, idOpcional)}
+                              />
+                              <span>+ {etiquetaVariable(opcional)}</span>
+                            </label>
+                          {/if}
+                        {/each}
+                        <!-- Los rangos de la derivada (Sin entrenar +0, Entrenado +2...): cada ficha elige uno y su bono se suma -->
+                        {#if (d.opciones?.length ?? 0) > 0}
+                          <select
+                            class="rango"
+                            aria-label="Rango de {d.nombre}"
+                            title={ayuda("El bono del rango elegido se suma al resultado")}
+                            value={editor.eleccion(d.id)}
+                            onchange={(e) => editor.elegirOpcion(d.id, Number(e.currentTarget.value))}
+                          >
+                            {#each d.opciones ?? [] as o, i (i)}
+                              <option value={i}>{o.nombre} ({textoModificador(o.bonus)})</option>
+                            {/each}
+                          </select>
+                        {:else if d.opcionales.length === 0}
+                          <span class="sin">—</span>
+                        {/if}
+                       </div>
+                      </td>
+                      <td class="resultado" class:positivo={resultado > 0} class:negativo={resultado < 0} title={editor.desgloseVariable(d)}>
+                        {textoModificador(resultado)}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              {/if}
+            </table>
+          {/if}
+        {/each}
         <p class="ayuda" title={ayuda("Si hay varias fichas con el foco, o ninguna, una tirada con variables da error")}>
           En el chat, con el foco en una instancia de esta ficha: «2d6 + {editor.variables[0].abreviatura || editor.variables[0].nombre}» suma su resultado.
         </p>
@@ -272,6 +351,10 @@
 
   .cuerpo-ficha { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
   .seccion { display: flex; flex-direction: column; gap: 8px; }
+  /* Con muchas variables (las 18 habilidades de D&D...) la lista hace scroll y las pestañas y los botones se quedan a la vista */
+  .seccion-variables { max-height: min(60vh, 520px); overflow-y: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+  .seccion-variables::-webkit-scrollbar { width: 4px; }
+  .seccion-variables::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
 
   .subpestanas { display: flex; gap: 2px; border-bottom: 1px solid #27272a; margin: -2px 0 0; }
   .subpestanas button {
@@ -281,11 +364,41 @@
   .subpestanas button:hover { color: #f4f4f5; }
   .subpestanas button.activa { color: white; border-bottom-color: #3b82f6; }
 
+  .titulo-grupo { margin: 6px 0 0; font-size: 11px; font-weight: 700; color: #d4d4d8; text-transform: uppercase; letter-spacing: 0.03em; }
+  .titulo-grupo:first-child { margin-top: 0; }
+  .tabla-variables td { vertical-align: middle; }
+  .rango {
+    background: #09090b; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; padding: 1px 4px; font-size: 11px; max-width: 100%;
+  }
+  .opcionales { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; min-height: 18px; }
+  .grupos-ficha { display: flex; flex-wrap: wrap; gap: 3px; }
+  .grupo-ficha {
+    background: #111113; border: 1px solid #27272a; color: #a1a1aa; border-radius: 4px; padding: 2px 8px;
+    font-size: 11px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  }
+  .grupo-ficha:hover { color: #f4f4f5; border-color: #3f3f46; }
+  .grupo-ficha.activo { color: white; border-color: #3b82f6; background: rgba(59, 130, 246, 0.12); }
+  .grupo-ficha .marca { color: #60a5fa; font-style: italic; font-size: 10px; }
+  .tabla-variables .sin { color: #52525b; }
+  .opcional { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: #d4d4d8; font-size: 11px; line-height: 1; white-space: nowrap; }
+  /* Check redondo */
+  .redondo {
+    appearance: none; -webkit-appearance: none; margin: 0; flex: none; position: relative; box-sizing: border-box;
+    width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #71717a; background: #09090b; cursor: pointer;
+  }
+  /* El punto de dentro, en el centro exacto del círculo (inset + margin auto), sea cual sea el grosor del borde */
+  .redondo::before {
+    content: ""; position: absolute; inset: 0; margin: auto; width: 6px; height: 6px; border-radius: 50%;
+    background: #3b82f6; transform: scale(0); transition: transform 0.1s;
+  }
+  .redondo:checked { border-color: #3b82f6; }
+  .redondo:checked::before { transform: scale(1); }
   .tabla-variables { width: 100%; border-collapse: collapse; font-size: 11px; }
   .tabla-variables th { color: #71717a; font-size: 10px; font-weight: 600; text-align: left; padding: 2px 6px; border-bottom: 1px solid #27272a; }
   .tabla-variables td { padding: 3px 6px; border-bottom: 1px solid #1f1f23; }
   .tabla-variables .nombre { color: #f4f4f5; font-weight: 600; }
   .tabla-variables .abreviatura { color: #a1a1aa; }
+  .tabla-variables .depende { color: #71717a; font-weight: 400; margin-left: 2px; }
   .tabla-variables .resultado { font-weight: bold; color: #d4d4d8; min-width: 40px; }
   .tabla-variables .resultado.positivo { color: #4ade80; }
   .tabla-variables .resultado.negativo { color: #f87171; }

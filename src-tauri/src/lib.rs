@@ -10,6 +10,12 @@ use red::comandos::{
 };
 
 use tablero_general::almacen::Almacen;
+use tablero_general::conjuntos::{
+    anadir_conjunto_de_serie, borrar_conjunto, exportar_conjunto, importar_conjunto, obtener_conjuntos_parametros,
+    renombrar_conjunto, usar_conjunto,
+};
+use tablero_general::escalas::{guardar_escala_resultado, obtener_ejemplos_escala, obtener_escala_resultado};
+use tablero_general::rangos::{borrar_lista_rangos, crear_lista_rangos, modificar_lista_rangos, obtener_listas_rangos};
 use tablero_general::dados::{limpiar_chat, tirar_dado};
 use tablero_general::estado;
 use tablero_general::partidas;
@@ -19,6 +25,7 @@ use tablero_general::partida::{
     borrar_definicion_parametro, modificar_definicion_parametro, crear_definicion_parametro, reordenar_definiciones_parametros,
     obtener_definiciones_variables, crear_definicion_variable, modificar_definicion_variable, borrar_definicion_variable,
     reordenar_definiciones_variables, ocultar_instancia, poner_paso_valor,
+    obtener_grupos_variables, crear_grupo_variables, renombrar_grupo_variables, borrar_grupo_variables,
     crear_documento_texto, crear_entidad, crear_mapa, crear_zona,
     descartar_archivos_borrador, eliminar_zona, guardar_archivo_texto, importar_archivo,
     importar_imagen, iniciar_autoguardado, iniciar_borrador_entidad, leer_archivo_texto,
@@ -127,6 +134,24 @@ pub fn run() {
             reordenar_definiciones_variables,
             ocultar_instancia,
             poner_paso_valor,
+            obtener_grupos_variables,
+            crear_grupo_variables,
+            renombrar_grupo_variables,
+            borrar_grupo_variables,
+            obtener_conjuntos_parametros,
+            anadir_conjunto_de_serie,
+            usar_conjunto,
+            obtener_escala_resultado,
+            obtener_listas_rangos,
+            crear_lista_rangos,
+            modificar_lista_rangos,
+            borrar_lista_rangos,
+            guardar_escala_resultado,
+            obtener_ejemplos_escala,
+            renombrar_conjunto,
+            borrar_conjunto,
+            exportar_conjunto,
+            importar_conjunto,
             obtener_partidas,
             crear_partida,
             abrir_partida,

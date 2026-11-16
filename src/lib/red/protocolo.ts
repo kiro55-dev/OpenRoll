@@ -3,11 +3,12 @@
 // Espejo a mano de src-tauri/src/red/protocolo.rs y red/vista.rs. Si cambia algo allí, cámbialo aquí y
 // sube VERSION_PROTOCOLO en los dos lados (y publica la página a la vez que la app).
 import type { AvisoTablero } from "$lib/avisosTablero";
-import type { DefinicionParametro, DefinicionVariable, Entidad, Instancia, Mapa, Zona } from "$lib/partida.svelte";
+import type { DefinicionParametro, DefinicionVariable, GrupoVariables, Entidad, Instancia, Mapa, Zona } from "$lib/partida.svelte";
 
 /** 11: variables de las fichas (`definiciones_variables`, `Entidad.variables`, `idInstancia` en `tirar_dado`).
- *  12: `Entidad.pasos_valor` y la acción `poner_paso_valor` (el paso de los botones − / +, por ficha). */
-export const VERSION_PROTOCOLO = 12;
+ *  12: `Entidad.pasos_valor` y la acción `poner_paso_valor` (el paso de los botones − / +, por ficha).
+ *  13: grupos de variables (`grupos_variables`; derivadas con `bases`/`opcionales`; `ValorVariable.opcionales`). */
+export const VERSION_PROTOCOLO = 14;
 
 export interface Jugador {
   id: number;
@@ -21,6 +22,12 @@ export interface TiradaChat {
   hora: string;
   jugador: number;
   autor: string;
+  /** Solo en una comparación (`1d100 <= acro`): «Éxito difícil», «Fallo»... con el nombre que le da la escala del conjunto. */
+  veredicto?: string;
+  /** Si la comparación acertó (para pintarla). */
+  acierta?: boolean | null;
+  /** El resultado salió de una regla del dado natural (crítico, pifia...). */
+  especial?: boolean;
 }
 
 /** `red::vista::VistaJugador`: lo que ve este jugador de la partida (lo mismo que lee la app, filtrado). */
@@ -32,6 +39,8 @@ export interface VistaJugador {
   definiciones: DefinicionParametro[];
   /** Las variables de la partida (los valores van solo en sus fichas). */
   definiciones_variables?: DefinicionVariable[];
+  /** Sus grupos (las secciones de la pestaña «Variables» de sus fichas). */
+  grupos_variables?: GrupoVariables[];
   /** El chat de tiradas, de todos, la más reciente primero. */
   historial_tiradas: TiradaChat[];
   /** El mapa que debe tener abierto (el del host, si lo comparte). `null`/ausente: aún ninguno. */
@@ -50,6 +59,7 @@ export interface Cambios {
   entidades_quitadas?: number[];
   definiciones?: DefinicionParametro[];
   definiciones_variables?: DefinicionVariable[];
+  grupos_variables?: GrupoVariables[];
   historial_tiradas?: TiradaChat[];
   /** Cambió el mapa que debe ver (`mapa_visible` puede venir vacío: ninguno). */
   mapa_visible_cambiado?: boolean;

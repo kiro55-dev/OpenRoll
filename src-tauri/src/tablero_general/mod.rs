@@ -2,7 +2,10 @@
 pub mod almacen;
 pub mod archivos;
 pub mod cambios_entidad;
+pub mod conjuntos;
+pub mod conjuntos_serie;
 pub mod dados;
+pub mod escalas;
 pub mod estado;
 pub mod imagenes;
 pub mod instancias;
@@ -12,6 +15,7 @@ pub mod partidas;
 pub mod modelos;
 pub mod papelera;
 pub mod partida;
+pub mod rangos;
 pub mod recursos;
 pub mod tablero;
 pub mod variables;

@@ -337,6 +337,7 @@ fn entidad_modificable(est: &EstadoPartida, jugador: IdJugador, e: &Entidad, sub
     let mut nueva = e.clone();
     normalizar_parametros(&est.definiciones_parametros, &mut nueva.parametros);
     crate::tablero_general::variables::normalizar_variables(&est.definiciones_variables, &mut nueva.variables);
+    crate::tablero_general::variables::recalcular_parametros(&est.definiciones_parametros, &est.definiciones_variables, &mut nueva);
     nueva.pasos_valor = guardada.pasos_valor.clone(); // los cambia `poner_paso_valor`, no el guardado de la ficha
     for c in cambios_entidad::entre(guardada, &nueva) {
         if !cambio_permitido(jugador, &c) {

@@ -297,6 +297,52 @@ describe("un jugador solo cambia las fichas que son suyas", () => {
     expect(partida.controla(instancia(2, 11))).toBe(false);
   });
 
+  it("variables: manda la ficha seleccionada (aunque sea ajena), luego la última propia y, si solo tiene una ficha, esa", async () => {
+    const { partida } = await comoJugador();
+    partida.banco = [{ id: 10 }, { id: 12 }] as any; // dos fichas suyas
+    partida.instancias = [instancia(1, 10), instancia(2, 11), instancia(4, 12)];
+    expect(partida.fichaParaVariables).toBeNull(); // nada seleccionado y nunca tocó una suya
+
+    // 1. Tiene seleccionada una AJENA (para ver su rango): es la que sale, y el host rechaza la tirada
+    partida.seleccionarInstancia(partida.instancias[1]);
+    expect(partida.fichaParaVariables).toBe(2);
+    // ...pero no se recuerda como «última»: al soltarla no queda nada propio
+    partida.seleccionarInstancia(null);
+    expect(partida.fichaParaVariables).toBeNull();
+
+    // 2. Una suya seleccionada es la que sale; al soltarla queda como la última, y mirar una ajena en medio no la cambia
+    partida.seleccionarInstancia(partida.instancias[0]);
+    expect(partida.fichaParaVariables).toBe(1);
+    partida.seleccionarInstancia(partida.instancias[1]);
+    expect(partida.fichaParaVariables).toBe(2);
+    partida.seleccionarInstancia(null);
+    expect(partida.fichaParaVariables).toBe(1);
+    partida.seleccionarInstancia(partida.instancias[2]);
+    partida.seleccionarInstancia(null);
+    expect(partida.fichaParaVariables).toBe(4);
+  });
+
+  it("variables: con una sola ficha asignada, sin selección ni último foco propio, sale esa; la seleccionada sigue mandando", async () => {
+    const { partida } = await comoJugador();
+    partida.banco = [{ id: 10 }] as any;
+    partida.instancias = [instancia(1, 10), instancia(2, 11), instancia(3, 10)];
+    // Nada seleccionado: la suya (cualquier instancia vale, las variables son de la ficha: la primera de «Fichas activas»)
+    expect(partida.fichaParaVariables).toBe(1);
+    // Una ajena seleccionada manda: la tirada irá contra ella y se rechazará
+    partida.seleccionarInstancia(partida.instancias[1]);
+    expect(partida.fichaParaVariables).toBe(2);
+    // Una suya seleccionada, esa
+    partida.seleccionarInstancia(partida.instancias[2]);
+    expect(partida.fichaParaVariables).toBe(3);
+    // Al soltarla, la última suya
+    partida.seleccionarInstancia(null);
+    expect(partida.fichaParaVariables).toBe(3);
+
+    // Sin ninguna suya puesta en juego aún, no hay de dónde sacarlas
+    partida.instancias = [instancia(2, 11)];
+    expect(partida.fichaParaVariables).toBeNull();
+  });
+
   it("no cambia el valor (la vida) de una ficha ajena, y sí el de la suya", async () => {
     const { partida } = await comoJugador();
     partida.banco = [{ id: 10 }] as any;

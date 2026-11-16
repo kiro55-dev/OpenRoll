@@ -52,7 +52,7 @@ impl AppState {
         bloquear(&self.estado)
     }
 
-    fn reservas(&self) -> MutexGuard<'_, HashSet<u16>> {
+    pub(crate) fn reservas(&self) -> MutexGuard<'_, HashSet<u16>> {
         bloquear(&self.borradores)
     }
 }
@@ -98,7 +98,8 @@ pub fn procesar_delta(state: &AppState, delta: DeltaPartida) {
 // Recibe el desglose y el total por separado: releer el total de un texto con `parse().unwrap_or(0)`
 // guardaba un 0 silencioso cuando el número no cabía.
 // `jugador` es quien tiró (`ID_HOST` o un jugador de la sala): su nombre se guarda en la tirada para el chat.
-pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, total: i32, publica: bool) {
+// `valoracion`: el resultado de una comparación (`1d100 <= acro`) con el nombre que le da la escala del conjunto; `None` en una tirada normal.
+pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, total: i32, publica: bool, valoracion: Option<&crate::tablero_general::escalas::Valoracion>) {
     let mut est = state.lock();
     let autor = est.jugadores.iter().find(|j| j.id == jugador).map(|j| j.nombre.clone()).unwrap_or_default();
     let tirada = Tiradas {
@@ -108,6 +109,9 @@ pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, to
         jugador,
         autor,
         publica,
+        veredicto: valoracion.map(|v| v.nombre.clone()).unwrap_or_default(),
+        acierta: valoracion.map(|v| v.acierta),
+        especial: valoracion.is_some_and(|v| v.especial),
     };
 
     registrar(&mut est, &state.almacen, DeltaPartida::TiradaRealizada(tirada));
@@ -369,7 +373,7 @@ pub fn obtener_definiciones_parametros(state: State<'_, AppState>) -> Vec<Defini
 const MAX_PARAMETROS: usize = 40;
 
 /// Comprueba una definición NUEVA contra las que ya existen.
-fn validar_definicion(existentes: &[DefinicionParametro], d: &DefinicionParametro) -> Result<(), String> {
+pub(crate) fn validar_definicion(existentes: &[DefinicionParametro], d: &DefinicionParametro) -> Result<(), String> {
     let clave = d.clave.trim();
     if clave.is_empty() {
         return Err("El parámetro necesita un nombre".into());
@@ -419,6 +423,7 @@ pub fn crear_definicion_parametro(
 ) -> Result<DefinicionParametro, String> {
     let mut est = state.lock();
     validar_definicion(&est.definiciones_parametros, &definicion)?;
+    variables::validar_parametro_calculado(&definicion, &est.definiciones_variables)?;
 
     // Un id nunca usado por ninguna definición actual (los de las borradas ya no están en ninguna ficha)
     let id = est.definiciones_parametros.iter().map(|d| d.id).max().unwrap_or(0) + 1;
@@ -452,6 +457,7 @@ pub fn modificar_definicion_parametro(
     let otras: Vec<DefinicionParametro> =
         est.definiciones_parametros.iter().filter(|d| d.id != definicion.id).cloned().collect();
     validar_definicion(&otras, &definicion)?;
+    variables::validar_parametro_calculado(&definicion, &est.definiciones_variables)?;
 
     let nueva = DefinicionParametro {
         clave: definicion.clave.trim().to_string(),
@@ -497,12 +503,31 @@ pub fn obtener_definiciones_variables(state: State<'_, AppState>) -> Vec<Definic
     state.lock().definiciones_variables.clone()
 }
 
-/// Nombre y abreviatura sin espacios de los lados (el nombre, con los de dentro reducidos a uno).
-fn limpiar_variable(d: DefinicionVariable) -> DefinicionVariable {
+/// Nombre y abreviatura sin espacios de los lados (el nombre, con los de dentro reducidos a uno). Una derivada no usa
+/// neutro ni escala: se guardan 0 y 1.
+fn limpiar_variable(d: DefinicionVariable, grupos: &[GrupoVariables]) -> DefinicionVariable {
+    let derivada = variables::tipo_de_grupo(grupos, d.grupo) == Some(TipoGrupoVariables::Derivadas);
     DefinicionVariable {
         nombre: d.nombre.split_whitespace().collect::<Vec<_>>().join(" "),
         abreviatura: d.abreviatura.trim().to_string(),
+        neutro: if derivada { 0 } else { d.neutro },
+        escala: if derivada { 1 } else { d.escala },
+        // Una base no lleva fórmula ni opciones
+        multiplicador: if derivada { d.multiplicador } else { 1 },
+        divisor: if derivada { d.divisor } else { 1 },
+        constante: if derivada { d.constante } else { 0 },
+        // La lista de rangos solo en una derivada; sus opciones son una copia que Rust rellena (`rangos::normalizar_rangos`)
+        rangos: if derivada { d.rangos } else { None },
+        opciones: vec![],
         ..d
+    }
+}
+
+/// La lista de rangos que usa una derivada tiene que existir.
+fn comprobar_lista_de_rangos(est: &EstadoPartida, d: &DefinicionVariable) -> Result<(), String> {
+    match d.rangos {
+        Some(id) if !est.listas_rangos.iter().any(|l| l.id == id) => Err("Esa lista de rangos ya no existe".into()),
+        _ => Ok(()),
     }
 }
 
@@ -514,16 +539,21 @@ pub fn crear_definicion_variable(definicion: DefinicionVariable, state: State<'_
 
 pub fn crear_definicion_variable_en(definicion: DefinicionVariable, state: &AppState) -> Result<DefinicionVariable, String> {
     let mut est = state.lock();
-    let definicion = limpiar_variable(definicion);
-    variables::validar_definicion(&est.definiciones_variables, &definicion)?;
+    let definicion = limpiar_variable(definicion, &est.grupos_variables);
+    // Un doble guardado (clic fuera y Enter a la vez...) llega dos veces: la segunda devuelve la que ya hay, sin error
+    if let Some(ya) = est.definiciones_variables.iter().find(|d| variables::es_la_misma(d, &definicion)) {
+        return Ok(ya.clone());
+    }
+    variables::validar_definicion(&est.definiciones_variables, &est.grupos_variables, &definicion)?;
+    comprobar_lista_de_rangos(&est, &definicion)?;
     let id = est.definiciones_variables.iter().map(|d| d.id).max().unwrap_or(0) + 1;
     let nueva = DefinicionVariable { id, ..definicion };
     registrar(&mut est, &state.almacen, DeltaPartida::VariableCreada(nueva.clone()));
     Ok(nueva)
 }
 
-/// Cambia el nombre, la abreviatura, el neutro o la escala de una variable. Los valores de las fichas no cambian
-/// (su resultado sí, si cambian el neutro o la escala).
+/// Cambia el nombre, la abreviatura, el neutro o la escala de una variable (o, en una derivada, sus bases y opcionales).
+/// Los valores de las fichas no cambian (su resultado sí). El grupo no se cambia: se conserva el guardado.
 #[tauri::command]
 pub fn modificar_definicion_variable(definicion: DefinicionVariable, state: State<'_, AppState>) -> Result<(), String> {
     modificar_definicion_variable_en(definicion, &state)
@@ -531,27 +561,87 @@ pub fn modificar_definicion_variable(definicion: DefinicionVariable, state: Stat
 
 pub fn modificar_definicion_variable_en(definicion: DefinicionVariable, state: &AppState) -> Result<(), String> {
     let mut est = state.lock();
-    let definicion = limpiar_variable(definicion);
     let Some(actual) = est.definiciones_variables.iter().find(|d| d.id == definicion.id) else {
         return Err("La variable ya no existe".into());
+    };
+    // Las opciones son una copia de su lista de rangos (la deja Rust): no cuentan para saber si algo cambió
+    let definicion = DefinicionVariable {
+        opciones: actual.opciones.clone(),
+        ..limpiar_variable(DefinicionVariable { grupo: actual.grupo, ..definicion }, &est.grupos_variables)
     };
     if *actual == definicion {
         return Ok(());
     }
     let otras: Vec<DefinicionVariable> = est.definiciones_variables.iter().filter(|d| d.id != definicion.id).cloned().collect();
-    variables::validar_definicion(&otras, &definicion)?;
+    variables::validar_definicion(&otras, &est.grupos_variables, &definicion)?;
+    comprobar_lista_de_rangos(&est, &definicion)?;
     registrar(&mut est, &state.almacen, DeltaPartida::VariableModificada(definicion));
     Ok(())
 }
 
-/// Borra una variable: desaparece de la lista y de todas las fichas.
+/// Borra una variable: desaparece de la lista y de todas las fichas, en cascada (sale de las derivadas que la usan, y las que
+/// se quedan sin bases también se borran). El front avisa antes con `efectoDeBorrar`.
 #[tauri::command]
 pub fn borrar_definicion_variable(id: u16, state: State<'_, AppState>) -> Result<(), String> {
+    borrar_definicion_variable_en(id, &state)
+}
+
+pub fn borrar_definicion_variable_en(id: u16, state: &AppState) -> Result<(), String> {
     let mut est = state.lock();
     if !est.definiciones_variables.iter().any(|d| d.id == id) {
         return Err("La variable ya no existe".into());
     }
     registrar(&mut est, &state.almacen, DeltaPartida::VariableBorrada(id));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn obtener_grupos_variables(state: State<'_, AppState>) -> Vec<GrupoVariables> {
+    state.lock().grupos_variables.clone()
+}
+
+/// Crea un grupo de variables (bases o derivadas). El id lo pone Rust.
+#[tauri::command]
+pub fn crear_grupo_variables(nombre: String, tipo: TipoGrupoVariables, state: State<'_, AppState>) -> Result<GrupoVariables, String> {
+    crear_grupo_variables_en(nombre, tipo, &state)
+}
+
+pub fn crear_grupo_variables_en(nombre: String, tipo: TipoGrupoVariables, state: &AppState) -> Result<GrupoVariables, String> {
+    let mut est = state.lock();
+    variables::validar_grupo(&est.grupos_variables, &nombre)?;
+    let id = est.grupos_variables.iter().map(|g| g.id).max().unwrap_or(0) + 1;
+    let grupo = GrupoVariables { id, nombre: nombre.trim().to_string(), tipo };
+    registrar(&mut est, &state.almacen, DeltaPartida::GrupoVariablesCreado(grupo.clone()));
+    Ok(grupo)
+}
+
+/// Otro nombre para un grupo de variables (sin cambio no hay delta).
+#[tauri::command]
+pub fn renombrar_grupo_variables(id: u16, nombre: String, state: State<'_, AppState>) -> Result<(), String> {
+    renombrar_grupo_variables_en(id, nombre, &state)
+}
+
+pub fn renombrar_grupo_variables_en(id: u16, nombre: String, state: &AppState) -> Result<(), String> {
+    let mut est = state.lock();
+    let actual = est.grupos_variables.iter().find(|g| g.id == id).ok_or("Ese grupo ya no existe")?;
+    let nombre = nombre.trim().to_string();
+    if actual.nombre == nombre {
+        return Ok(());
+    }
+    let otros: Vec<GrupoVariables> = est.grupos_variables.iter().filter(|g| g.id != id).cloned().collect();
+    variables::validar_grupo(&otros, &nombre)?;
+    registrar(&mut est, &state.almacen, DeltaPartida::GrupoVariablesRenombrado { id, nombre });
+    Ok(())
+}
+
+/// Borra un grupo con todas sus variables, en cascada como `borrar_definicion_variable`.
+#[tauri::command]
+pub fn borrar_grupo_variables(id: u16, state: State<'_, AppState>) -> Result<(), String> {
+    let mut est = state.lock();
+    if !est.grupos_variables.iter().any(|g| g.id == id) {
+        return Err("Ese grupo ya no existe".into());
+    }
+    registrar(&mut est, &state.almacen, DeltaPartida::GrupoVariablesBorrado(id));
     Ok(())
 }
 
@@ -1152,8 +1242,7 @@ pub fn iniciar_borrador_entidad_en(zona_id: u16, foto_url: Option<String>, state
     normalizar_parametros(&est.definiciones_parametros, &mut parametros);
     let mut variables = Vec::new();
     normalizar_variables(&est.definiciones_variables, &mut variables);
-
-    Ok(Entidad {
+    let mut ficha = Entidad {
         id,
         nombre: "Nueva Ficha".into(),
         tipo: TipoEntidad::Enemigo,
@@ -1168,7 +1257,10 @@ pub fn iniciar_borrador_entidad_en(zona_id: u16, foto_url: Option<String>, state
         archivos_adjuntos: vec![],
         es_unico: false,
         propietarios: vec![],
-    })
+    };
+    // Los parámetros calculados nacen ya con el valor que dan las variables de por defecto
+    variables::recalcular_parametros(&est.definiciones_parametros, &est.definiciones_variables, &mut ficha);
+    Ok(ficha)
 }
 
 /// Cancela una ficha nueva: libera su id, borra su carpeta y descarta lo creado en la sesión
@@ -1288,6 +1380,7 @@ pub fn crear_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<Entida
     }
     normalizar_parametros(&est.definiciones_parametros, &mut entidad.parametros);
     normalizar_variables(&est.definiciones_variables, &mut entidad.variables);
+    variables::recalcular_parametros(&est.definiciones_parametros, &est.definiciones_variables, &mut entidad);
     entidad.pasos_valor.clear(); // solo los cambia `poner_paso_valor`
     validar_entidad(&est, &state.almacen.dir(), &entidad)?;
     entidad.miniatura_url = None; // solo la pone `guardar_miniatura_ficha`
@@ -1321,6 +1414,7 @@ pub fn modificar_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<()
     }
     normalizar_parametros(&est.definiciones_parametros, &mut entidad.parametros);
     normalizar_variables(&est.definiciones_variables, &mut entidad.variables);
+    variables::recalcular_parametros(&est.definiciones_parametros, &est.definiciones_variables, &mut entidad);
     // Los pasos de − / + son de Rust (los cambia `poner_paso_valor`): se conservan los guardados
     entidad.pasos_valor = est.banco_entidades.iter().find(|e| e.id == entidad.id).map(|e| e.pasos_valor.clone()).unwrap_or_default();
     validar_entidad(&est, &state.almacen.dir(), &entidad)?;
@@ -1625,6 +1719,7 @@ mod tests {
             visibilidad: Visibilidad::Variable,
             unidad: None,
             atenuar_si_negativo: false,
+            calculo: None,
         }];
         let ps = vec![Parametro { id_definicion: 9, valor: ValorParametro::Texto("Bob".into()), publico: false }];
         assert!(validar_parametros(&defs, &ps).is_err());
@@ -1645,6 +1740,7 @@ mod tests_definiciones {
             visibilidad: Visibilidad::Variable,
             unidad: None,
             atenuar_si_negativo: false,
+            calculo: None,
         }
     }
 
@@ -1768,6 +1864,50 @@ mod tests_partidas {
         for (id, def, p) in [(1u16, ID_VIDA, 0u16), (1, ID_VIDA, PASO_VALOR_MAX + 1), (9, ID_VIDA, 2), (1, ID_ARMADURA, 2), (1, 99, 2)] {
             assert!(poner_paso_valor_en(id, def, p, &state).is_err(), "{id} {def} {p}");
         }
+    }
+
+    #[test]
+    fn grupos_y_derivadas_desde_los_comandos() {
+        use crate::tablero_general::variables::pruebas::var;
+        let state = estado_en_a("grupos_variables");
+        let habilidades = crear_grupo_variables_en(" Habilidades ".into(), TipoGrupoVariables::Derivadas, &state).unwrap();
+        assert_eq!((habilidades.id, habilidades.nombre.as_str()), (2, "Habilidades"));
+        assert!(crear_grupo_variables_en("habilidades".into(), TipoGrupoVariables::Base, &state).is_err(), "nombre repetido");
+
+        // Crear dos veces la misma variable (un doble guardado) no da error ni la duplica
+        let rty = crear_definicion_variable_en(var(0, "Rty", "rty", 10, 2), &state).unwrap();
+        let otra_vez = crear_definicion_variable_en(var(0, "Rty", "rty", 10, 2), &state).unwrap();
+        assert_eq!(otra_vez.id, rty.id);
+        assert_eq!(state.lock().definiciones_variables.len(), 1);
+        // Una distinta con su nombre sí choca, y el error dice contra cuál
+        let e = crear_definicion_variable_en(var(0, "Otra", "rty", 10, 2), &state).unwrap_err();
+        assert!(e.contains("«Rty»"), "{e}");
+        borrar_definicion_variable_en(rty.id, &state).unwrap();
+
+        let des = crear_definicion_variable_en(var(0, "Destreza", "des", 10, 2), &state).unwrap();
+        let com = crear_definicion_variable_en(var(0, "Competencia", "com", 0, 1), &state).unwrap();
+        // Una derivada: neutro y escala no se usan (se guardan 0 y 1)
+        let acro = DefinicionVariable {
+            grupo: habilidades.id, bases: vec![des.id], opcionales: vec![com.id], ..var(0, "Acrobacias", "acro", 77, 9)
+        };
+        let acro = crear_definicion_variable_en(acro, &state).unwrap();
+        assert_eq!((acro.neutro, acro.escala), (0, 1));
+        // Una base en el grupo de derivadas, o una derivada sin bases, no valen
+        assert!(crear_definicion_variable_en(DefinicionVariable { grupo: 2, ..var(0, "Sigilo", "sig", 10, 2) }, &state).is_err());
+
+        // Modificar no cambia el grupo, aunque el front mande otro
+        modificar_definicion_variable_en(DefinicionVariable { abreviatura: "acr".into(), grupo: 1, ..acro.clone() }, &state).unwrap();
+        let guardada = state.lock().definiciones_variables.iter().find(|d| d.id == acro.id).cloned().unwrap();
+        assert_eq!((guardada.abreviatura.as_str(), guardada.grupo), ("acr", 2));
+
+        renombrar_grupo_variables_en(2, "Pericias".into(), &state).unwrap();
+        assert_eq!(state.lock().grupos_variables[1].nombre, "Pericias");
+        assert!(renombrar_grupo_variables_en(2, "Variables".into(), &state).is_err(), "el de serie ya se llama así");
+
+        // Borrar Destreza se lleva Acrobacias (se queda sin bases)
+        borrar_definicion_variable_en(des.id, &state).unwrap();
+        assert_eq!(state.lock().definiciones_variables.iter().map(|d| d.id).collect::<Vec<_>>(), vec![com.id]);
+        assert!(borrar_definicion_variable_en(des.id, &state).is_err(), "ya no existe");
     }
 
     #[test]

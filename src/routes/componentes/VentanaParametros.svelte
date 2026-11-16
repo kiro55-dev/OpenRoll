@@ -11,13 +11,16 @@
   import { FormularioParametro, formasDisponibles, VISIBILIDADES, resumenDefinicion } from "$lib/formularioParametro.svelte";
   import ArrastreFlotante from "./comunes/ArrastreFlotante.svelte";
   import TablaVariables from "./ventana-parametros/TablaVariables.svelte";
+  import TablaEscala from "./ventana-parametros/TablaEscala.svelte";
+  import ConjuntosParametros from "./ventana-parametros/ConjuntosParametros.svelte";
+  import SelectorVariables from "./ventana-parametros/SelectorVariables.svelte";
 
   let { onCerrar }: { onCerrar: () => void } = $props();
 
   /** Subpestaña: los parámetros de siempre (vida, rangos... lo que se dibuja) o las variables (Fuerza «f»...). */
-  let pestana = $state<"parametros" | "variables">("parametros");
+  let pestana = $state<"parametros" | "variables" | "resultados">("parametros");
 
-  async function cambiarPestana(p: "parametros" | "variables") {
+  async function cambiarPestana(p: "parametros" | "variables" | "resultados") {
     if (p === pestana) return;
     if (!(await guardarSiCambio())) return; // un parámetro editado que no vale se queda a la vista con su error
     error = "";
@@ -139,6 +142,8 @@
 <div
   class="ventana-flotante"
   style="left: {pos.x}px; top: {pos.y}px;"
+  style:width={pestana === "variables" || pestana === "resultados" ? "560px" : null}
+  style:max-height="calc(100vh - {pos.y}px - 12px)"
   role="dialog"
   aria-label="Parámetros de la partida"
   tabindex="-1"
@@ -152,13 +157,19 @@
   </div>
 
   <div class="cuerpo">
+    <!-- El conjunto de parámetros en uso (el rol que se juega): cambiarlo, importar, exportar... Al cambiar, lo que se estaba editando se descarta -->
+    <ConjuntosParametros onError={(m) => (error = m)} alCambiar={cancelarFormulario} />
+
     <div class="subpestanas" role="tablist" aria-label="Qué se configura">
       <button type="button" role="tab" aria-selected={pestana === "parametros"} class:activa={pestana === "parametros"} onclick={() => cambiarPestana("parametros")}>Parámetros visuales</button>
       <button type="button" role="tab" aria-selected={pestana === "variables"} class:activa={pestana === "variables"} onclick={() => cambiarPestana("variables")}>Variables</button>
+      <button type="button" role="tab" aria-selected={pestana === "resultados"} class:activa={pestana === "resultados"} onclick={() => cambiarPestana("resultados")}>Resultados</button>
     </div>
 
     {#if pestana === "variables"}
       <TablaVariables onError={(m) => (error = m)} />
+    {:else if pestana === "resultados"}
+      <TablaEscala onError={(m) => (error = m)} />
     {:else}
     <p class="ayuda">Los tienen todas las fichas. Pulsa uno para configurarlo y arrástralo para cambiar el orden en que salen en ellas.</p>
 
@@ -238,6 +249,32 @@
               </label>
             {/if}
           </div>
+          <!-- Un parámetro calculado no se escribe en la ficha: sale de sus variables (los puntos de vida de Cthulhu = (CON + TAM) ÷ 10) -->
+          {#if partida.definicionesVariables.length > 0 || formulario.calcular}
+            <div class="fila">
+              <label class="check" title={ayuda("En vez de escribirlo en cada ficha, se calcula con sus variables: floor(suma × multiplicador ÷ divisor) + constante")}>
+                <input type="checkbox" bind:checked={formulario.calcular} />
+                <span>Se calcula con las variables de la ficha</span>
+              </label>
+            </div>
+            {#if formulario.calcular}
+              <div class="fila">
+                <SelectorVariables
+                  opciones={partida.definicionesVariables}
+                  bind:elegidas={formulario.calculoVariables}
+                  vacio="Elegir variables…"
+                  etiquetaAria="Variables del cálculo"
+                  titulo="Se suma el valor de cada una (en una base, el valor escrito; en una derivada, su resultado)"
+                />
+                <span>×</span>
+                <input type="number" class="input-num" min="1" max="100" aria-label="Multiplicador" bind:value={formulario.calculoMultiplicador} />
+                <span>÷</span>
+                <input type="number" class="input-num" min="1" max="100" aria-label="Divisor" title={ayuda("Redondea hacia abajo")} bind:value={formulario.calculoDivisor} />
+                <span>+</span>
+                <input type="number" class="input-num" min="-9999" max="9999" aria-label="Constante" bind:value={formulario.calculoConstante} />
+              </div>
+            {/if}
+          {/if}
           <div class="fila">
             <label for="p-unidad">Unidad:</label>
             <input id="p-unidad" type="text" class="input-num" maxlength="8" placeholder="m" bind:value={formulario.unidad} />
@@ -306,7 +343,10 @@
   .btn-cerrar { background: none; border: none; color: #a1a1aa; cursor: pointer; font-size: 13px; }
   .btn-cerrar:hover { color: white; }
 
-  .cuerpo { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  /* Si la ventana no cabe por abajo, el cuerpo hace scroll (la cabecera se queda a la vista) */
+  .cuerpo { padding: 10px; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+  .cuerpo::-webkit-scrollbar { width: 4px; }
+  .cuerpo::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
 
   .subpestanas { display: flex; gap: 2px; border-bottom: 1px solid #27272a; margin-top: -2px; }
   .subpestanas button {
@@ -317,7 +357,8 @@
   .subpestanas button.activa { color: white; border-bottom-color: #3b82f6; }
   .ayuda { margin: 0; color: #a1a1aa; font-size: 10px; }
 
-  .lista { display: flex; flex-direction: column; gap: 3px; max-height: 240px; overflow-y: auto; }
+  /* Sin scroll propio: la lista crece y el que hace scroll es el cuerpo de toda la ventana */
+  .lista { display: flex; flex-direction: column; gap: 3px; }
   .fila-param {
     display: flex; align-items: center; gap: 8px; padding: 5px 8px; cursor: grab;
     background: #111113; border: 1px solid #27272a; border-radius: 5px;

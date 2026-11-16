@@ -1,6 +1,7 @@
 // src-tauri/src/tablero_general/dados.rs
 use std::fmt::Write;
 use tauri::State;
+use crate::tablero_general::escalas::{self, Operador};
 use crate::tablero_general::estado::{DeltaPartida, EstadoPartida};
 use crate::tablero_general::jugadores::controla_instancia;
 use crate::tablero_general::modelos::{IdJugador, ID_HOST};
@@ -35,10 +36,10 @@ fn resolver_variable(
     if !controla_instancia(est, jugador, id) {
         return Err("Solo puedes usar las variables de tus fichas".into());
     }
-    let valor = inst.base.variables.iter().find(|v| v.id_definicion == def.id).map_or(def.neutro, |v| v.valor);
-    // En el desglose, la abreviatura que definió el host o, sin ella, el nombre
+    // En el desglose, la abreviatura que definió el host o, sin ella, el nombre. Una derivada (Acrobacias) suma sus bases y
+    // las opcionales que la ficha tiene marcadas
     let nombre = if def.abreviatura.is_empty() { &def.nombre } else { &def.abreviatura };
-    Ok((nombre.clone(), variables::modificador(def, valor)))
+    Ok((nombre.clone(), variables::resultado(&est.definiciones_variables, &inst.base.variables, def)))
 }
 
 // Resalta en negrita si es 1 (pifia) o el valor máximo de caras (crítico)
@@ -202,6 +203,13 @@ fn parsear_comando(
 /// Devuelve el desglose (sin el total) y el total. Se calcula en i64 y se comprueba al final que cabe
 /// en i32: con dados de muchas caras el total se desbordaba (panic en debug, número basura en release).
 fn ejecutar_tiradas(tiradas: &[Tirada]) -> Result<(String, i32), String> {
+    ejecutar_con_natural(tiradas).map(|(desglose, total, _)| (desglose, total))
+}
+
+/// Como `ejecutar_tiradas`, y además el resultado natural `(cara, caras)` cuando la tirada es UN solo dado normal, sin
+/// ventaja ni multiplicador (lo que hace falta para los críticos y las pifias de una tirada `vs`).
+fn ejecutar_con_natural(tiradas: &[Tirada]) -> Result<(String, i32, Option<(i32, i32)>), String> {
+    let mut natural: Option<(i32, i32)> = None;
     let mut resultado = String::new();
     let mut total: i64 = 0;
     let mut primero = true;
@@ -276,6 +284,7 @@ fn ejecutar_tiradas(tiradas: &[Tirada]) -> Result<(String, i32), String> {
             } else {
                 // Tirada normal directa
                 let r = rand::random_range(1..=t.d);
+                natural = Some((r, t.d));
                 subtotal_dados += i64::from(r);
                 let _ = write!(resultado, "{}", formatear_num(r, t.d));
             }
@@ -291,7 +300,82 @@ fn ejecutar_tiradas(tiradas: &[Tirada]) -> Result<(String, i32), String> {
     }
 
     let total = i32::try_from(total).map_err(|_| "El resultado es demasiado grande".to_string())?;
-    Ok((resultado, total))
+    let un_dado_normal = tiradas.iter().filter(|t| t.bonificador.is_none()).count() == 1
+        && tiradas.iter().any(|t| t.bonificador.is_none() && t.veces == 1 && t.signo > 0 && t.multiplicador == 1 && !t.ventaja && !t.desventaja);
+    Ok((resultado, total, if un_dado_normal { natural } else { None }))
+}
+
+/// Parte un comando en sus dos lados por una comparación suelta: `<=`, `>=`, `<`, `>` o `vs` (azúcar de `<=`): `1d100 vs acro`,
+/// `1d20 + 2 >= 12`. Sin comparación, todo es tirada. Un `vs` pegado a letras (parte de un nombre) no cuenta, solo puede haber una
+/// comparación y le tienen que quedar los dos lados escritos.
+fn dividir_comparacion(comando: &str) -> Result<(&str, Option<(Operador, &str)>), String> {
+    let mut encontrada: Option<(usize, usize, Operador)> = None; // (dónde empieza, cuánto mide, cuál)
+    let mut poner = |inicio: usize, largo: usize, op: Operador| -> Result<(), String> {
+        if encontrada.is_some() {
+            return Err("Solo puede haber una comparación (<=, >= o vs) en la tirada".into());
+        }
+        encontrada = Some((inicio, largo, op));
+        Ok(())
+    };
+    let mut saltar = 0;
+    for (i, c) in comando.char_indices() {
+        if i < saltar {
+            continue;
+        }
+        let resto = &comando[i..];
+        if resto.starts_with("<=") {
+            poner(i, 2, Operador::MenorIgual)?;
+            saltar = i + 2;
+        } else if resto.starts_with(">=") {
+            poner(i, 2, Operador::MayorIgual)?;
+            saltar = i + 2;
+        } else if c == '<' {
+            poner(i, 1, Operador::Menor)?;
+        } else if c == '>' {
+            poner(i, 1, Operador::Mayor)?;
+        } else if (c == 'v' || c == 'V') && resto.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("vs")) {
+            let antes = comando[..i].chars().next_back().is_some_and(char::is_alphabetic);
+            let despues = comando[i + 2..].chars().next().is_some_and(char::is_alphabetic);
+            if !antes && !despues {
+                poner(i, 2, Operador::MenorIgual)?;
+                saltar = i + 2;
+            }
+        }
+    }
+    let Some((i, largo, op)) = encontrada else { return Ok((comando, None)) };
+    let (izquierda, derecha) = (&comando[..i], &comando[i + largo..]);
+    if izquierda.trim().is_empty() {
+        return Err("Falta la tirada a la izquierda de la comparación".into());
+    }
+    if derecha.trim().is_empty() {
+        return Err("Falta el objetivo de la comparación (un número o una variable)".into());
+    }
+    Ok((izquierda, Some((op, derecha))))
+}
+
+/// Un lado de una comparación, ya tirado.
+struct Lado {
+    desglose: String,
+    total: i32,
+    /// `(cara, caras)` si el total sale de UN solo dado normal.
+    natural: Option<(i32, i32)>,
+    /// ¿Lleva algún dado? (un número o una variable no tiran nada)
+    con_dados: bool,
+}
+
+fn tirar_lado(tiradas: &[Tirada]) -> Result<Lado, String> {
+    let (desglose, total, natural) = ejecutar_con_natural(tiradas)?;
+    Ok(Lado { desglose, total, natural, con_dados: tiradas.iter().any(|t| t.bonificador.is_none()) })
+}
+
+/// Lo que se compara: el SUJETO (el lado con dados; el izquierdo si los dos los llevan) contra el otro lado. Devuelve el total del
+/// sujeto, el objetivo, el operador visto desde el sujeto (`12 >= 1d20` es `1d20 <= 12`) y la cara natural del sujeto.
+fn sujeto_y_objetivo(izquierda: &Lado, op: Operador, derecha: &Lado) -> (i32, i32, Operador, Option<(i32, i32)>) {
+    if izquierda.con_dados || !derecha.con_dados {
+        (izquierda.total, derecha.total, op, izquierda.natural)
+    } else {
+        (derecha.total, izquierda.total, op.invertido(), derecha.natural)
+    }
 }
 
 #[tauri::command]
@@ -319,18 +403,36 @@ pub fn tirar_dado_de(
     if jugador != ID_HOST && es_comando_limpiar(comando) {
         return Err("Solo el host puede limpiar el chat".into());
     }
-    let tiradas = parsear_comando(comando, &mut |texto| resolver_variable(&state.lock(), jugador, id_instancia, texto))?;
-    let (desglose, total) = ejecutar_tiradas(&tiradas)?;
+    if comando.chars().count() > MAX_LONGITUD_COMANDO {
+        return Err(format!("El comando no puede pasar de {MAX_LONGITUD_COMANDO} caracteres"));
+    }
+    // `1d100 <= acro`, `1d20 >= 12`, `1d100 vs 45`: dos lados que se tiran por separado y se comparan
+    let (izquierda, comparacion) = dividir_comparacion(comando)?;
+    let mut resolver = |texto: &str| resolver_variable(&state.lock(), jugador, id_instancia, texto);
+    let lado_izquierdo = tirar_lado(&parsear_comando(izquierda, &mut resolver)?)?;
+
+    let (desglose, total, valoracion) = match comparacion {
+        None => (lado_izquierdo.desglose, lado_izquierdo.total, None),
+        Some((op, derecha)) => {
+            let lado_derecho = tirar_lado(&parsear_comando(derecha, &mut resolver)?)?;
+            let (total, objetivo, op_sujeto, natural) = sujeto_y_objetivo(&lado_izquierdo, op, &lado_derecho);
+            let valoracion = escalas::valorar(state.lock().escala_resultado.as_ref(), op_sujeto, total, objetivo, natural);
+            (format!("{} {} {}", lado_izquierdo.desglose, op.simbolo(), lado_derecho.desglose), total, Some(valoracion))
+        }
+    };
 
     // 1. Registra en el estado de la partida / deltas (con el total tal cual, sin releerlo de un texto)
-    registrar_tirada(state, jugador, &desglose, total, publica || jugador != ID_HOST);
+    registrar_tirada(state, jugador, &desglose, total, publica || jugador != ID_HOST, valoracion.as_ref());
 
     // 2. El historial personal (↑ ↓) es de quien tira: se guarda en el disco del host, uno por jugador (así lo
     //    recupera al reconectar; se borra al quitarlo de la partida)
     state.almacen.anadir_historial_de(jugador, comando);
 
     // El front espera "desglose = total"
-    Ok(format!("{desglose} = {total}"))
+    match valoracion {
+        None => Ok(format!("{desglose} = {total}")),
+        Some(v) => Ok(format!("{desglose} = {total} · {}", v.nombre)),
+    }
 }
 
 /// `clean` o `c` (sin nada más, da igual mayúsculas) es la orden de vaciar el chat de tiradas.
@@ -378,7 +480,7 @@ mod tests {
         e.definiciones_variables = vec![var(1, "Fuerza", "f", 10, 2), var(2, "Cordura", "cor", 7, 3)];
         let ficha = |id: u16, propietarios: Vec<u16>, fuerza: i16| Entidad {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Jugador, parametros: vec![],
-            variables: vec![ValorVariable { id_definicion: 1, valor: fuerza }, ValorVariable { id_definicion: 2, valor: 9 }],
+            variables: vec![ValorVariable { id_definicion: 1, valor: fuerza, opcionales: vec![], eleccion: 0 }, ValorVariable { id_definicion: 2, valor: 9, opcionales: vec![], eleccion: 0 }],
             pasos_valor: vec![],
             cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
             archivos_adjuntos: vec![], es_unico: false, propietarios,
@@ -390,6 +492,61 @@ mod tests {
         e.jugadores = vec![Jugador { id: 3, nombre: "Ana".into() }];
         e.instancias_activas = vec![inst(1, ficha(1, vec![3], 12)), inst(2, ficha(2, vec![], 4))];
         e
+    }
+
+    #[test]
+    fn las_comparaciones_separan_los_lados_sin_confundirse_con_nombres() {
+        use Operador::{Mayor, MayorIgual, Menor, MenorIgual};
+        assert_eq!(dividir_comparacion("1d20 > 12").unwrap(), ("1d20 ", Some((Mayor, " 12"))));
+        assert_eq!(dividir_comparacion("1d100<45").unwrap(), ("1d100", Some((Menor, "45"))));
+        assert_eq!(dividir_comparacion("1d20+2>=1d20").unwrap(), ("1d20+2", Some((MayorIgual, "1d20"))), "el = no cuenta como otra comparación");
+        assert_eq!(dividir_comparacion("1d20 <= 5").unwrap().1.unwrap().0, MenorIgual);
+        assert_eq!(dividir_comparacion("1d100 vs 45").unwrap(), ("1d100 ", Some((MenorIgual, " 45"))));
+        assert_eq!(dividir_comparacion("1d100VS acro").unwrap(), ("1d100", Some((MenorIgual, " acro"))));
+        assert_eq!(dividir_comparacion("1d100vs45").unwrap(), ("1d100", Some((MenorIgual, "45"))));
+        assert_eq!(dividir_comparacion("1d100 <= 45").unwrap(), ("1d100 ", Some((MenorIgual, " 45"))));
+        assert_eq!(dividir_comparacion("1d20 + 2>=12").unwrap(), ("1d20 + 2", Some((MayorIgual, "12"))));
+        assert_eq!(dividir_comparacion("12 >= 1d20").unwrap(), ("12 ", Some((MayorIgual, " 1d20"))));
+        assert_eq!(dividir_comparacion("1d20 + avs").unwrap(), ("1d20 + avs", None), "pegado a letras es un nombre");
+        assert_eq!(dividir_comparacion("1d20 + vsa").unwrap(), ("1d20 + vsa", None));
+        assert_eq!(dividir_comparacion("1d6").unwrap(), ("1d6", None));
+        for dos in ["1d100 vs 40 vs 30", "1d20 >= 10 <= 15", "1d20 >= 10 vs 3", "1d20 <= <= 3", "1d20 < 5 > 2", "1d20 <> 5"] {
+            assert!(dividir_comparacion(dos).is_err(), "{dos}");
+        }
+        // Le tienen que quedar los dos lados
+        for (sin_lado, falta) in [("1d20 >=", "objetivo"), ("1d20 vs  ", "objetivo"), (">= 12", "izquierda"), ("< 3", "izquierda")] {
+            let e = dividir_comparacion(sin_lado).unwrap_err();
+            assert!(e.contains(falta), "{sin_lado}: {e}");
+        }
+    }
+
+    #[test]
+    fn el_sujeto_es_el_lado_con_dados_y_el_izquierdo_si_los_dos_tiran() {
+        use Operador::{MayorIgual, MenorIgual};
+        let lado = |total, con_dados, natural| Lado { desglose: String::new(), total, natural, con_dados };
+        let dado = lado(37, true, Some((37, 100)));
+        let numero = lado(45, false, None);
+        assert_eq!(sujeto_y_objetivo(&dado, MenorIgual, &numero), (37, 45, MenorIgual, Some((37, 100))));
+        // `12 >= 1d20` es `1d20 <= 12`: el sujeto pasa a la derecha y el operador se invierte
+        assert_eq!(sujeto_y_objetivo(&numero, MayorIgual, &dado), (37, 45, MenorIgual, Some((37, 100))));
+        // Los dos tiran: manda el izquierdo (tirada enfrentada)
+        let otro = lado(20, true, Some((20, 20)));
+        assert_eq!(sujeto_y_objetivo(&dado, MayorIgual, &otro), (37, 20, MayorIgual, Some((37, 100))));
+        // Ninguno tira (`5 >= 3`): el izquierdo
+        assert_eq!(sujeto_y_objetivo(&numero, MayorIgual, &lado(3, false, None)), (45, 3, MayorIgual, None));
+    }
+
+    #[test]
+    fn solo_un_dado_normal_da_resultado_natural() {
+        let natural = |cmd: &str| ejecutar_con_natural(&parsear_comando(cmd).unwrap()).unwrap().2;
+        let (cara, caras) = natural("1d100").unwrap();
+        assert!((1..=100).contains(&cara) && caras == 100);
+        assert!(natural("1d100 + 5").is_some(), "el bonificador no quita el natural");
+        assert!(natural("2d6").is_none());
+        assert!(natural("1d20 + 1d4").is_none());
+        assert!(natural("1d20adv").is_none());
+        assert!(natural("2*1d6").is_none());
+        assert!(natural("7").is_none());
     }
 
     fn tirar_con(e: &EstadoPartida, jugador: IdJugador, foco: Option<u16>, cmd: &str) -> Result<(String, i32), String> {
@@ -410,6 +567,20 @@ mod tests {
         assert_eq!((d.as_str(), total), ("10 + f (-3)", 7));
         // Sin variables el foco no importa
         assert_eq!(tirar_con(&e, ID_HOST, None, "1d1 + 2").unwrap().1, 3);
+    }
+
+    #[test]
+    fn una_derivada_suma_sus_bases_y_la_opcional_si_la_ficha_la_marca() {
+        use crate::tablero_general::variables::pruebas::{derivada, grupos};
+        let mut e = partida_con_variables(); // Fuerza 12 (+1), Cordura 9 (0)
+        e.grupos_variables = grupos();
+        e.definiciones_variables.push(var(3, "Competencia", "com", 0, 1));
+        e.definiciones_variables.push(derivada(4, "Atletismo", "atl", &[1], &[3]));
+        e.ajustar_a_definiciones();
+        e.instancias_activas[0].base.variables[2].valor = 2; // competencia +2
+        assert_eq!(tirar_con(&e, ID_HOST, Some(1), "1d1 + atl").unwrap(), ("1d1 (<b>1</b>) + atl (+1)".into(), 2), "sin el check");
+        e.instancias_activas[0].base.variables[3].opcionales = vec![3];
+        assert_eq!(tirar_con(&e, ID_HOST, Some(1), "1d1 + Atletismo").unwrap(), ("1d1 (<b>1</b>) + atl (+3)".into(), 4), "con él");
     }
 
     #[test]
@@ -443,7 +614,7 @@ mod tests {
         }
 
         let mut e = crate::tablero_general::estado::EstadoPartida::default();
-        let t = crate::tablero_general::modelos::Tiradas { total: 3, comando: "1d6 (3)".into(), hora: "10:00".into(), jugador: 0, autor: String::new(), publica: true };
+        let t = crate::tablero_general::modelos::Tiradas { total: 3, comando: "1d6 (3)".into(), hora: "10:00".into(), jugador: 0, autor: String::new(), publica: true, veredicto: String::new(), acierta: None, especial: false };
         e.aplicar_delta(&DeltaPartida::TiradaRealizada(t));
         e.aplicar_delta(&DeltaPartida::HistorialTiradasLimpiado);
         assert!(e.historial_tiradas.is_empty());

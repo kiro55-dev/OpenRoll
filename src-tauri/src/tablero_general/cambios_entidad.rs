@@ -133,7 +133,7 @@ mod tests {
             nombre: "Orco".into(),
             tipo: TipoEntidad::Enemigo,
             parametros: vec![param(ID_VIDA, 20, false), param(ID_ARMADURA, 12, true)],
-            variables: vec![ValorVariable { id_definicion: 1, valor: 10 }, ValorVariable { id_definicion: 2, valor: 8 }],
+            variables: vec![ValorVariable { id_definicion: 1, valor: 10, opcionales: vec![], eleccion: 0 }, ValorVariable { id_definicion: 2, valor: 8, opcionales: vec![], eleccion: 0 }],
             pasos_valor: vec![PasoValor { id_definicion: ID_VIDA, paso: 5 }],
             cuerpo: Cuerpo::Pequenio,
             zona_id: 1,
@@ -191,7 +191,7 @@ mod tests {
 
         let cambios = entre(&antes, &despues);
         assert_eq!(cambios.len(), 11, "un cambio por campo");
-        assert!(cambios.contains(&CambioEntidad::Variable(ValorVariable { id_definicion: 2, valor: 14 })), "solo la variable que cambió");
+        assert!(cambios.contains(&CambioEntidad::Variable(ValorVariable { id_definicion: 2, valor: 14, opcionales: vec![], eleccion: 0 })), "solo la variable que cambió");
         let mut aplicada = antes.clone();
         aplicar(&mut aplicada, &cambios);
         assert_eq!(sin_miniatura(&aplicada), sin_miniatura(&despues));

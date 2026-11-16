@@ -85,6 +85,26 @@ pub struct DefinicionParametro {
     /// Solo con `tiene_maximo`: si el valor actual de una instancia llega a 0 o menos, la ficha se ve
     /// atenuada (en gris) en el tablero y en «Fichas activas». Es lo que hace la vida.
     pub atenuar_si_negativo: bool,
+    /// Si lo hay, el valor de este parámetro NO se escribe: se calcula con las variables de la ficha (los puntos de vida de
+    /// Cthulhu = (CON + TAM) / 10). Solo números. Lo recalcula Rust al guardar la ficha y al cambiar las variables.
+    pub calculo: Option<CalculoParametro>,
+}
+
+/// Cómo se calcula un parámetro a partir de las variables de la ficha: `floor(suma · multiplicador / divisor) + constante`,
+/// donde `suma` es el valor de cada variable de la lista (en una base, el valor escrito; en una derivada, su resultado).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct CalculoParametro {
+    pub variables: Vec<u16>,
+    #[serde(default = "uno")]
+    pub multiplicador: i16,
+    #[serde(default = "uno")]
+    pub divisor: i16,
+    #[serde(default)]
+    pub constante: i16,
+}
+
+fn uno() -> i16 {
+    1
 }
 
 /// Forma en que se LEE una `DefinicionParametro`: las partidas guardadas antes de `atenuar_si_negativo`
@@ -103,6 +123,8 @@ struct DefinicionGuardada {
     unidad: Option<String>,
     #[serde(default)]
     atenuar_si_negativo: Option<bool>,
+    #[serde(default)]
+    calculo: Option<CalculoParametro>,
 }
 
 impl From<DefinicionGuardada> for DefinicionParametro {
@@ -116,6 +138,7 @@ impl From<DefinicionGuardada> for DefinicionParametro {
             representar_mapa: g.representar_mapa,
             visibilidad: g.visibilidad,
             unidad: g.unidad,
+            calculo: g.calculo,
         }
     }
 }
@@ -187,6 +210,7 @@ pub fn parametros_por_defecto() -> Vec<DefinicionParametro> {
             unidad: unidad.map(Into::into),
             // La vida: a 0 o menos, la ficha se ve atenuada
             atenuar_si_negativo: id == ID_VIDA,
+            calculo: None,
         }
     };
     vec![
@@ -251,13 +275,200 @@ pub struct DefinicionVariable {
     pub neutro: i16,
     /// Cuántos puntos por encima (o por debajo) del neutro suman (o restan) 1. Siempre ≥ 1.
     pub escala: i16,
+    /// El grupo al que pertenece (`GrupoVariables.id`). Las partidas antiguas traen 0: se pasan al primer grupo de bases.
+    #[serde(default)]
+    pub grupo: u16,
+    /// Solo en un grupo de derivadas: las variables BASE cuyos resultados se suman (al menos una).
+    #[serde(default)]
+    pub bases: Vec<u16>,
+    /// Solo en un grupo de derivadas: variables BASE que cada ficha puede sumar o no (un check «+ com»).
+    #[serde(default)]
+    pub opcionales: Vec<u16>,
+    /// Solo en una derivada: `resultado = floor(suma · multiplicador / divisor) + constante (+ el bono del rango elegido)`,
+    /// donde `suma` son los resultados de sus bases y de las opcionales marcadas. Sin tocar son 1, 1 y 0 (la suma tal cual).
+    #[serde(default = "uno")]
+    pub multiplicador: i16,
+    #[serde(default = "uno")]
+    pub divisor: i16,
+    #[serde(default)]
+    pub constante: i16,
+    /// Solo en una derivada: la LISTA DE RANGOS (`ListaRangos.id`) de la que cada ficha elige UNO (Sin entrenar +0, Entrenado +2...). Varias
+    /// variables comparten una lista: se define una vez y se cambia en un solo sitio.
+    #[serde(default)]
+    pub rangos: Option<u16>,
+    /// Copia de las opciones de su lista de rangos (`rangos`), que Rust deja al día en `rangos::normalizar_rangos` para que la ficha, el chat y
+    /// los jugadores no necesiten buscar la lista. Nunca se escribe a mano. Si, al leer una partida o un archivo antiguos, una variable trae
+    /// opciones propias sin lista, pasan a una lista. Si tiene opciones, cada ficha elige UNA y su bono se suma al
+    /// resultado. Vacío = no hay elección.
+    #[serde(default)]
+    pub opciones: Vec<OpcionVariable>,
+}
+
+/// Una opción de una variable derivada con rangos (la competencia de Pathfinder: Entrenado +2, Experto +4...).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct OpcionVariable {
+    pub nombre: String,
+    pub bonus: i16,
+}
+
+/// Una lista de rangos con nombre («Competencia»: Sin entrenar +0, Entrenado +2, Experto +4...). Las variables derivadas la usan por su id.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ListaRangos {
+    pub id: u16,
+    pub nombre: String,
+    pub opciones: Vec<OpcionVariable>,
+}
+
+/// Los dos tipos de grupo: variables con valor propio (Fuerza...) o calculadas a partir de ellas (Acrobacias...).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TipoGrupoVariables {
+    Base,
+    Derivadas,
+}
+
+/// Un grupo de variables («Características», «Habilidades»...): una subpestaña en su definición y una sección en la ficha.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct GrupoVariables {
+    pub id: u16,
+    pub nombre: String,
+    pub tipo: TipoGrupoVariables,
+}
+
+/// Un CONJUNTO DE PARÁMETROS: todo lo que define cómo es el juego al que se juega (los parámetros visuales, las variables y
+/// sus grupos). Una partida guarda varios y usa uno (`EstadoPartida.conjunto_activo`); se pueden exportar a un archivo y
+/// traer de otra partida, y el programa trae algunos de serie definidos en código (`conjuntos::integrados`). Es también el
+/// contenido del archivo exportado.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ConjuntoParametros {
+    pub nombre: String,
+    #[serde(default)]
+    pub descripcion: String,
+    #[serde(default)]
+    pub parametros: Vec<DefinicionParametro>,
+    #[serde(default)]
+    pub grupos_variables: Vec<GrupoVariables>,
+    #[serde(default)]
+    pub variables: Vec<DefinicionVariable>,
+    /// Las listas de rangos que usan las variables derivadas (ver rangos.rs).
+    #[serde(default)]
+    pub listas_rangos: Vec<ListaRangos>,
+    /// Cómo se nombra el resultado de una comparación del chat (`1d100 <= 45`): sus niveles (extremo, difícil...) y sus críticos y
+    /// pifias. Sin ella, solo «Éxito» o «Fallo». Ver escalas.rs.
+    #[serde(default)]
+    pub escala_resultado: Option<EscalaResultado>,
+}
+
+/// Cómo se nombra el resultado de una comparación del chat. Es del conjunto de parámetros (cada rol tiene la suya): el chat solo
+/// compara, y esto decide si un acierto es «Éxito difícil» o un 1 natural es un «Crítico».
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct EscalaResultado {
+    /// Cómo se llama acertar sin más y fallar sin más.
+    pub nombre_exito: String,
+    pub nombre_fallo: String,
+    /// Solo por debajo (`<`, `<=`): niveles de acierto según qué parte del objetivo alcanza el total, del más estricto al más laxo.
+    #[serde(default)]
+    pub tramos: Vec<TramoEscala>,
+    /// Críticos y pifias: reglas sobre la cara que sale en un dado suelto. La primera que casa gana.
+    #[serde(default)]
+    pub naturales: Vec<ReglaNatural>,
+}
+
+/// «Éxito difícil» si `total <= objetivo · numerador / denominador`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct TramoEscala {
+    pub nombre: String,
+    pub numerador: i16,
+    pub denominador: i16,
+}
+
+/// Una regla sobre la cara natural de UN dado normal (sin ventaja ni multiplicador): si sale una cara de `desde` a `hasta`
+/// (y, si se indica, en un dado de `dado` caras y con un objetivo menor que `umbral_menor_que`), el resultado se llama `nombre`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ReglaNatural {
+    pub nombre: String,
+    /// Solo en un dado de estas caras (el 96-100 de Cthulhu es de un d100). `None` = en cualquiera.
+    #[serde(default)]
+    pub dado: Option<u16>,
+    pub desde: u16,
+    pub hasta: u16,
+    pub efecto: EfectoNatural,
+    /// Solo si el objetivo es menor que esto (la pifia de Cthulhu del 96 al 100 solo vale con un objetivo menor de 50).
+    #[serde(default)]
+    pub umbral_menor_que: Option<i32>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EfectoNatural {
+    /// Solo se nombra si la comparación acierta (el crítico de Cthulhu).
+    SoloSiAcierta,
+    /// Solo se nombra si la comparación falla (la pifia de Cthulhu).
+    SoloSiFalla,
+    /// Acierta aunque la comparación fallara (el 20 de D&D).
+    ForzarAcierto,
+    /// Falla aunque la comparación acertara (el 1 de D&D).
+    ForzarFallo,
+}
+
+/// Un conjunto que la partida tiene guardado. De los de serie guarda su propia copia (se puede editar sin tocar el original).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ConjuntoGuardado {
+    pub id: u16,
+    /// La clave del conjunto de serie del que viene («generico»); `None` si es propio o importado.
+    #[serde(default)]
+    pub origen: Option<String>,
+    /// Del activo, esto puede estar desfasado: sus definiciones de verdad son las «vivas» del estado
+    /// (`EstadoPartida::contenido_de`).
+    pub contenido: ConjuntoParametros,
+    /// Lo que tenía cada ficha cuando se dejó de usar este conjunto (solo el que NO está activo lo lleva al día). Es de la partida
+    /// y no del conjunto: no se exporta. Cada conjunto guarda lo suyo y solo lo recupera él: nada pasa de uno a otro aunque
+    /// los ids de sus parámetros coincidan.
+    #[serde(default)]
+    pub valores: ValoresDeFichas,
+}
+
+/// Los valores que las fichas tenían bajo un conjunto: de cada ficha, los de sus parámetros y variables y la variación de − y +;
+/// de cada instancia, el valor actual de sus parámetros con máximo.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct ValoresDeFichas {
+    #[serde(default)]
+    pub fichas: Vec<ValoresFicha>,
+    #[serde(default)]
+    pub instancias: Vec<ValoresInstancia>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ValoresFicha {
+    pub id_entidad: u16,
+    pub parametros: Vec<Parametro>,
+    pub variables: Vec<ValorVariable>,
+    pub pasos_valor: Vec<PasoValor>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ValoresInstancia {
+    pub id_instancia: u16,
+    /// La ficha de esa instancia: si el id de la instancia se reutilizó para otra ficha, no se le devuelve nada.
+    pub id_entidad: u16,
+    pub valores_actuales: Vec<ValorActual>,
+}
+
+/// El grupo con el que nace una partida (y al que van las variables de las partidas anteriores a los grupos).
+pub fn grupos_por_defecto() -> Vec<GrupoVariables> {
+    vec![GrupoVariables { id: 1, nombre: "Variables".into(), tipo: TipoGrupoVariables::Base }]
 }
 
 /// Valor de una variable en una ficha.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ValorVariable {
     pub id_definicion: u16,
+    /// El valor escrito (solo en las bases: una derivada se calcula).
     pub valor: i16,
+    /// Solo en una derivada: las opcionales que esta ficha tiene marcadas (se suman).
+    #[serde(default)]
+    pub opcionales: Vec<u16>,
+    /// Solo en una derivada con opciones: la que ha elegido esta ficha (su posición en `DefinicionVariable.opciones`).
+    #[serde(default)]
+    pub eleccion: u16,
 }
 
 /// Cuánto suman o restan los botones − / + de un valor actual (vida...) en una ficha. Solo se guardan los que no son 1.
@@ -548,6 +759,16 @@ pub struct Tiradas {
     /// Si los jugadores la ven. Solo el host puede tirar en privado; las de los jugadores son siempre públicas.
     #[serde(default = "tirada_publica")]
     pub publica: bool,
+    /// Solo en una comparación (`1d100 <= acro`): el resultado frente al objetivo, con el nombre que le da la escala del conjunto
+    /// («Éxito difícil», «Fallo», «Crítico»...); nunca texto escrito en el chat. Vacío en una tirada normal.
+    #[serde(default)]
+    pub veredicto: String,
+    /// Solo en una comparación: si acertó (para pintarla sin depender del texto, que define el host).
+    #[serde(default)]
+    pub acierta: Option<bool>,
+    /// Solo en una comparación: el resultado salió de una regla del dado natural (crítico, pifia...), no del nivel normal.
+    #[serde(default)]
+    pub especial: bool,
 }
 
 fn tirada_publica() -> bool {
