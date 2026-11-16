@@ -251,13 +251,46 @@ pub struct DefinicionVariable {
     pub neutro: i16,
     /// Cuántos puntos por encima (o por debajo) del neutro suman (o restan) 1. Siempre ≥ 1.
     pub escala: i16,
+    /// El grupo al que pertenece (`GrupoVariables.id`). Las partidas antiguas traen 0: se pasan al primer grupo de bases.
+    #[serde(default)]
+    pub grupo: u16,
+    /// Solo en un grupo de derivadas: las variables BASE cuyos resultados se suman (al menos una).
+    #[serde(default)]
+    pub bases: Vec<u16>,
+    /// Solo en un grupo de derivadas: variables BASE que cada ficha puede sumar o no (un check «+ com»).
+    #[serde(default)]
+    pub opcionales: Vec<u16>,
+}
+
+/// Los dos tipos de grupo: variables con valor propio (Fuerza...) o calculadas a partir de ellas (Acrobacias...).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TipoGrupoVariables {
+    Base,
+    Derivadas,
+}
+
+/// Un grupo de variables («Características», «Habilidades»...): una subpestaña en su definición y una sección en la ficha.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct GrupoVariables {
+    pub id: u16,
+    pub nombre: String,
+    pub tipo: TipoGrupoVariables,
+}
+
+/// El grupo con el que nace una partida (y al que van las variables de las partidas anteriores a los grupos).
+pub fn grupos_por_defecto() -> Vec<GrupoVariables> {
+    vec![GrupoVariables { id: 1, nombre: "Variables".into(), tipo: TipoGrupoVariables::Base }]
 }
 
 /// Valor de una variable en una ficha.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ValorVariable {
     pub id_definicion: u16,
+    /// El valor escrito (solo en las bases: una derivada se calcula).
     pub valor: i16,
+    /// Solo en una derivada: las opcionales que esta ficha tiene marcadas (se suman).
+    #[serde(default)]
+    pub opcionales: Vec<u16>,
 }
 
 /// Cuánto suman o restan los botones − / + de un valor actual (vida...) en una ficha. Solo se guardan los que no son 1.

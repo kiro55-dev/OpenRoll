@@ -283,6 +283,9 @@ su pantalla relee. Las peticiones de un jugador se ejecutan **en orden**, una a 
   vacía, `cambios_para` quita `CambioEntidad::Variable`); las definiciones van a todos en
   `VistaJugador.definiciones_variables` / `Cambios.definiciones_variables`. En el chat todos ven solo el resultado:
   «2d6 (3, 4) + f (+1) = 8».
+- **Grupos de variables (protocolo 13).** `VistaJugador.grupos_variables` / `Cambios.grupos_variables` (la lista entera si
+  cambia); `DefinicionVariable` lleva `grupo`, `bases` y `opcionales`, y `ValorVariable.opcionales` los checks de una
+  ficha (solo llegan a host y propietarios, como los valores). Definir grupos y variables sigue siendo solo del host.
 - **Paso de − / + (protocolo 12).** `poner_paso_valor { idEntidad, idDefinicion, paso }` está en la lista blanca: un jugador solo
   lo cambia en una ficha suya (`ficha_suya`). Es un `EntidadCambiada { PasoValor }` normal, y solo llega al host y a los
   propietarios (`Entidad.pasos_valor` se vacía en `vista_jugador`).

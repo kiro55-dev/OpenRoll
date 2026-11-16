@@ -35,10 +35,10 @@ fn resolver_variable(
     if !controla_instancia(est, jugador, id) {
         return Err("Solo puedes usar las variables de tus fichas".into());
     }
-    let valor = inst.base.variables.iter().find(|v| v.id_definicion == def.id).map_or(def.neutro, |v| v.valor);
-    // En el desglose, la abreviatura que definió el host o, sin ella, el nombre
+    // En el desglose, la abreviatura que definió el host o, sin ella, el nombre. Una derivada (Acrobacias) suma sus bases y
+    // las opcionales que la ficha tiene marcadas
     let nombre = if def.abreviatura.is_empty() { &def.nombre } else { &def.abreviatura };
-    Ok((nombre.clone(), variables::modificador(def, valor)))
+    Ok((nombre.clone(), variables::resultado(&est.definiciones_variables, &inst.base.variables, def)))
 }
 
 // Resalta en negrita si es 1 (pifia) o el valor máximo de caras (crítico)
@@ -378,7 +378,7 @@ mod tests {
         e.definiciones_variables = vec![var(1, "Fuerza", "f", 10, 2), var(2, "Cordura", "cor", 7, 3)];
         let ficha = |id: u16, propietarios: Vec<u16>, fuerza: i16| Entidad {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Jugador, parametros: vec![],
-            variables: vec![ValorVariable { id_definicion: 1, valor: fuerza }, ValorVariable { id_definicion: 2, valor: 9 }],
+            variables: vec![ValorVariable { id_definicion: 1, valor: fuerza, opcionales: vec![] }, ValorVariable { id_definicion: 2, valor: 9, opcionales: vec![] }],
             pasos_valor: vec![],
             cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
             archivos_adjuntos: vec![], es_unico: false, propietarios,
@@ -410,6 +410,20 @@ mod tests {
         assert_eq!((d.as_str(), total), ("10 + f (-3)", 7));
         // Sin variables el foco no importa
         assert_eq!(tirar_con(&e, ID_HOST, None, "1d1 + 2").unwrap().1, 3);
+    }
+
+    #[test]
+    fn una_derivada_suma_sus_bases_y_la_opcional_si_la_ficha_la_marca() {
+        use crate::tablero_general::variables::pruebas::{derivada, grupos};
+        let mut e = partida_con_variables(); // Fuerza 12 (+1), Cordura 9 (0)
+        e.grupos_variables = grupos();
+        e.definiciones_variables.push(var(3, "Competencia", "com", 0, 1));
+        e.definiciones_variables.push(derivada(4, "Atletismo", "atl", &[1], &[3]));
+        e.ajustar_a_definiciones();
+        e.instancias_activas[0].base.variables[2].valor = 2; // competencia +2
+        assert_eq!(tirar_con(&e, ID_HOST, Some(1), "1d1 + atl").unwrap(), ("1d1 (<b>1</b>) + atl (+1)".into(), 2), "sin el check");
+        e.instancias_activas[0].base.variables[3].opcionales = vec![3];
+        assert_eq!(tirar_con(&e, ID_HOST, Some(1), "1d1 + Atletismo").unwrap(), ("1d1 (<b>1</b>) + atl (+3)".into(), 4), "con él");
     }
 
     #[test]

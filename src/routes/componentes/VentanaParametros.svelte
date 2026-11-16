@@ -139,6 +139,7 @@
 <div
   class="ventana-flotante"
   style="left: {pos.x}px; top: {pos.y}px;"
+  style:width={pestana === "variables" ? "560px" : null}
   role="dialog"
   aria-label="Parámetros de la partida"
   tabindex="-1"

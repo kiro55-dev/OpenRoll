@@ -497,11 +497,15 @@ pub fn obtener_definiciones_variables(state: State<'_, AppState>) -> Vec<Definic
     state.lock().definiciones_variables.clone()
 }
 
-/// Nombre y abreviatura sin espacios de los lados (el nombre, con los de dentro reducidos a uno).
-fn limpiar_variable(d: DefinicionVariable) -> DefinicionVariable {
+/// Nombre y abreviatura sin espacios de los lados (el nombre, con los de dentro reducidos a uno). Una derivada no usa
+/// neutro ni escala: se guardan 0 y 1.
+fn limpiar_variable(d: DefinicionVariable, grupos: &[GrupoVariables]) -> DefinicionVariable {
+    let derivada = variables::tipo_de_grupo(grupos, d.grupo) == Some(TipoGrupoVariables::Derivadas);
     DefinicionVariable {
         nombre: d.nombre.split_whitespace().collect::<Vec<_>>().join(" "),
         abreviatura: d.abreviatura.trim().to_string(),
+        neutro: if derivada { 0 } else { d.neutro },
+        escala: if derivada { 1 } else { d.escala },
         ..d
     }
 }
@@ -514,16 +518,16 @@ pub fn crear_definicion_variable(definicion: DefinicionVariable, state: State<'_
 
 pub fn crear_definicion_variable_en(definicion: DefinicionVariable, state: &AppState) -> Result<DefinicionVariable, String> {
     let mut est = state.lock();
-    let definicion = limpiar_variable(definicion);
-    variables::validar_definicion(&est.definiciones_variables, &definicion)?;
+    let definicion = limpiar_variable(definicion, &est.grupos_variables);
+    variables::validar_definicion(&est.definiciones_variables, &est.grupos_variables, &definicion)?;
     let id = est.definiciones_variables.iter().map(|d| d.id).max().unwrap_or(0) + 1;
     let nueva = DefinicionVariable { id, ..definicion };
     registrar(&mut est, &state.almacen, DeltaPartida::VariableCreada(nueva.clone()));
     Ok(nueva)
 }
 
-/// Cambia el nombre, la abreviatura, el neutro o la escala de una variable. Los valores de las fichas no cambian
-/// (su resultado sí, si cambian el neutro o la escala).
+/// Cambia el nombre, la abreviatura, el neutro o la escala de una variable (o, en una derivada, sus bases y opcionales).
+/// Los valores de las fichas no cambian (su resultado sí). El grupo no se cambia: se conserva el guardado.
 #[tauri::command]
 pub fn modificar_definicion_variable(definicion: DefinicionVariable, state: State<'_, AppState>) -> Result<(), String> {
     modificar_definicion_variable_en(definicion, &state)
@@ -531,27 +535,82 @@ pub fn modificar_definicion_variable(definicion: DefinicionVariable, state: Stat
 
 pub fn modificar_definicion_variable_en(definicion: DefinicionVariable, state: &AppState) -> Result<(), String> {
     let mut est = state.lock();
-    let definicion = limpiar_variable(definicion);
     let Some(actual) = est.definiciones_variables.iter().find(|d| d.id == definicion.id) else {
         return Err("La variable ya no existe".into());
     };
+    let definicion = limpiar_variable(DefinicionVariable { grupo: actual.grupo, ..definicion }, &est.grupos_variables);
     if *actual == definicion {
         return Ok(());
     }
     let otras: Vec<DefinicionVariable> = est.definiciones_variables.iter().filter(|d| d.id != definicion.id).cloned().collect();
-    variables::validar_definicion(&otras, &definicion)?;
+    variables::validar_definicion(&otras, &est.grupos_variables, &definicion)?;
     registrar(&mut est, &state.almacen, DeltaPartida::VariableModificada(definicion));
     Ok(())
 }
 
-/// Borra una variable: desaparece de la lista y de todas las fichas.
+/// Borra una variable: desaparece de la lista y de todas las fichas, en cascada (sale de las derivadas que la usan, y las que
+/// se quedan sin bases también se borran). El front avisa antes con `efectoDeBorrar`.
 #[tauri::command]
 pub fn borrar_definicion_variable(id: u16, state: State<'_, AppState>) -> Result<(), String> {
+    borrar_definicion_variable_en(id, &state)
+}
+
+pub fn borrar_definicion_variable_en(id: u16, state: &AppState) -> Result<(), String> {
     let mut est = state.lock();
     if !est.definiciones_variables.iter().any(|d| d.id == id) {
         return Err("La variable ya no existe".into());
     }
     registrar(&mut est, &state.almacen, DeltaPartida::VariableBorrada(id));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn obtener_grupos_variables(state: State<'_, AppState>) -> Vec<GrupoVariables> {
+    state.lock().grupos_variables.clone()
+}
+
+/// Crea un grupo de variables (bases o derivadas). El id lo pone Rust.
+#[tauri::command]
+pub fn crear_grupo_variables(nombre: String, tipo: TipoGrupoVariables, state: State<'_, AppState>) -> Result<GrupoVariables, String> {
+    crear_grupo_variables_en(nombre, tipo, &state)
+}
+
+pub fn crear_grupo_variables_en(nombre: String, tipo: TipoGrupoVariables, state: &AppState) -> Result<GrupoVariables, String> {
+    let mut est = state.lock();
+    variables::validar_grupo(&est.grupos_variables, &nombre)?;
+    let id = est.grupos_variables.iter().map(|g| g.id).max().unwrap_or(0) + 1;
+    let grupo = GrupoVariables { id, nombre: nombre.trim().to_string(), tipo };
+    registrar(&mut est, &state.almacen, DeltaPartida::GrupoVariablesCreado(grupo.clone()));
+    Ok(grupo)
+}
+
+/// Otro nombre para un grupo de variables (sin cambio no hay delta).
+#[tauri::command]
+pub fn renombrar_grupo_variables(id: u16, nombre: String, state: State<'_, AppState>) -> Result<(), String> {
+    renombrar_grupo_variables_en(id, nombre, &state)
+}
+
+pub fn renombrar_grupo_variables_en(id: u16, nombre: String, state: &AppState) -> Result<(), String> {
+    let mut est = state.lock();
+    let actual = est.grupos_variables.iter().find(|g| g.id == id).ok_or("Ese grupo ya no existe")?;
+    let nombre = nombre.trim().to_string();
+    if actual.nombre == nombre {
+        return Ok(());
+    }
+    let otros: Vec<GrupoVariables> = est.grupos_variables.iter().filter(|g| g.id != id).cloned().collect();
+    variables::validar_grupo(&otros, &nombre)?;
+    registrar(&mut est, &state.almacen, DeltaPartida::GrupoVariablesRenombrado { id, nombre });
+    Ok(())
+}
+
+/// Borra un grupo con todas sus variables, en cascada como `borrar_definicion_variable`.
+#[tauri::command]
+pub fn borrar_grupo_variables(id: u16, state: State<'_, AppState>) -> Result<(), String> {
+    let mut est = state.lock();
+    if !est.grupos_variables.iter().any(|g| g.id == id) {
+        return Err("Ese grupo ya no existe".into());
+    }
+    registrar(&mut est, &state.almacen, DeltaPartida::GrupoVariablesBorrado(id));
     Ok(())
 }
 
@@ -1768,6 +1827,40 @@ mod tests_partidas {
         for (id, def, p) in [(1u16, ID_VIDA, 0u16), (1, ID_VIDA, PASO_VALOR_MAX + 1), (9, ID_VIDA, 2), (1, ID_ARMADURA, 2), (1, 99, 2)] {
             assert!(poner_paso_valor_en(id, def, p, &state).is_err(), "{id} {def} {p}");
         }
+    }
+
+    #[test]
+    fn grupos_y_derivadas_desde_los_comandos() {
+        use crate::tablero_general::variables::pruebas::var;
+        let state = estado_en_a("grupos_variables");
+        let habilidades = crear_grupo_variables_en(" Habilidades ".into(), TipoGrupoVariables::Derivadas, &state).unwrap();
+        assert_eq!((habilidades.id, habilidades.nombre.as_str()), (2, "Habilidades"));
+        assert!(crear_grupo_variables_en("habilidades".into(), TipoGrupoVariables::Base, &state).is_err(), "nombre repetido");
+
+        let des = crear_definicion_variable_en(var(0, "Destreza", "des", 10, 2), &state).unwrap();
+        let com = crear_definicion_variable_en(var(0, "Competencia", "com", 0, 1), &state).unwrap();
+        // Una derivada: neutro y escala no se usan (se guardan 0 y 1)
+        let acro = DefinicionVariable {
+            grupo: habilidades.id, bases: vec![des.id], opcionales: vec![com.id], ..var(0, "Acrobacias", "acro", 77, 9)
+        };
+        let acro = crear_definicion_variable_en(acro, &state).unwrap();
+        assert_eq!((acro.neutro, acro.escala), (0, 1));
+        // Una base en el grupo de derivadas, o una derivada sin bases, no valen
+        assert!(crear_definicion_variable_en(DefinicionVariable { grupo: 2, ..var(0, "Sigilo", "sig", 10, 2) }, &state).is_err());
+
+        // Modificar no cambia el grupo, aunque el front mande otro
+        modificar_definicion_variable_en(DefinicionVariable { abreviatura: "acr".into(), grupo: 1, ..acro.clone() }, &state).unwrap();
+        let guardada = state.lock().definiciones_variables.iter().find(|d| d.id == acro.id).cloned().unwrap();
+        assert_eq!((guardada.abreviatura.as_str(), guardada.grupo), ("acr", 2));
+
+        renombrar_grupo_variables_en(2, "Pericias".into(), &state).unwrap();
+        assert_eq!(state.lock().grupos_variables[1].nombre, "Pericias");
+        assert!(renombrar_grupo_variables_en(2, "Variables".into(), &state).is_err(), "el de serie ya se llama así");
+
+        // Borrar Destreza se lleva Acrobacias (se queda sin bases)
+        borrar_definicion_variable_en(des.id, &state).unwrap();
+        assert_eq!(state.lock().definiciones_variables.iter().map(|d| d.id).collect::<Vec<_>>(), vec![com.id]);
+        assert!(borrar_definicion_variable_en(des.id, &state).is_err(), "ya no existe");
     }
 
     #[test]

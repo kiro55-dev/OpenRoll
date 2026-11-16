@@ -85,6 +85,22 @@ export interface DefinicionVariable {
   abreviatura: string;
   neutro: number;
   escala: number;
+  /** Su grupo (`GrupoVariables.id`). */
+  grupo: number;
+  /** Solo derivadas: las variables base cuyos resultados se suman (al menos una). */
+  bases: number[];
+  /** Solo derivadas: variables base que cada ficha puede sumar o no (un check «+ com»). */
+  opcionales: number[];
+}
+
+/** Los dos tipos de grupo de variables (`TipoGrupoVariables` en Rust). */
+export type TipoGrupoVariables = "Base" | "Derivadas";
+
+/** Un grupo de variables («Características», «Habilidades»...). */
+export interface GrupoVariables {
+  id: number;
+  nombre: string;
+  tipo: TipoGrupoVariables;
 }
 
 /** Paso de − / + de un parámetro en una ficha (`PasoValor` en Rust). */
@@ -99,7 +115,10 @@ export const PASO_VALOR_MAX = 9999;
 /** Valor de una variable en una ficha. */
 export interface ValorVariable {
   id_definicion: number;
+  /** El valor escrito (solo en las bases: una derivada se calcula). */
   valor: number;
+  /** Solo en una derivada: las opcionales que esta ficha tiene marcadas. */
+  opcionales?: number[];
 }
 
 /** Ids de los parámetros de serie (fijos en Rust: `ID_VIDA`...). */
@@ -252,6 +271,8 @@ class Partida {
   definiciones = $state<DefinicionParametro[]>([]);
   /** Variables de las fichas (Fuerza «f»...), usables en el chat de dados. */
   definicionesVariables = $state<DefinicionVariable[]>([]);
+  /** Sus grupos (bases o derivadas), en su orden. */
+  gruposVariables = $state<GrupoVariables[]>([]);
 
   /** «Fichas activas» de arriba abajo. */
   instanciasOrdenadas = $derived([...this.instancias].sort((a, b) => a.orden - b.orden || a.id_instancia - b.id_instancia));
@@ -511,14 +532,16 @@ class Partida {
   // Parámetros de la partida (comunes a todas las fichas)
   // ------------------------------------------------------------------
 
-  /** Los parámetros y las variables de la partida. */
+  /** Los parámetros y las variables (con sus grupos) de la partida. */
   async recargarDefiniciones() {
-    const [definiciones, variables] = await Promise.all([
+    const [definiciones, variables, grupos] = await Promise.all([
       invoke<DefinicionParametro[]>("obtener_definiciones_parametros"),
-      invoke<DefinicionVariable[]>("obtener_definiciones_variables")
+      invoke<DefinicionVariable[]>("obtener_definiciones_variables"),
+      invoke<GrupoVariables[]>("obtener_grupos_variables")
     ]);
     this.definiciones = definiciones;
     this.definicionesVariables = variables ?? [];
+    this.gruposVariables = grupos ?? [];
   }
 
   /** Crear, borrar o reordenar un parámetro cambia también las fichas: se vuelve a leer todo.
@@ -567,9 +590,25 @@ class Partida {
     return this.#cambiarDefiniciones("modificar_definicion_variable", { definicion });
   }
 
-  /** Desaparece de la lista y de todas las fichas. */
+  /** Desaparece de la lista y de todas las fichas, en cascada (ver `efectoDeBorrar` en $lib/variables). */
   borrarVariable(id: number) {
     return this.#cambiarDefiniciones("borrar_definicion_variable", { id });
+  }
+
+  /** Crea un grupo de variables (bases o derivadas) y lo devuelve con el id que le puso Rust. */
+  async crearGrupoVariables(nombre: string, tipo: TipoGrupoVariables): Promise<GrupoVariables> {
+    let creado: GrupoVariables | null = null;
+    await this.#cambiarDefiniciones("crear_grupo_variables", { nombre, tipo }, (r) => (creado = r as GrupoVariables));
+    return creado!;
+  }
+
+  renombrarGrupoVariables(id: number, nombre: string) {
+    return this.#cambiarDefiniciones("renombrar_grupo_variables", { id, nombre });
+  }
+
+  /** Borra el grupo y sus variables, en cascada. */
+  borrarGrupoVariables(id: number) {
+    return this.#cambiarDefiniciones("borrar_grupo_variables", { id });
   }
 
   /** `ids` = todas las variables en el orden nuevo (el que seguirán las fichas). */

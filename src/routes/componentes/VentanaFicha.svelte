@@ -15,7 +15,7 @@
   import { alSoltarArchivos } from "$lib/soltarArchivos";
   import { moverVentana } from "$lib/moverVentana";
   import { esJugador } from "$lib/modo";
-  import { LIMITE_VALOR_VARIABLE, textoModificador } from "$lib/variables";
+  import { LIMITE_VALOR_VARIABLE, etiquetaVariable, textoModificador } from "$lib/variables";
   import CajaFoto from "./ventana-ficha/CajaFoto.svelte";
   import CampoNumero from "./ventana-ficha/CampoNumero.svelte";
   import AdjuntosFicha from "./ventana-ficha/AdjuntosFicha.svelte";
@@ -41,8 +41,8 @@
       if (objetivo?.tagName === "TEXTAREA") return;
       e.preventDefault();
       // En el valor de una variable, Enter no guarda: pasa a la fila siguiente y, en la última, suelta el foco
-      if (objetivo instanceof HTMLInputElement && objetivo.closest(".tabla-variables")) {
-        const campos = [...(ventana?.querySelectorAll<HTMLInputElement>(".tabla-variables input") ?? [])];
+      if (objetivo instanceof HTMLInputElement && objetivo.type === "number" && objetivo.closest(".tabla-variables")) {
+        const campos = [...(ventana?.querySelectorAll<HTMLInputElement>(".tabla-variables input[type='number']") ?? [])];
         const siguiente = campos[campos.indexOf(objetivo) + 1];
         if (siguiente) {
           siguiente.focus();
@@ -204,31 +204,75 @@
           {esJugador ? "El host aún no ha definido variables." : "Aún no hay variables. Defínelas en ⚙ → «Editar parámetros de esta partida» → «Variables»."}
         </p>
       {:else}
-        <table class="tabla-variables">
-          <thead>
-            <tr><th>Nombre</th><th>Abreviatura</th><th>Valor</th><th>Resultado</th></tr>
-          </thead>
-          <tbody>
-            {#each editor.variables as d (d.id)}
-              {@const resultado = editor.resultadoVariable(d)}
-              <tr>
-                <td class="nombre">{d.nombre}</td>
-                <td class="abreviatura">{d.abreviatura || "—"}</td>
-                <td>
-                  <CampoNumero
-                    min={-LIMITE_VALOR_VARIABLE}
-                    max={LIMITE_VALOR_VARIABLE}
-                    titulo="Neutro {d.neutro}, escala {d.escala} (rueda del ratón para ajustar)"
-                    bind:value={() => editor.valorVariable(d.id), (v) => editor.ponerValorVariable(d.id, v)}
-                  />
-                </td>
-                <td class="resultado" class:positivo={resultado !== null && resultado > 0} class:negativo={resultado !== null && resultado < 0}>
-                  {resultado === null ? "—" : textoModificador(resultado)}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+        <!-- Una sección por grupo: las bases con su valor y las derivadas ya calculadas, con los checks de sus opcionales -->
+        {#each editor.gruposVariables as grupo (grupo.id)}
+          {@const suyas = editor.variablesDe(grupo)}
+          {#if suyas.length > 0}
+            <h4 class="titulo-grupo">{grupo.nombre}</h4>
+            <table class="tabla-variables">
+              {#if grupo.tipo === "Base"}
+                <thead>
+                  <tr><th>Nombre</th><th>Abreviatura</th><th>Valor</th><th>Resultado</th></tr>
+                </thead>
+                <tbody>
+                  {#each suyas as d (d.id)}
+                    {@const resultado = editor.resultadoVariable(d)}
+                    <tr>
+                      <td class="nombre">{d.nombre}</td>
+                      <td class="abreviatura">{d.abreviatura || "—"}</td>
+                      <td>
+                        <CampoNumero
+                          min={-LIMITE_VALOR_VARIABLE}
+                          max={LIMITE_VALOR_VARIABLE}
+                          titulo="Neutro {d.neutro}, escala {d.escala} (rueda del ratón para ajustar)"
+                          bind:value={() => editor.valorVariable(d.id), (v) => editor.ponerValorVariable(d.id, v)}
+                        />
+                      </td>
+                      <td class="resultado" class:positivo={resultado !== null && resultado > 0} class:negativo={resultado !== null && resultado < 0}>
+                        {resultado === null ? "—" : textoModificador(resultado)}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              {:else}
+                <thead>
+                  <tr><th>Nombre</th><th>Abreviatura</th><th>Opcionales</th><th>Resultado</th></tr>
+                </thead>
+                <tbody>
+                  {#each suyas as d (d.id)}
+                    {@const resultado = editor.resultadoVariable(d) ?? 0}
+                    <tr>
+                      <td class="nombre">{d.nombre}</td>
+                      <td class="abreviatura">{d.abreviatura || "—"}</td>
+                      <td class="opcionales">
+                        {#each d.opcionales as idOpcional (idOpcional)}
+                          {@const opcional = editor.variables.find((v) => v.id === idOpcional)}
+                          {#if opcional}
+                            <!-- Check redondo: si está marcado, se suma «+ <abreviatura o nombre de la opcional>» -->
+                            <label class="opcional" title={ayuda(`Sumar ${opcional.nombre} a ${d.nombre}`)}>
+                              <input
+                                type="checkbox"
+                                class="redondo"
+                                checked={editor.opcionalMarcada(d.id, idOpcional)}
+                                onchange={() => editor.alternarOpcional(d.id, idOpcional)}
+                              />
+                              <span>+ {etiquetaVariable(opcional)}</span>
+                            </label>
+                          {/if}
+                        {:else}
+                          <span class="sin">—</span>
+                        {/each}
+                      </td>
+                      <td class="resultado" class:positivo={resultado > 0} class:negativo={resultado < 0} title={editor.desgloseVariable(d)}>
+                        {textoModificador(resultado)}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              {/if}
+            </table>
+          {/if}
+        {/each}
         <p class="ayuda" title={ayuda("Si hay varias fichas con el foco, o ninguna, una tirada con variables da error")}>
           En el chat, con el foco en una instancia de esta ficha: «2d6 + {editor.variables[0].abreviatura || editor.variables[0].nombre}» suma su resultado.
         </p>
@@ -281,6 +325,19 @@
   .subpestanas button:hover { color: #f4f4f5; }
   .subpestanas button.activa { color: white; border-bottom-color: #3b82f6; }
 
+  .titulo-grupo { margin: 6px 0 0; font-size: 11px; font-weight: 700; color: #d4d4d8; text-transform: uppercase; letter-spacing: 0.03em; }
+  .titulo-grupo:first-child { margin-top: 0; }
+  .tabla-variables .opcionales { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+  .tabla-variables .sin { color: #52525b; }
+  .opcional { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: #d4d4d8; font-size: 11px; white-space: nowrap; }
+  /* Check redondo */
+  .redondo {
+    appearance: none; -webkit-appearance: none; margin: 0; width: 13px; height: 13px; border-radius: 50%;
+    border: 1.5px solid #71717a; background: #09090b; cursor: pointer; display: inline-grid; place-content: center;
+  }
+  .redondo::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #3b82f6; transform: scale(0); transition: transform 0.1s; }
+  .redondo:checked { border-color: #3b82f6; }
+  .redondo:checked::before { transform: scale(1); }
   .tabla-variables { width: 100%; border-collapse: collapse; font-size: 11px; }
   .tabla-variables th { color: #71717a; font-size: 10px; font-weight: 600; text-align: left; padding: 2px 6px; border-bottom: 1px solid #27272a; }
   .tabla-variables td { padding: 3px 6px; border-bottom: 1px solid #1f1f23; }

@@ -192,19 +192,51 @@ describe("guardar, cancelar y borrar", () => {
 
 describe("variables", () => {
   const VARIABLES = [
-    { id: 1, nombre: "Fuerza", abreviatura: "f", neutro: 10, escala: 2 },
-    { id: 2, nombre: "Cordura", abreviatura: "cor", neutro: 7, escala: 3 }
+    { id: 1, nombre: "Fuerza", abreviatura: "f", neutro: 10, escala: 2, grupo: 1, bases: [], opcionales: [] },
+    { id: 2, nombre: "Cordura", abreviatura: "cor", neutro: 7, escala: 3, grupo: 1, bases: [], opcionales: [] }
   ];
+  const GRUPOS = [{ id: 1, nombre: "Variables", tipo: "Base" as const }];
 
-  async function conVariables(e = entidad()) {
+  async function conVariables(e = entidad(), variables: any[] = VARIABLES, grupos: any[] = GRUPOS) {
     const ed = await nuevoEditor(e);
     const { EditorFicha } = await import("$lib/editorFicha.svelte");
-    return new EditorFicha(ed.entidad, false, structuredClone(DEFINICIONES) as any, structuredClone(VARIABLES));
+    return new EditorFicha(ed.entidad, false, structuredClone(DEFINICIONES) as any, structuredClone(variables), structuredClone(grupos));
   }
 
   it("una ficha sin valores recibe el neutro de cada variable, en su orden", async () => {
     const ed = await conVariables(entidad({ variables: [{ id_definicion: 2, valor: 9 }, { id_definicion: 99, valor: 1 }] }));
-    expect(ed.entidad.variables).toEqual([{ id_definicion: 1, valor: 10 }, { id_definicion: 2, valor: 9 }]);
+    expect(ed.entidad.variables).toEqual([
+      { id_definicion: 1, valor: 10, opcionales: [] },
+      { id_definicion: 2, valor: 9, opcionales: [] }
+    ]);
+  });
+
+  it("una derivada se recalcula sola al cambiar sus bases o marcar una opcional («+ com»)", async () => {
+    const variables = [
+      { id: 1, nombre: "Destreza", abreviatura: "des", neutro: 10, escala: 2, grupo: 1, bases: [], opcionales: [] },
+      { id: 3, nombre: "Competencia", abreviatura: "com", neutro: 0, escala: 1, grupo: 1, bases: [], opcionales: [] },
+      { id: 4, nombre: "Acrobacias", abreviatura: "acro", neutro: 0, escala: 1, grupo: 2, bases: [1], opcionales: [3] }
+    ];
+    const grupos = [...GRUPOS, { id: 2, nombre: "Habilidades", tipo: "Derivadas" as const }];
+    const ed = await conVariables(entidad(), variables, grupos);
+    const acrobacias = ed.variables[2];
+    expect(ed.variablesDe(ed.gruposVariables[1]).map((d) => d.nombre)).toEqual(["Acrobacias"]);
+    ed.ponerValorVariable(1, 16);
+    ed.ponerValorVariable(3, 2);
+    expect(ed.resultadoVariable(acrobacias)).toBe(3);
+    expect(ed.opcionalMarcada(4, 3)).toBe(false);
+    ed.alternarOpcional(4, 3);
+    expect(ed.opcionalMarcada(4, 3)).toBe(true);
+    expect(ed.resultadoVariable(acrobacias)).toBe(5);
+    expect(ed.desgloseVariable(acrobacias)).toBe("des (+3) + com (+2)");
+    ed.ponerValorVariable(1, 18); // cambia la base: la derivada la sigue
+    expect(ed.resultadoVariable(acrobacias)).toBe(6);
+    ed.alternarOpcional(4, 3);
+    expect(ed.resultadoVariable(acrobacias)).toBe(4);
+    // Guardar no exige valor a la derivada (se calcula) y lleva los checks
+    ed.alternarOpcional(4, 3);
+    expect(await ed.guardar()).toBe(true);
+    expect(ed.entidad.variables.find((v: any) => v.id_definicion === 4)?.opcionales).toEqual([3]);
   });
 
   it("el resultado se recalcula con el valor escrito y se redondea hacia abajo", async () => {

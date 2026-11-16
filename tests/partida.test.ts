@@ -62,6 +62,7 @@ function crearBackend() {
           return;
         }
         case "obtener_definiciones_variables": return clon(b.variables);
+        case "obtener_grupos_variables": return [{ id: 1, nombre: "Variables", tipo: "Base" }];
         case "crear_definicion_variable": {
           if (b.variables.some((v) => v.abreviatura === args.definicion.abreviatura)) throw "Ya hay una variable que se llama o se abrevia";
           const v = { ...clon(args.definicion), id: Math.max(0, ...b.variables.map((x) => x.id)) + 1 };

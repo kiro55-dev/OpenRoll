@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::tablero_general::estado::EstadoPartida;
-use crate::tablero_general::modelos::{DefinicionParametro, DefinicionVariable, Entidad, IdJugador, Instancia, Mapa, Tiradas, Zona, ID_HOST};
+use crate::tablero_general::modelos::{DefinicionParametro, DefinicionVariable, Entidad, GrupoVariables, IdJugador, Instancia, Mapa, Tiradas, Zona, ID_HOST};
 use crate::tablero_general::visibilidad;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -32,6 +32,9 @@ pub struct VistaJugador {
     /// definiciones: los valores van en cada ficha, y solo en las suyas.
     #[serde(default)]
     pub definiciones_variables: Vec<DefinicionVariable>,
+    /// Los grupos de esas variables (bases o derivadas): las secciones de la pestaña «Variables» de sus fichas.
+    #[serde(default)]
+    pub grupos_variables: Vec<GrupoVariables>,
     /// El chat de tiradas: es de todos (cada tirada lleva el nombre de quien la hizo), la más reciente primero.
     pub historial_tiradas: Vec<Tiradas>,
     /// El mapa que debe tener abierto: el del host si lo comparte (ver `visibilidad::mapa_visible`). El jugador no
@@ -66,6 +69,9 @@ pub struct Cambios {
     /// La lista entera cuando cambia.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definiciones_variables: Option<Vec<DefinicionVariable>>,
+    /// La lista entera cuando cambia.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grupos_variables: Option<Vec<GrupoVariables>>,
     /// El chat entero cuando cambia (son 20 tiradas como mucho).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub historial_tiradas: Option<Vec<Tiradas>>,
@@ -99,6 +105,7 @@ pub fn vista_para(jugador: IdJugador, est: &EstadoPartida) -> VistaJugador {
     VistaJugador {
         zonas, mapas, instancias, entidades, definiciones,
         definiciones_variables: est.definiciones_variables.clone(),
+        grupos_variables: est.grupos_variables.clone(),
         // Las tiradas privadas del host no salen (las de los jugadores son siempre públicas)
         historial_tiradas: est.historial_tiradas.iter().filter(|t| t.publica || jugador == ID_HOST).cloned().collect(),
         mapa_visible: visibilidad::mapa_visible(est),
@@ -117,6 +124,9 @@ pub fn diferencias(antes: &VistaJugador, despues: &VistaJugador) -> Option<Cambi
     }
     if antes.definiciones_variables != despues.definiciones_variables {
         c.definiciones_variables = Some(despues.definiciones_variables.clone());
+    }
+    if antes.grupos_variables != despues.grupos_variables {
+        c.grupos_variables = Some(despues.grupos_variables.clone());
     }
     if antes.historial_tiradas != despues.historial_tiradas {
         c.historial_tiradas = Some(despues.historial_tiradas.clone());
@@ -161,6 +171,9 @@ pub fn aplicar(vista: &mut VistaJugador, cambios: &Cambios) {
     }
     if let Some(d) = &cambios.definiciones_variables {
         vista.definiciones_variables = d.clone();
+    }
+    if let Some(g) = &cambios.grupos_variables {
+        vista.grupos_variables = g.clone();
     }
     if let Some(h) = &cambios.historial_tiradas {
         vista.historial_tiradas = h.clone();

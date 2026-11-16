@@ -13,6 +13,7 @@ export const vistaVacia = (): VistaJugador => ({
   entidades: [],
   definiciones: [],
   definiciones_variables: [],
+  grupos_variables: [],
   historial_tiradas: [],
   mapa_visible: null
 });
@@ -35,6 +36,7 @@ export function aplicarCambios(vista: VistaJugador, c: Cambios): VistaJugador {
     entidades: poner(vista.entidades, c.entidades, c.entidades_quitadas, (e) => e.id),
     definiciones: c.definiciones ?? vista.definiciones,
     definiciones_variables: c.definiciones_variables ?? vista.definiciones_variables ?? [],
+    grupos_variables: c.grupos_variables ?? vista.grupos_variables ?? [],
     historial_tiradas: c.historial_tiradas ?? vista.historial_tiradas,
     mapa_visible: c.mapa_visible_cambiado ? (c.mapa_visible ?? null) : (vista.mapa_visible ?? null)
   };
@@ -55,7 +57,7 @@ export function partesCambiadas(c: Cambios): PartesCambiadas {
     zonas: algo(c.zonas, c.zonas_quitadas),
     mapas: algo(c.mapas, c.mapas_quitados) || !!c.mapa_visible_cambiado,
     entidades: algo(c.instancias, c.instancias_quitadas) || algo(c.entidades, c.entidades_quitadas),
-    definiciones: c.definiciones !== undefined || c.definiciones_variables !== undefined,
+    definiciones: c.definiciones !== undefined || c.definiciones_variables !== undefined || c.grupos_variables !== undefined,
     tiradas: c.historial_tiradas !== undefined
   };
 }
@@ -126,6 +128,8 @@ export function responder(cmd: string, args: Record<string, unknown>, vista: Vis
       return copia(vista.definiciones);
     case "obtener_definiciones_variables":
       return copia(vista.definiciones_variables ?? []);
+    case "obtener_grupos_variables":
+      return copia(vista.grupos_variables ?? []);
     case "obtener_mapa_visible": {
       // El que tiene abierto el host (si lo comparte); si aún no hay, el primero que ve. Puede ser de cualquier zona.
       const orden = new Map(vista.zonas.map((z) => [z.id, z.orden]));

@@ -18,7 +18,7 @@ use crate::tablero_general::cambios_entidad::{self, CambioEntidad};
 use crate::tablero_general::modelos::*;
 use crate::tablero_general::papelera::{self, Borrado, GrupoPapelera};
 use crate::tablero_general::tablero;
-use crate::tablero_general::variables::normalizar_variables;
+use crate::tablero_general::variables::{self, normalizar_variables};
 
 // ========================================================
 // 1. DELTAS (eventos de la partida)
@@ -59,7 +59,15 @@ pub enum DeltaPartida {
     /// Cambia el nombre, la abreviatura, el neutro o la escala de una variable. Las fichas conservan sus valores.
     VariableModificada(DefinicionVariable),
     /// Quita una variable de la partida y su valor de todas las fichas.
+    /// Quita una variable de la partida y su valor de todas las fichas, EN CASCADA: sale de las bases y opcionales de las
+    /// derivadas, y las que se quedan sin bases también se borran (`variables::aplicar_borrado`).
     VariableBorrada(u16),
+    /// Un grupo de variables nuevo (o reemplaza el de ese id).
+    GrupoVariablesCreado(GrupoVariables),
+    /// Otro nombre para un grupo de variables.
+    GrupoVariablesRenombrado { id: u16, nombre: String },
+    /// Se borra un grupo con todas sus variables (en cascada, como `VariableBorrada`).
+    GrupoVariablesBorrado(u16),
     /// Nuevo orden de las variables (ids). Las fichas lo siguen.
     VariablesReordenadas(Vec<u16>),
     /// Instancia nueva (o reemplaza la de ese id). Las reglas para construirla están en `instancias.rs`.
@@ -116,6 +124,9 @@ pub struct EstadoPartida {
     /// Variables de las fichas (Fuerza «f»...), usables en el chat de dados. Ver variables.rs.
     #[serde(default)]
     pub definiciones_variables: Vec<DefinicionVariable>,
+    /// Los grupos de esas variables (bases o derivadas), en su orden. Las partidas anteriores nacen con el de serie.
+    #[serde(default = "grupos_por_defecto")]
+    pub grupos_variables: Vec<GrupoVariables>,
     #[serde(default)]
     pub zonas: Vec<Zona>,
     #[serde(default)]
@@ -178,6 +189,7 @@ impl Default for EstadoPartida {
             ultimo_seq: 0,
             definiciones_parametros: parametros_por_defecto(),
             definiciones_variables: Vec::new(),
+            grupos_variables: grupos_por_defecto(),
             zonas: Vec::new(),
             mapas: Vec::new(),
             banco_entidades: Vec::new(),
@@ -415,7 +427,24 @@ impl EstadoPartida {
                 self.ajustar_a_definiciones();
             }
             DeltaPartida::VariableBorrada(id) => {
-                self.definiciones_variables.retain(|d| d.id != *id);
+                variables::aplicar_borrado(&mut self.definiciones_variables, &[*id]);
+                self.ajustar_a_definiciones();
+            }
+            DeltaPartida::GrupoVariablesCreado(grupo) => {
+                match self.grupos_variables.iter().position(|g| g.id == grupo.id) {
+                    Some(pos) => self.grupos_variables[pos] = grupo.clone(),
+                    None => self.grupos_variables.push(grupo.clone()),
+                }
+            }
+            DeltaPartida::GrupoVariablesRenombrado { id, nombre } => {
+                if let Some(g) = self.grupos_variables.iter_mut().find(|g| g.id == *id) {
+                    g.nombre = nombre.clone();
+                }
+            }
+            DeltaPartida::GrupoVariablesBorrado(id) => {
+                let suyas: Vec<u16> = self.definiciones_variables.iter().filter(|d| d.grupo == *id).map(|d| d.id).collect();
+                variables::aplicar_borrado(&mut self.definiciones_variables, &suyas);
+                self.grupos_variables.retain(|g| g.id != *id);
                 self.ajustar_a_definiciones();
             }
             DeltaPartida::VariablesReordenadas(ids) => {
@@ -463,6 +492,8 @@ impl EstadoPartida {
 
     pub fn ajustar_a_definiciones(&mut self) {
         let defs = self.definiciones_parametros.clone();
+        // Las variables sin grupo (de antes de los grupos) pasan al primero de bases
+        variables::asegurar_grupos(&mut self.grupos_variables, &mut self.definiciones_variables);
         let vars = self.definiciones_variables.clone();
         for e in self.banco_entidades.iter_mut() {
             normalizar_parametros(&defs, &mut e.parametros);
@@ -1064,9 +1095,43 @@ mod tests {
         assert_eq!(valores(&e), vec![(1, 14)]);
         assert_eq!(e.banco_entidades[0].variables.len(), 1);
 
-        // Una partida guardada antes de las variables carga sin ninguna
+        // Una partida guardada antes de las variables carga sin ninguna, con el grupo de serie
         let vieja: EstadoPartida = serde_json::from_str("{}").unwrap();
         assert!(vieja.definiciones_variables.is_empty());
+        assert_eq!(vieja.grupos_variables, grupos_por_defecto());
+    }
+
+    #[test]
+    fn grupos_de_variables_y_borrado_en_cascada() {
+        use crate::tablero_general::variables::pruebas::{derivada, grupos, var};
+        let mut e = EstadoPartida::default();
+        e.banco_entidades.push(instancia(1, 4).base);
+        e.aplicar_delta(&DeltaPartida::GrupoVariablesCreado(grupos()[1].clone())); // «Habilidades», derivadas
+        e.aplicar_delta(&DeltaPartida::VariableCreada(var(1, "Destreza", "des", 10, 2)));
+        e.aplicar_delta(&DeltaPartida::VariableCreada(var(2, "Fuerza", "fue", 10, 2)));
+        e.aplicar_delta(&DeltaPartida::VariableCreada(var(3, "Competencia", "com", 0, 1)));
+        e.aplicar_delta(&DeltaPartida::VariableCreada(derivada(4, "Acrobacias", "acro", &[1], &[3])));
+        e.aplicar_delta(&DeltaPartida::VariableCreada(derivada(5, "Atletismo", "atl", &[2, 1], &[3])));
+        e.aplicar_delta(&DeltaPartida::GrupoVariablesRenombrado { id: 2, nombre: "Pericias".into() });
+        assert_eq!(e.grupos_variables[1].nombre, "Pericias");
+
+        // La ficha marca la competencia en Acrobacias; normalizar la conserva
+        e.banco_entidades[0].variables[3].opcionales = vec![3];
+        e.ajustar_a_definiciones();
+        assert_eq!(e.banco_entidades[0].variables[3].opcionales, vec![3]);
+
+        // Borrar Destreza: Acrobacias se queda sin bases y se va; Atletismo solo la pierde
+        e.aplicar_delta(&DeltaPartida::VariableBorrada(1));
+        let ids = |e: &EstadoPartida| e.definiciones_variables.iter().map(|d| d.id).collect::<Vec<_>>();
+        assert_eq!(ids(&e), vec![2, 3, 5]);
+        assert_eq!(e.definiciones_variables[2].bases, vec![2]);
+        assert_eq!(e.banco_entidades[0].variables.len(), 3, "la ficha sigue a las definiciones");
+
+        // Borrar el grupo de bases borra sus variables y, en cascada, la derivada que dependía de ellas
+        e.aplicar_delta(&DeltaPartida::GrupoVariablesBorrado(1));
+        assert!(e.definiciones_variables.is_empty());
+        assert_eq!(e.grupos_variables.iter().map(|g| g.id).collect::<Vec<_>>(), vec![2]);
+        assert!(e.banco_entidades[0].variables.is_empty());
     }
 
     #[test]

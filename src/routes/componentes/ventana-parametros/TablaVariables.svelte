@@ -1,112 +1,196 @@
 <!-- src/routes/componentes/ventana-parametros/TablaVariables.svelte -->
-<!-- Pestaña «Variables» de la ventana de parámetros: las variables de la partida (Fuerza «f»...), que cada
-     ficha rellena con su valor y se usan en el chat de dados (`2d6 + f`). Formulario rápido: se edita en
-     la propia tabla, se reordena arrastrando y «+» añade una con neutro 10 y escala 2. -->
+<!-- Pestaña «Variables» de la ventana de parámetros: los GRUPOS de variables, una subpestaña cada uno. Un grupo es de
+     bases (Fuerza, Destreza... cada ficha pone su valor) o de derivadas (Acrobacias = Destreza + Competencia si la ficha la
+     marca). Doble clic en una subpestaña la renombra; «+» crea un grupo nuevo eligiendo su tipo. Las variables de cada
+     grupo se editan en `ListaGrupoVariables`. -->
 <script lang="ts">
-  import { flip } from "svelte/animate";
-  import { partida, type DefinicionVariable } from "$lib/partida.svelte";
-  import { ListaOrdenable } from "$lib/ordenable.svelte";
-  import ArrastreFlotante from "../comunes/ArrastreFlotante.svelte";
-  import FilaVariable from "./FilaVariable.svelte";
+  import { ayuda } from "$lib/ajustesVista.svelte";
+  import { partida, type GrupoVariables, type TipoGrupoVariables } from "$lib/partida.svelte";
+  import { MAX_NOMBRE_GRUPO, avisoDeBorrar } from "$lib/variables";
+  import ListaGrupoVariables from "./ListaGrupoVariables.svelte";
 
   let { onError }: { onError: (mensaje: string) => void } = $props();
 
-  type Fila = DefinicionVariable & { orden: number };
+  /** El grupo abierto (el primero si el que había ya no existe). */
+  let idActivo = $state<number | null>(partida.gruposVariables[0]?.id ?? null);
+  const activo = $derived(partida.gruposVariables.find((g) => g.id === idActivo) ?? partida.gruposVariables[0] ?? null);
 
-  const lista = new ListaOrdenable<Fila>({
-    selector: ".fila-variable",
-    alReordenar: async (ids) => {
-      try {
-        await partida.reordenarVariables(ids);
-        onError("");
-      } catch (err) {
-        onError(String(err)); // la lista vuelve sola al orden real al recargar
-      }
-    },
-    alPulsar: () => {}
+  // ---- Renombrar (doble clic) ----
+  let renombrando = $state<{ id: number; texto: string } | null>(null);
+
+  function empezarRenombrar(g: GrupoVariables) {
+    renombrando = { id: g.id, texto: g.nombre };
+  }
+
+  async function confirmarRenombrar() {
+    const r = renombrando;
+    renombrando = null; // antes de esperar: el blur que provoca quitar el campo no vuelve a entrar
+    if (!r) return;
+    const nombre = r.texto.trim();
+    const actual = partida.gruposVariables.find((g) => g.id === r.id);
+    if (!actual || !nombre || nombre === actual.nombre) return;
+    try {
+      await partida.renombrarGrupoVariables(r.id, nombre);
+      onError("");
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  /** Al aparecer el campo, ya con el foco y el nombre seleccionado. */
+  function enfocar(el: HTMLInputElement) {
+    el.focus();
+    el.select();
+  }
+
+  // ---- Crear (pestaña «+») ----
+  let eligiendoTipo = $state(false);
+
+  /** «Grupo N» con el primer N libre. */
+  function nombreNuevo(): string {
+    const usados = new Set(partida.gruposVariables.map((g) => g.nombre.toLowerCase()));
+    let n = partida.gruposVariables.length + 1;
+    while (usados.has(`grupo ${n}`)) n++;
+    return `Grupo ${n}`;
+  }
+
+  async function crear(tipo: TipoGrupoVariables) {
+    eligiendoTipo = false;
+    try {
+      const g = await partida.crearGrupoVariables(nombreNuevo(), tipo);
+      idActivo = g.id;
+      empezarRenombrar(g); // lo normal es ponerle nombre enseguida
+      onError("");
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  // ---- Borrar el grupo abierto (con confirmación) ----
+  let confirmandoBorrar = $state(false);
+  const avisoBorrarGrupo = $derived.by(() => {
+    if (!activo) return "";
+    const ids = partida.definicionesVariables.filter((d) => d.grupo === activo.id).map((d) => d.id);
+    const cascada = avisoDeBorrar(partida.definicionesVariables, ids);
+    const cuantas = ids.length === 0 ? "No tiene variables." : `Se borrarán sus ${ids.length} variable${ids.length > 1 ? "s" : ""} de todas las fichas.`;
+    return `¿Borrar el grupo «${activo.nombre}»? ${cuantas}${cascada ? ` ${cascada}` : ""}`;
   });
 
-  $effect(() => lista.sincronizar(partida.definicionesVariables.map((d, i) => ({ ...d, orden: i }))));
-
-  // Filas nuevas a medias (borradores). Viven aquí, no en Rust: «Añadir» siempre vale, un borrador con nombre se
-  // crea al salir de su fila y uno sin nombre se queda sin más (y se pierde al cerrar la pestaña).
-  let borradores = $state<number[]>(partida.definicionesVariables.length === 0 ? [0] : []);
-  let siguiente = partida.definicionesVariables.length === 0 ? 1 : 0;
-
-  function anadir() {
-    borradores.push(siguiente++);
+  async function borrarGrupo() {
+    const g = activo;
+    confirmandoBorrar = false;
+    if (!g) return;
+    try {
+      await partida.borrarGrupoVariables(g.id);
+      idActivo = partida.gruposVariables[0]?.id ?? null;
+      onError("");
+    } catch (err) {
+      onError(String(err));
+    }
   }
 
-  /** El borrador ya es una variable de Rust (aparece en la lista): se quita; con Enter se deja otro vacío listo. */
-  function alCrear(clave: number, conEnter: boolean) {
-    borradores = borradores.filter((c) => c !== clave);
-    if (conEnter) anadir();
+  function cambiarA(g: GrupoVariables) {
+    confirmandoBorrar = false;
+    eligiendoTipo = false;
+    idActivo = g.id;
   }
-
-  const descartar = (clave: number) => (borradores = borradores.filter((c) => c !== clave));
 </script>
 
-<p class="ayuda">
-  Cada ficha pone su valor y el resultado es (valor − neutro) / escala, redondeado hacia abajo. En el chat se usan con su
-  nombre o su abreviatura (2d6 + f) y valen lo de la ficha con el foco.
-</p>
-
-<div class="cabecera-tabla" aria-hidden="true">
-  <span></span><span>Nombre</span><span>Abreviatura</span><span>Neutro</span><span>Escala</span><span></span>
-</div>
-
-<div class="lista">
-  {#each lista.visuales as d, i (d.id)}
-    <div animate:flip={{ duration: 150 }}>
-      <FilaVariable
-        definicion={d}
-        indice={i}
-        ejemplo={i === 0}
-        arrastrando={lista.activo && lista.item?.id === d.id}
-        onIniciarArrastre={(e) => lista.iniciar(d, i, e)}
-        {onError}
+<div class="grupos" role="tablist" aria-label="Grupos de variables">
+  {#each partida.gruposVariables as g (g.id)}
+    {#if renombrando?.id === g.id}
+      <input
+        class="renombrar"
+        maxlength={MAX_NOMBRE_GRUPO}
+        aria-label="Nombre del grupo"
+        bind:value={renombrando.texto}
+        use:enfocar
+        onkeydown={(e) => {
+          e.stopPropagation(); // Enter y Escape son de este campo, no de la ventana
+          if (e.key === "Enter") void confirmarRenombrar();
+          else if (e.key === "Escape") renombrando = null;
+        }}
+        onblur={() => void confirmarRenombrar()}
       />
-    </div>
+    {:else}
+      <button
+        type="button"
+        role="tab"
+        class="grupo"
+        class:activo={activo?.id === g.id}
+        aria-selected={activo?.id === g.id}
+        title={ayuda(`${g.tipo === "Base" ? "Variables base" : "Variables derivadas"}. Doble clic para cambiarle el nombre`)}
+        onclick={() => cambiarA(g)}
+        ondblclick={() => empezarRenombrar(g)}
+      >
+        {g.nombre}
+        {#if g.tipo === "Derivadas"}<span class="marca" aria-hidden="true">ƒ</span>{/if}
+      </button>
+    {/if}
   {/each}
-  {#each borradores as clave, k (clave)}
-    <FilaVariable
-      ejemplo={lista.visuales.length === 0 && k === 0}
-      {onError}
-      onCreada={(conEnter) => alCrear(clave, conEnter)}
-      onDescartar={() => descartar(clave)}
-    />
-  {/each}
+  <span class="nuevo">
+    <button type="button" class="grupo mas" aria-label="Nuevo grupo de variables" title={ayuda("Nuevo grupo de variables")} onclick={() => (eligiendoTipo = !eligiendoTipo)}>+</button>
+    {#if eligiendoTipo}
+      <span class="tipos" role="menu">
+        <button type="button" role="menuitem" onclick={() => crear("Base")} title={ayuda("Cada ficha pone su valor (Fuerza, Destreza…)")}>Bases</button>
+        <button type="button" role="menuitem" onclick={() => crear("Derivadas")} title={ayuda("Se calculan sumando bases (Acrobacias = Destreza…)")}>Derivadas</button>
+      </span>
+    {/if}
+  </span>
 </div>
 
-<button type="button" class="btn-crear" onclick={anadir}>+ Añadir variable</button>
+{#if activo}
+  {#key activo.id}
+    <ListaGrupoVariables grupo={activo} {onError} />
+  {/key}
 
-<ArrastreFlotante {lista} recto>
-  {#if lista.item}
-    <div class="flotante">
-      <span class="asa">⋮⋮</span>
-      <span class="nombre">{lista.item.nombre}</span>
-      <span class="abreviatura">{lista.item.abreviatura}</span>
-    </div>
-  {/if}
-</ArrastreFlotante>
+  <div class="pie-grupo">
+    {#if confirmandoBorrar}
+      <div class="confirmar" role="alert">
+        <span>{avisoBorrarGrupo}</span>
+        <button type="button" class="si" onclick={borrarGrupo}>Borrar grupo</button>
+        <button type="button" class="no" onclick={() => (confirmandoBorrar = false)}>Cancelar</button>
+      </div>
+    {:else}
+      <button type="button" class="btn-borrar-grupo" onclick={() => (confirmandoBorrar = true)}>Borrar grupo</button>
+    {/if}
+  </div>
+{:else}
+  <p class="vacio">No hay grupos de variables. Crea uno con «+».</p>
+{/if}
 
 <style>
-  .ayuda { margin: 0; color: #a1a1aa; font-size: 10px; }
-  .cabecera-tabla {
-    display: grid; grid-template-columns: 14px 1fr 64px 50px 44px 46px; gap: 4px;
-    padding: 0 7px; color: #71717a; font-size: 10px; font-weight: 600;
+  .grupos { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+  .grupo {
+    background: #111113; border: 1px solid #27272a; color: #a1a1aa; border-radius: 4px; padding: 2px 8px;
+    font-size: 11px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
   }
-  .lista { display: flex; flex-direction: column; gap: 3px; max-height: 280px; overflow-y: auto; }
-  .btn-crear {
-    padding: 6px; border-radius: 5px; cursor: pointer; font-size: 11px; font-weight: 600;
-    background: transparent; border: 1px dashed #52525b; color: #a1a1aa;
+  .grupo:hover { color: #f4f4f5; border-color: #3f3f46; }
+  .grupo.activo { color: white; border-color: #3b82f6; background: rgba(59, 130, 246, 0.12); }
+  .grupo.mas { padding: 2px 7px; }
+  .marca { color: #60a5fa; font-style: italic; font-size: 10px; }
+  .renombrar {
+    width: 120px; padding: 2px 6px; border-radius: 4px; font-size: 11px;
+    background: #09090b; border: 1px solid #3b82f6; color: white;
   }
-  .btn-crear:hover { border-color: #3b82f6; color: white; }
-  .flotante {
-    height: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 4px 8px;
-    background: #27272a; border: 1px solid #3f3f46; border-radius: 5px; font-size: 11px; color: #f4f4f5;
+  .nuevo { position: relative; display: inline-flex; gap: 3px; }
+  .tipos { display: inline-flex; gap: 3px; }
+  .tipos button {
+    background: #27272a; border: 1px solid #3f3f46; color: #f4f4f5; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;
   }
-  .flotante .asa { color: #71717a; }
-  .flotante .nombre { font-weight: 600; }
-  .flotante .abreviatura { color: #a1a1aa; }
+  .tipos button:hover { border-color: #3b82f6; }
+  .pie-grupo { display: flex; justify-content: flex-end; }
+  .btn-borrar-grupo { background: none; border: none; color: #f87171; font-size: 10px; font-weight: 600; cursor: pointer; padding: 2px; }
+  .btn-borrar-grupo:hover { text-decoration: underline; }
+  .confirmar {
+    flex: 1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 5px 7px; border-radius: 4px; background: rgba(127, 29, 29, 0.35); border: 1px solid #7f1d1d;
+    color: #fecaca; font-size: 10px;
+  }
+  .confirmar span { flex: 1; min-width: 160px; }
+  .confirmar button { border: none; border-radius: 3px; padding: 3px 8px; font-size: 10px; font-weight: 700; cursor: pointer; }
+  .confirmar .si { background: #b91c1c; color: white; }
+  .confirmar .si:hover { background: #dc2626; }
+  .confirmar .no { background: #27272a; color: #d4d4d8; }
+  .vacio { margin: 0; color: #71717a; font-size: 11px; text-align: center; padding: 10px; }
 </style>
