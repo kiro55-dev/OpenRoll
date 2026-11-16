@@ -20,7 +20,8 @@
     { tipo: "d8", cantidad: 1, color: "#8b5cf6" },
     { tipo: "d10", cantidad: 1, color: "#ec4899" },
     { tipo: "d12", cantidad: 1, color: "#f97316" },
-    { tipo: "d20", cantidad: 1, color: "#eab308" }
+    { tipo: "d20", cantidad: 1, color: "#eab308" },
+    { tipo: "d100", cantidad: 1, color: "#ef4444" }
   ]);
 
   function rueda(e, d) {
