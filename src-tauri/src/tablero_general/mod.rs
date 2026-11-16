@@ -2,6 +2,7 @@
 pub mod almacen;
 pub mod archivos;
 pub mod cambios_entidad;
+pub mod conjuntos;
 pub mod dados;
 pub mod estado;
 pub mod imagenes;

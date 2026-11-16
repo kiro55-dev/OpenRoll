@@ -52,7 +52,7 @@ impl AppState {
         bloquear(&self.estado)
     }
 
-    fn reservas(&self) -> MutexGuard<'_, HashSet<u16>> {
+    pub(crate) fn reservas(&self) -> MutexGuard<'_, HashSet<u16>> {
         bloquear(&self.borradores)
     }
 }
@@ -369,7 +369,7 @@ pub fn obtener_definiciones_parametros(state: State<'_, AppState>) -> Vec<Defini
 const MAX_PARAMETROS: usize = 40;
 
 /// Comprueba una definición NUEVA contra las que ya existen.
-fn validar_definicion(existentes: &[DefinicionParametro], d: &DefinicionParametro) -> Result<(), String> {
+pub(crate) fn validar_definicion(existentes: &[DefinicionParametro], d: &DefinicionParametro) -> Result<(), String> {
     let clave = d.clave.trim();
     if clave.is_empty() {
         return Err("El parámetro necesita un nombre".into());

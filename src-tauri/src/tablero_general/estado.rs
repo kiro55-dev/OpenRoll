@@ -68,6 +68,15 @@ pub enum DeltaPartida {
     GrupoVariablesRenombrado { id: u16, nombre: String },
     /// Se borra un grupo con todas sus variables (en cascada, como `VariableBorrada`).
     GrupoVariablesBorrado(u16),
+    /// La partida guarda un conjunto de parámetros más (importado o copia de uno de serie), con su contenido entero.
+    ConjuntoAnadido(ConjuntoGuardado),
+    /// Pasa a usarse ese conjunto: el que se deja guarda lo editado, se cargan las definiciones del elegido y las fichas
+    /// empiezan de cero (ver `conjuntos.rs`).
+    ConjuntoActivado(u16),
+    /// Otro nombre para un conjunto.
+    ConjuntoRenombrado { id: u16, nombre: String },
+    /// Se borra un conjunto guardado (nunca el activo).
+    ConjuntoBorrado(u16),
     /// Nuevo orden de las variables (ids). Las fichas lo siguen.
     VariablesReordenadas(Vec<u16>),
     /// Instancia nueva (o reemplaza la de ese id). Las reglas para construirla están en `instancias.rs`.
@@ -127,6 +136,13 @@ pub struct EstadoPartida {
     /// Los grupos de esas variables (bases o derivadas), en su orden. Las partidas anteriores nacen con el de serie.
     #[serde(default = "grupos_por_defecto")]
     pub grupos_variables: Vec<GrupoVariables>,
+    /// Los conjuntos de parámetros que guarda la partida (ver conjuntos.rs). Las definiciones de arriba son las del ACTIVO.
+    /// Las partidas anteriores a los conjuntos lo reciben al cargar (`conjuntos::asegurar`).
+    #[serde(default)]
+    pub conjuntos_parametros: Vec<ConjuntoGuardado>,
+    /// El conjunto que se está usando (`ConjuntoGuardado.id`).
+    #[serde(default)]
+    pub conjunto_activo: u16,
     #[serde(default)]
     pub zonas: Vec<Zona>,
     #[serde(default)]
@@ -190,6 +206,8 @@ impl Default for EstadoPartida {
             definiciones_parametros: parametros_por_defecto(),
             definiciones_variables: Vec::new(),
             grupos_variables: grupos_por_defecto(),
+            conjuntos_parametros: crate::tablero_general::conjuntos::conjuntos_iniciales(),
+            conjunto_activo: 1,
             zonas: Vec::new(),
             mapas: Vec::new(),
             banco_entidades: Vec::new(),
@@ -447,6 +465,22 @@ impl EstadoPartida {
                 self.grupos_variables.retain(|g| g.id != *id);
                 self.ajustar_a_definiciones();
             }
+            DeltaPartida::ConjuntoAnadido(c) => match self.conjuntos_parametros.iter().position(|g| g.id == c.id) {
+                Some(pos) => self.conjuntos_parametros[pos] = c.clone(),
+                None => self.conjuntos_parametros.push(c.clone()),
+            },
+            DeltaPartida::ConjuntoActivado(id) => self.activar_conjunto(*id),
+            DeltaPartida::ConjuntoRenombrado { id, nombre } => {
+                // El activo guarda sus definiciones vivas en otro sitio, pero el nombre sí está en su ficha
+                if let Some(c) = self.conjuntos_parametros.iter_mut().find(|c| c.id == *id) {
+                    c.contenido.nombre = nombre.clone();
+                }
+            }
+            DeltaPartida::ConjuntoBorrado(id) => {
+                if *id != self.conjunto_activo {
+                    self.conjuntos_parametros.retain(|c| c.id != *id);
+                }
+            }
             DeltaPartida::VariablesReordenadas(ids) => {
                 self.definiciones_variables
                     .sort_by_key(|d| ids.iter().position(|i| *i == d.id).unwrap_or(usize::MAX));
@@ -550,7 +584,11 @@ pub fn cargar(almacen: &Almacen) -> Result<(EstadoPartida, InformeCarga), String
             EstadoPartida::default()
         }
         Some(json) => match serde_json::from_str::<EstadoPartida>(&json) {
-            Ok(e) => e,
+            Ok(mut e) => {
+                // Una partida de antes de los conjuntos recibe uno con lo que ya tenía (antes de reproducir el log)
+                crate::tablero_general::conjuntos::asegurar(&mut e);
+                e
+            }
             Err(err) => {
                 eprintln!("[partida] partida.json ilegible ({err}); se aparta y se empieza vacío");
                 informe.partida_corrupta_respaldada_en = almacen.respaldar_partida_corrupta();

@@ -11,6 +11,7 @@
   import { FormularioParametro, formasDisponibles, VISIBILIDADES, resumenDefinicion } from "$lib/formularioParametro.svelte";
   import ArrastreFlotante from "./comunes/ArrastreFlotante.svelte";
   import TablaVariables from "./ventana-parametros/TablaVariables.svelte";
+  import ConjuntosParametros from "./ventana-parametros/ConjuntosParametros.svelte";
 
   let { onCerrar }: { onCerrar: () => void } = $props();
 
@@ -153,6 +154,9 @@
   </div>
 
   <div class="cuerpo">
+    <!-- El conjunto de parámetros en uso (el rol que se juega): cambiarlo, importar, exportar... Al cambiar, lo que se estaba editando se descarta -->
+    <ConjuntosParametros onError={(m) => (error = m)} alCambiar={cancelarFormulario} />
+
     <div class="subpestanas" role="tablist" aria-label="Qué se configura">
       <button type="button" role="tab" aria-selected={pestana === "parametros"} class:activa={pestana === "parametros"} onclick={() => cambiarPestana("parametros")}>Parámetros visuales</button>
       <button type="button" role="tab" aria-selected={pestana === "variables"} class:activa={pestana === "variables"} onclick={() => cambiarPestana("variables")}>Variables</button>

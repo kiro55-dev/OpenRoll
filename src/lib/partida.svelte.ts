@@ -103,6 +103,32 @@ export interface GrupoVariables {
   tipo: TipoGrupoVariables;
 }
 
+/** Un conjunto de parámetros guardado en la partida, en resumen (`ResumenConjunto` en Rust). */
+export interface ResumenConjunto {
+  id: number;
+  nombre: string;
+  descripcion: string;
+  /** La clave del conjunto de serie del que viene; `null` si es propio o importado. */
+  origen: string | null;
+  parametros: number;
+  variables: number;
+  grupos: number;
+}
+
+/** Un conjunto que trae el programa (definido en código). `ya_anadido`: la partida ya tiene una copia. */
+export interface ResumenDeSerie {
+  clave: string;
+  nombre: string;
+  descripcion: string;
+  ya_anadido: boolean;
+}
+
+export interface ListaConjuntos {
+  activo: number;
+  guardados: ResumenConjunto[];
+  de_serie: ResumenDeSerie[];
+}
+
 /** Paso de − / + de un parámetro en una ficha (`PasoValor` en Rust). */
 export interface PasoValor {
   id_definicion: number;
@@ -273,6 +299,8 @@ class Partida {
   definicionesVariables = $state<DefinicionVariable[]>([]);
   /** Sus grupos (bases o derivadas), en su orden. */
   gruposVariables = $state<GrupoVariables[]>([]);
+  /** Los conjuntos de parámetros de la partida y los de serie (solo el host: el jugador no los ve ni los cambia). */
+  conjuntos = $state<ListaConjuntos>({ activo: 0, guardados: [], de_serie: [] });
 
   /** «Fichas activas» de arriba abajo. */
   instanciasOrdenadas = $derived([...this.instancias].sort((a, b) => a.orden - b.orden || a.id_instancia - b.id_instancia));
@@ -542,6 +570,7 @@ class Partida {
     this.definiciones = definiciones;
     this.definicionesVariables = variables ?? [];
     this.gruposVariables = grupos ?? [];
+    if (!esJugador) this.conjuntos = await invoke<ListaConjuntos>("obtener_conjuntos_parametros");
   }
 
   /** Crear, borrar o reordenar un parámetro cambia también las fichas: se vuelve a leer todo.
@@ -593,6 +622,57 @@ class Partida {
   /** Desaparece de la lista y de todas las fichas, en cascada (ver `efectoDeBorrar` en $lib/variables). */
   borrarVariable(id: number) {
     return this.#cambiarDefiniciones("borrar_definicion_variable", { id });
+  }
+
+  // ------------------------------------------------------------------
+  // Conjuntos de parámetros: varios guardados, uno en uso, exportar e importar (solo el host)
+  // ------------------------------------------------------------------
+
+  /** ¿Hay una ficha NUEVA abierta en el editor? Entonces no se puede cambiar de conjunto (su borrador es del anterior). */
+  get hayFichaNuevaAbierta(): boolean {
+    return !!this.entidadEnEdicion && this.editorEsBorrador;
+  }
+
+  /**
+   * Pasa a usar el conjunto `id`. Las fichas empiezan de cero: la pantalla avisa ANTES. Lo que estaba pendiente de mandar
+   * (cambios de vida...) era de las fichas viejas y se descarta, y la ficha abierta en el editor se cierra sin guardar.
+   */
+  async usarConjunto(id: number) {
+    if (this.#temporizadorValores) clearTimeout(this.#temporizadorValores);
+    this.#temporizadorValores = null;
+    this.valoresPendientes = {};
+    this.valoresEnVuelo = {};
+    this.pasosEnVuelo = {};
+    if (this.entidadEnEdicion && !this.editorEsBorrador) this.cerrarEditorEntidad();
+    await this.#cambiarDefiniciones("usar_conjunto", { id });
+  }
+
+  /** Copia un conjunto de serie a la partida (sin usarlo) y devuelve su id. */
+  async anadirConjuntoDeSerie(clave: string): Promise<number> {
+    let id = 0;
+    await this.#cambiarDefiniciones("anadir_conjunto_de_serie", { clave }, (r) => (id = r as number));
+    return id;
+  }
+
+  /** Importa el archivo `ruta` (sin usarlo) y devuelve el id del conjunto nuevo. Rust lo valida entero y da el motivo si falla. */
+  async importarConjunto(ruta: string): Promise<number> {
+    let id = 0;
+    await this.#cambiarDefiniciones("importar_conjunto", { ruta }, (r) => (id = r as number));
+    return id;
+  }
+
+  /** Escribe el conjunto en `ruta` (la del diálogo «Guardar como»). */
+  exportarConjunto(id: number, ruta: string) {
+    return invoke("exportar_conjunto", { id, ruta });
+  }
+
+  renombrarConjunto(id: number, nombre: string) {
+    return this.#cambiarDefiniciones("renombrar_conjunto", { id, nombre });
+  }
+
+  /** Borra un conjunto guardado (no el que se usa). No toca las fichas. */
+  borrarConjunto(id: number) {
+    return this.#cambiarDefiniciones("borrar_conjunto", { id });
   }
 
   /** Crea un grupo de variables (bases o derivadas) y lo devuelve con el id que le puso Rust. */

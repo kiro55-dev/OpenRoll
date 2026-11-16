@@ -277,6 +277,35 @@ pub struct GrupoVariables {
     pub tipo: TipoGrupoVariables,
 }
 
+/// Un CONJUNTO DE PARÁMETROS: todo lo que define cómo es el juego al que se juega (los parámetros visuales, las variables y
+/// sus grupos). Una partida guarda varios y usa uno (`EstadoPartida.conjunto_activo`); se pueden exportar a un archivo y
+/// traer de otra partida, y el programa trae algunos de serie definidos en código (`conjuntos::integrados`). Es también el
+/// contenido del archivo exportado.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ConjuntoParametros {
+    pub nombre: String,
+    #[serde(default)]
+    pub descripcion: String,
+    #[serde(default)]
+    pub parametros: Vec<DefinicionParametro>,
+    #[serde(default)]
+    pub grupos_variables: Vec<GrupoVariables>,
+    #[serde(default)]
+    pub variables: Vec<DefinicionVariable>,
+}
+
+/// Un conjunto que la partida tiene guardado. De los de serie guarda su propia copia (se puede editar sin tocar el original).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ConjuntoGuardado {
+    pub id: u16,
+    /// La clave del conjunto de serie del que viene («generico»); `None` si es propio o importado.
+    #[serde(default)]
+    pub origen: Option<String>,
+    /// Del activo, esto puede estar desfasado: sus definiciones de verdad son las «vivas» del estado
+    /// (`EstadoPartida::contenido_de`).
+    pub contenido: ConjuntoParametros,
+}
+
 /// El grupo con el que nace una partida (y al que van las variables de las partidas anteriores a los grupos).
 pub fn grupos_por_defecto() -> Vec<GrupoVariables> {
     vec![GrupoVariables { id: 1, nombre: "Variables".into(), tipo: TipoGrupoVariables::Base }]

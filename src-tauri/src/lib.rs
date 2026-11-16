@@ -10,6 +10,10 @@ use red::comandos::{
 };
 
 use tablero_general::almacen::Almacen;
+use tablero_general::conjuntos::{
+    anadir_conjunto_de_serie, borrar_conjunto, exportar_conjunto, importar_conjunto, obtener_conjuntos_parametros,
+    renombrar_conjunto, usar_conjunto,
+};
 use tablero_general::dados::{limpiar_chat, tirar_dado};
 use tablero_general::estado;
 use tablero_general::partidas;
@@ -132,6 +136,13 @@ pub fn run() {
             crear_grupo_variables,
             renombrar_grupo_variables,
             borrar_grupo_variables,
+            obtener_conjuntos_parametros,
+            anadir_conjunto_de_serie,
+            usar_conjunto,
+            renombrar_conjunto,
+            borrar_conjunto,
+            exportar_conjunto,
+            importar_conjunto,
             obtener_partidas,
             crear_partida,
             abrir_partida,

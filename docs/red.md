@@ -286,6 +286,9 @@ su pantalla relee. Las peticiones de un jugador se ejecutan **en orden**, una a 
 - **Grupos de variables (protocolo 13).** `VistaJugador.grupos_variables` / `Cambios.grupos_variables` (la lista entera si
   cambia); `DefinicionVariable` lleva `grupo`, `bases` y `opcionales`, y `ValorVariable.opcionales` los checks de una
   ficha (solo llegan a host y propietarios, como los valores). Definir grupos y variables sigue siendo solo del host.
+- **Conjuntos de parámetros.** Importar, exportar y cambiar de conjunto son solo del host (no están en la lista blanca). Al activar
+  otro, los jugadores reciben el diff de siempre (`definiciones`, `grupos_variables`, sus fichas reiniciadas); no hay mensajes
+  nuevos ni cambio de protocolo.
 - **Paso de − / + (protocolo 12).** `poner_paso_valor { idEntidad, idDefinicion, paso }` está en la lista blanca: un jugador solo
   lo cambia en una ficha suya (`ficha_suya`). Es un `EntidadCambiada { PasoValor }` normal, y solo llega al host y a los
   propietarios (`Entidad.pasos_valor` se vacía en `vista_jugador`).
