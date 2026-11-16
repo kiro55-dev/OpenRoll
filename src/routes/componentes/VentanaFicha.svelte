@@ -200,7 +200,7 @@
     </div>
 
     <!-- Variables: el host define cuáles hay (nombre, abreviatura, neutro y escala); aquí solo se pone el valor -->
-    <div class="seccion" style:display={editor.seccion === "variables" ? null : "none"}>
+    <div class="seccion seccion-variables" style:display={editor.seccion === "variables" ? null : "none"}>
       {#if editor.variables.length === 0}
         <p class="vacio">
           {esJugador ? "El host aún no ha definido variables." : "Aún no hay variables. Defínelas en ⚙ → «Editar parámetros de esta partida» → «Variables»."}
@@ -351,6 +351,10 @@
 
   .cuerpo-ficha { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
   .seccion { display: flex; flex-direction: column; gap: 8px; }
+  /* Con muchas variables (las 18 habilidades de D&D...) la lista hace scroll y las pestañas y los botones se quedan a la vista */
+  .seccion-variables { max-height: min(60vh, 520px); overflow-y: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+  .seccion-variables::-webkit-scrollbar { width: 4px; }
+  .seccion-variables::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
 
   .subpestanas { display: flex; gap: 2px; border-bottom: 1px solid #27272a; margin: -2px 0 0; }
   .subpestanas button {
