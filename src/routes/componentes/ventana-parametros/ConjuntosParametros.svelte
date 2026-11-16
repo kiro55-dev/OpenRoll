@@ -2,8 +2,8 @@
 <!-- El conjunto de parámetros que usa la partida (parámetros visuales + variables), arriba de la ventana de parámetros: un
      selector para cambiar de conjunto y «Gestionar…» para importar, exportar, renombrar y borrar los que guarda. Un conjunto
      define el rol que se juega (D&D…): la partida guarda varios y usa uno. Cada conjunto guarda lo que tenían las fichas cuando lo
-     dejaste y lo recupera al volver; nada se comparte de uno a otro. Cambiar de conjunto cambia los valores de TODAS las fichas,
-     así que SIEMPRE pide confirmar y lo explica. -->
+     dejaste y lo recupera al volver; nada se comparte de uno a otro. Como no se pierde nada, cambiar de conjunto no pide confirmar:
+     debajo del selector hay un texto informativo. -->
 <script lang="ts">
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { ayuda } from "$lib/ajustesVista.svelte";
@@ -19,32 +19,30 @@
   /** Lo último que se hizo bien (importado, exportado...), para decírselo. */
   let aviso = $state("");
 
-  // ---- Cambiar de conjunto (con aviso) ----
-  type Destino = { tipo: "guardado"; id: number; nombre: string } | { tipo: "serie"; clave: string; nombre: string };
-  let confirmando = $state<Destino | null>(null);
-
-  function pedirCambio(valor: string) {
+  // ---- Cambiar de conjunto (directo: lo que tenían las fichas se guarda en el que se deja y vuelve al regresar) ----
+  async function pedirCambio(valor: string) {
+    if (ocupado || partida.hayFichaNuevaAbierta) return;
     aviso = "";
+    let nombre = "";
+    let clave: string | null = null;
+    let id = 0;
     if (valor.startsWith("serie:")) {
       const s = partida.conjuntos.de_serie.find((x) => x.clave === valor.slice(6));
-      if (s) confirmando = { tipo: "serie", clave: s.clave, nombre: s.nombre };
+      if (!s) return;
+      clave = s.clave;
+      nombre = s.nombre;
     } else {
       const c = partida.conjuntos.guardados.find((x) => x.id === Number(valor));
-      if (c && c.id !== partida.conjuntos.activo) confirmando = { tipo: "guardado", id: c.id, nombre: c.nombre };
+      if (!c || c.id === partida.conjuntos.activo) return;
+      id = c.id;
+      nombre = c.nombre;
     }
-  }
-
-  async function cambiar() {
-    const d = confirmando;
-    if (!d || ocupado || partida.hayFichaNuevaAbierta) return;
     ocupado = true;
     try {
-      const id = d.tipo === "serie" ? await partida.anadirConjuntoDeSerie(d.clave) : d.id;
-      await partida.usarConjunto(id);
-      confirmando = null;
+      await partida.usarConjunto(clave ? await partida.anadirConjuntoDeSerie(clave) : id);
       onError("");
       alCambiar();
-      aviso = `Ahora usas «${d.nombre}».`;
+      aviso = `Ahora usas «${nombre}».`;
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -147,6 +145,7 @@
     class="select"
     title={ayuda("El conjunto de parámetros y variables que usa esta partida (el rol que se juega). Cambiarlo reinicia los valores de las fichas")}
     value={String(partida.conjuntos.activo)}
+    disabled={ocupado || partida.hayFichaNuevaAbierta}
     onchange={(e) => {
       const v = e.currentTarget.value;
       e.currentTarget.value = String(partida.conjuntos.activo); // hasta confirmar, se sigue en el mismo
@@ -169,36 +168,14 @@
   </button>
 </div>
 
-{#if confirmando}
-  <div
-    class="confirmar"
-    role="alertdialog"
-    aria-label="Cambiar de conjunto"
-    tabindex="-1"
-    onkeydown={(e) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        confirmando = null;
-      }
-    }}
-  >
-    <p>
-      Vas a usar «{confirmando.nombre}». <strong>Los parámetros y variables específicos de TODAS las fichas cambiarán</strong>: sus
-      valores, la variación de − y + y el valor actual de los parámetros con máximo serán los que tenían con ese conjunto (si ya lo
-      usaste antes) o los de por defecto (si es la primera vez).
-      {#if activo}Lo que tienen ahora se guarda en «{activo.nombre}»: si vuelves a él, lo recuperas.{/if}
-      Los conjuntos son independientes: no se comparte ningún valor entre ellos.
-      {#if partida.entidadEnEdicion && !partida.editorEsBorrador}La ficha que tienes abierta se cerrará sin guardar.{/if}
-    </p>
-    {#if partida.hayFichaNuevaAbierta}
-      <p class="bloqueo">Cierra antes la ficha nueva que tienes abierta (guárdala o cancélala).</p>
-    {/if}
-    <div class="botones">
-      <button type="button" class="no" onclick={() => (confirmando = null)}>Cancelar</button>
-      <button type="button" class="si" disabled={ocupado || partida.hayFichaNuevaAbierta} onclick={cambiar}>Cambiar de conjunto</button>
-    </div>
-  </div>
-{/if}
+<p class="info">
+  {#if partida.hayFichaNuevaAbierta}
+    Cierra antes la ficha nueva que tienes abierta (guárdala o cancélala) para poder cambiar de conjunto.
+  {:else}
+    Los parámetros y variables de las fichas cambiarán. Los valores que puedan contener no se pierden: puedes volver a poner el
+    conjunto que tenías y se recupera.
+  {/if}
+</p>
 
 {#if aviso}
   <p class="aviso" role="status">{aviso}</p>
@@ -292,19 +269,7 @@
   }
   .gestionar:hover, .gestionar.abierto { border-color: #3b82f6; color: white; }
 
-  .confirmar {
-    display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 5px;
-    background: rgba(120, 80, 10, 0.3); border: 1px solid #854d0e; color: #fde68a; font-size: 11px;
-  }
-  .confirmar p { margin: 0; line-height: 1.4; }
-  .confirmar strong { color: #fff; }
-  .confirmar .bloqueo { color: #fca5a5; font-weight: 700; }
-  .botones { display: flex; justify-content: flex-end; gap: 6px; }
-  .botones button { border: none; border-radius: 4px; padding: 4px 12px; font-size: 11px; font-weight: 700; cursor: pointer; }
-  .botones .si { background: #2563eb; color: white; }
-  .botones .si:hover:not(:disabled) { background: #1d4ed8; }
-  .botones .si:disabled { opacity: 0.4; cursor: default; }
-  .botones .no { background: #27272a; color: #d4d4d8; }
+  .info { margin: 0; color: #71717a; font-size: 10px; line-height: 1.4; }
 
   .aviso { margin: 0; color: #86efac; font-size: 10px; }
 
