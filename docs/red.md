@@ -286,7 +286,7 @@ su pantalla relee. Las peticiones de un jugador se ejecutan **en orden**, una a 
 - **Grupos de variables (protocolo 13).** `VistaJugador.grupos_variables` / `Cambios.grupos_variables` (la lista entera si
   cambia); `DefinicionVariable` lleva `grupo`, `bases` y `opcionales`, y `ValorVariable.opcionales` los checks de una
   ficha (solo llegan a host y propietarios, como los valores). Definir grupos y variables sigue siendo solo del host.
-- **Fórmulas, rangos, parámetros calculados y tiradas `vs` (protocolo 14).** `DefinicionVariable` lleva `multiplicador`/`divisor`/`constante`/`opciones`
+- **Fórmulas, rangos, parámetros calculados y tiradas `vs` (protocolo 14).** `DefinicionVariable` lleva `multiplicador`/`divisor`/`constante`/`rangos` (la lista de rangos que usa) y `opciones` (una copia de las de su lista, que deja el host: el jugador no necesita las listas)
   (de una derivada), `ValorVariable.eleccion` es el rango que ha elegido cada ficha (solo llega a host y propietarios, como los demás
   valores), `DefinicionParametro.calculo` hace que el valor de un parámetro lo calcule el host con las variables de la ficha (el jugador
   recibe ya el resultado, y al guardar su ficha el host lo recalcula: lo que mande en ese parámetro se ignora) y `Tiradas.veredicto` es el

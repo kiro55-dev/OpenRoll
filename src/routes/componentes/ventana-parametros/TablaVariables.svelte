@@ -8,6 +8,7 @@
   import { partida, type GrupoVariables, type TipoGrupoVariables } from "$lib/partida.svelte";
   import { MAX_NOMBRE_GRUPO, avisoDeBorrar } from "$lib/variables";
   import ListaGrupoVariables from "./ListaGrupoVariables.svelte";
+  import ListasRangos from "./ListasRangos.svelte";
 
   let { onError }: { onError: (mensaje: string) => void } = $props();
 
@@ -159,6 +160,9 @@
 {:else}
   <p class="vacio">No hay grupos de variables. Crea uno con «+».</p>
 {/if}
+
+<!-- Las listas de rangos que eligen las derivadas (una vez definidas, las comparten varias variables) -->
+<ListasRangos {onError} />
 
 <style>
   .grupos { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }

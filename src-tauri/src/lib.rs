@@ -15,6 +15,7 @@ use tablero_general::conjuntos::{
     renombrar_conjunto, usar_conjunto,
 };
 use tablero_general::escalas::{guardar_escala_resultado, obtener_ejemplos_escala, obtener_escala_resultado};
+use tablero_general::rangos::{borrar_lista_rangos, crear_lista_rangos, modificar_lista_rangos, obtener_listas_rangos};
 use tablero_general::dados::{limpiar_chat, tirar_dado};
 use tablero_general::estado;
 use tablero_general::partidas;
@@ -141,6 +142,10 @@ pub fn run() {
             anadir_conjunto_de_serie,
             usar_conjunto,
             obtener_escala_resultado,
+            obtener_listas_rangos,
+            crear_lista_rangos,
+            modificar_lista_rangos,
+            borrar_lista_rangos,
             guardar_escala_resultado,
             obtener_ejemplos_escala,
             renombrar_conjunto,

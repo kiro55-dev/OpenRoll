@@ -115,7 +115,8 @@
     padding: 0 7px; color: #71717a; font-size: 10px; font-weight: 600;
   }
   .cabecera-tabla.derivadas { grid-template-columns: 14px 1fr 54px 1fr 1fr 46px; }
-  .lista { display: flex; flex-direction: column; gap: 3px; max-height: 280px; overflow-y: auto; }
+  /* Sin scroll propio: la lista crece y el que hace scroll es el cuerpo de toda la ventana de parámetros */
+  .lista { display: flex; flex-direction: column; gap: 3px; }
   .btn-crear {
     padding: 6px; border-radius: 5px; cursor: pointer; font-size: 11px; font-weight: 600;
     background: transparent; border: 1px dashed #52525b; color: #a1a1aa;

@@ -112,8 +112,17 @@ export interface DefinicionVariable {
   multiplicador?: number;
   divisor?: number;
   constante?: number;
-  /** Solo derivadas: si hay rangos, cada ficha elige uno (`ValorVariable.eleccion`) y su bono se suma. */
+  /** Solo derivadas: la lista de rangos (`ListaRangos.id`) de la que cada ficha elige uno (`ValorVariable.eleccion`) y cuyo bono se suma. */
+  rangos?: number | null;
+  /** Una copia de las opciones de su lista (la deja Rust al día: no se escribe a mano). */
   opciones?: OpcionVariable[];
+}
+
+/** Una lista de rangos con nombre («Competencia»: Sin entrenar +0, Entrenado +2...) que comparten las variables derivadas. */
+export interface ListaRangos {
+  id: number;
+  nombre: string;
+  opciones: OpcionVariable[];
 }
 
 /** Los dos tipos de grupo de variables (`TipoGrupoVariables` en Rust). */
@@ -363,6 +372,8 @@ class Partida {
   gruposVariables = $state<GrupoVariables[]>([]);
   /** Los conjuntos de parámetros de la partida y los de serie (solo el host: el jugador no los ve ni los cambia). */
   conjuntos = $state<ListaConjuntos>({ activo: 0, guardados: [], de_serie: [] });
+  /** Las listas de rangos del conjunto activo (solo el host las lee: el jugador recibe en cada variable la copia de sus opciones). */
+  listasRangos = $state<ListaRangos[]>([]);
   /** La escala de resultados del conjunto activo (`null` = solo «Éxito» o «Fallo»). Solo la lee el host: el jugador recibe ya el veredicto. */
   escala = $state<EscalaResultado | null>(null);
   /** Escalas de ejemplo (Cthulhu, D&D...) con las que rellenar el editor. */
@@ -639,7 +650,24 @@ class Partida {
     if (!esJugador) {
       this.conjuntos = await invoke<ListaConjuntos>("obtener_conjuntos_parametros");
       this.escala = (await invoke<EscalaResultado | null>("obtener_escala_resultado")) ?? null;
+      this.listasRangos = (await invoke<ListaRangos[]>("obtener_listas_rangos")) ?? [];
     }
+  }
+
+  /** Crea una lista de rangos. Cambiar una lista cambia las variables que la usan, y con ellas las fichas: se vuelve a leer todo. */
+  async crearListaRangos(lista: Omit<ListaRangos, "id">): Promise<ListaRangos> {
+    let creada = { ...lista, id: 0 } as ListaRangos;
+    await this.#cambiarDefiniciones("crear_lista_rangos", { lista: { ...lista, id: 0 } }, (r) => (creada = r as ListaRangos));
+    return creada;
+  }
+
+  modificarListaRangos(lista: ListaRangos) {
+    return this.#cambiarDefiniciones("modificar_lista_rangos", { lista });
+  }
+
+  /** Borra una lista: las variables que la usaban se quedan sin rangos. */
+  borrarListaRangos(id: number) {
+    return this.#cambiarDefiniciones("borrar_lista_rangos", { id });
   }
 
   /** Guarda (o quita, con `null`) la escala de resultados del conjunto activo. Rust la valida entera y da el motivo si falla. */

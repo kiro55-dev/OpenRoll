@@ -14,9 +14,7 @@
     MAX_ABREVIATURA_VARIABLE,
     MAX_ESCALA_VARIABLE,
     MAX_FACTOR_FORMULA,
-    MAX_NOMBRE_OPCION,
     MAX_NOMBRE_VARIABLE,
-    MAX_OPCIONES_VARIABLE,
     VARIABLE_NUEVA,
     avisoDeBorrar,
     esDerivada
@@ -78,7 +76,7 @@
   // svelte-ignore state_referenced_locally
   let constante = $state<number | null>(definicion?.constante ?? 0);
   // svelte-ignore state_referenced_locally
-  let rangos = $state<{ nombre: string; bonus: number | null }[]>((definicion?.opciones ?? []).map((o) => ({ ...o })));
+  let rangos = $state<number | null>(definicion?.rangos ?? null);
   /** El panel de la fórmula y los rangos: se abre solo si la variable ya tiene alguno. */
   // svelte-ignore state_referenced_locally
   let avanzado = $state(tieneAvanzado(definicion));
@@ -89,11 +87,8 @@
   let confirmando = $state<string | null>(null);
 
   function tieneAvanzado(d: DefinicionVariable | null) {
-    return !!d && ((d.multiplicador ?? 1) !== 1 || (d.divisor ?? 1) !== 1 || (d.constante ?? 0) !== 0 || (d.opciones?.length ?? 0) > 0);
+    return !!d && ((d.multiplicador ?? 1) !== 1 || (d.divisor ?? 1) !== 1 || (d.constante ?? 0) !== 0 || d.rangos != null);
   }
-
-  /** Los rangos con nombre (uno recién añadido y sin escribir no cuenta). */
-  const rangosValidos = () => rangos.filter((r) => r.nombre.trim() !== "").map((r) => ({ nombre: r.nombre.trim(), bonus: Number(r.bonus ?? 0) }));
 
   /** Vuelve a lo que tiene Rust (tras guardar, o al deshacer con Escape). */
   function deshacer() {
@@ -107,14 +102,14 @@
     multiplicador = definicion.multiplicador ?? 1;
     divisor = definicion.divisor ?? 1;
     constante = definicion.constante ?? 0;
-    rangos = (definicion.opciones ?? []).map((o) => ({ ...o }));
+    rangos = definicion.rangos ?? null;
   }
 
   // Si la lista se relee (al guardar esta u otra), se toma lo de Rust, salvo en la fila donde se está escribiendo
   $effect(() => {
     if (!definicion) return;
     const d = definicion;
-    void [d.nombre, d.abreviatura, d.neutro, d.escala, d.bases, d.opcionales, d.multiplicador, d.divisor, d.constante, d.opciones];
+    void [d.nombre, d.abreviatura, d.neutro, d.escala, d.bases, d.opcionales, d.multiplicador, d.divisor, d.constante, d.rangos];
     if (fila?.contains(document.activeElement)) return;
     deshacer();
   });
@@ -138,7 +133,7 @@
       multiplicador: derivada ? Number(multiplicador ?? 0) : 1,
       divisor: derivada ? Number(divisor ?? 0) : 1,
       constante: derivada ? Number(constante ?? 0) : 0,
-      opciones: derivada ? rangosValidos() : []
+      rangos: derivada ? rangos : null
     };
     // Un borrador a medias se queda como está, sin error y sin guardarse: sin nombre, o una derivada sin ninguna base
     if (!definicion && (!datos.nombre || (derivada && datos.bases.length === 0))) return;
@@ -157,7 +152,7 @@
       datos.multiplicador === (definicion.multiplicador ?? 1) &&
       datos.divisor === (definicion.divisor ?? 1) &&
       datos.constante === (definicion.constante ?? 0) &&
-      JSON.stringify(datos.opciones) === JSON.stringify(definicion.opciones ?? [])
+      datos.rangos === (definicion.rangos ?? null)
     ) {
       return;
     }
@@ -335,7 +330,7 @@
       <button
         type="button"
         class="btn-avanzado"
-        class:con-datos={tieneAvanzado(definicion) || rangos.length > 0 || multiplicador !== 1 || divisor !== 1 || constante !== 0}
+        class:con-datos={tieneAvanzado(definicion) || rangos !== null || multiplicador !== 1 || divisor !== 1 || constante !== 0}
         aria-expanded={avanzado}
         title={ayuda("Fórmula (× ÷ +) y rangos de esta variable")}
         onclick={() => (avanzado = !avanzado)}
@@ -350,17 +345,11 @@
           <label>+ <input type="number" class="campo numero" min={-LIMITE_VALOR_VARIABLE} max={LIMITE_VALOR_VARIABLE} aria-label="Constante" bind:value={constante} /></label>
         </div>
         <div class="rangos">
-          <span class="texto" title={ayuda("Cada ficha elige uno y su bono se suma al resultado (Sin entrenar +0, Entrenado +2...)")}>Rangos que elige cada ficha:</span>
-          {#each rangos as r, i (i)}
-            <div class="rango">
-              <input type="text" class="campo" maxlength={MAX_NOMBRE_OPCION} placeholder="Entrenado" aria-label="Nombre del rango" bind:value={r.nombre} />
-              <input type="number" class="campo numero" min={-LIMITE_VALOR_VARIABLE} max={LIMITE_VALOR_VARIABLE} aria-label="Bono del rango" bind:value={r.bonus} />
-              <button type="button" class="btn-borrar" aria-label="Quitar el rango" onclick={() => (rangos = rangos.filter((_, j) => j !== i))}>✕</button>
-            </div>
-          {/each}
-          {#if rangos.length < MAX_OPCIONES_VARIABLE}
-            <button type="button" class="btn-mas" onclick={() => (rangos = [...rangos, { nombre: "", bonus: 0 }])}>+ Añadir rango</button>
-          {/if}
+          <label class="texto" for="lista-{definicion?.id ?? 'nueva'}" title={ayuda("Cada ficha elige uno de los rangos de la lista y su bono se suma al resultado. Las listas se definen una vez, abajo, y las comparten varias variables")}>Rangos:</label>
+          <select id="lista-{definicion?.id ?? 'nueva'}" class="campo" aria-label="Lista de rangos" bind:value={rangos}>
+            <option value={null}>Sin rangos</option>
+            {#each partida.listasRangos as l (l.id)}<option value={l.id}>{l.nombre}</option>{/each}
+          </select>
         </div>
       </div>
     {/if}
@@ -390,9 +379,6 @@
   .formula label { display: flex; align-items: center; gap: 3px; color: #a1a1aa; font-size: 11px; }
   .formula .numero { width: 48px; }
   .texto { color: #a1a1aa; font-size: 10px; }
-  .rango { display: grid; grid-template-columns: 130px 54px 22px; gap: 4px; align-items: center; }
-  .btn-mas { background: none; border: 1px dashed #3f3f46; color: #a1a1aa; border-radius: 4px; font-size: 10px; padding: 2px 8px; cursor: pointer; }
-  .btn-mas:hover { color: white; border-color: #71717a; }
   .campos { display: grid; grid-template-columns: 14px 1fr 64px 50px 44px 46px; gap: 4px; align-items: center; }
   .campos.derivada { grid-template-columns: 14px 1fr 54px 1fr 1fr 46px; }
   .fila-variable:hover { border-color: #3f3f46; }

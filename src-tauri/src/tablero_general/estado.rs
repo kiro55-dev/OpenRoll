@@ -79,6 +79,10 @@ pub enum DeltaPartida {
     ConjuntoBorrado(u16),
     /// Nuevo orden de las variables (ids). Las fichas lo siguen.
     VariablesReordenadas(Vec<u16>),
+    /// Se crea o cambia una lista de rangos (ya validada): las variables que la usan reciben sus opciones.
+    ListaRangosGuardada(ListaRangos),
+    /// Se borra una lista de rangos: las variables que la usaban se quedan sin rangos.
+    ListaRangosBorrada(u16),
     /// La escala de resultados del conjunto activo (o ninguna). Ya validada.
     EscalaResultadoCambiada(Option<EscalaResultado>),
     /// Instancia nueva (o reemplaza la de ese id). Las reglas para construirla están en `instancias.rs`.
@@ -138,6 +142,9 @@ pub struct EstadoPartida {
     /// Los grupos de esas variables (bases o derivadas), en su orden. Las partidas anteriores nacen con el de serie.
     #[serde(default = "grupos_por_defecto")]
     pub grupos_variables: Vec<GrupoVariables>,
+    /// Las listas de rangos de las variables derivadas (ver rangos.rs). Son las «vivas» del conjunto activo, como las definiciones.
+    #[serde(default)]
+    pub listas_rangos: Vec<ListaRangos>,
     /// Cómo se nombra el resultado de una comparación del chat (ver escalas.rs). Es la «viva» del conjunto activo, como las
     /// definiciones de arriba. `None` = solo «Éxito» o «Fallo».
     #[serde(default)]
@@ -212,6 +219,7 @@ impl Default for EstadoPartida {
             definiciones_parametros: parametros_por_defecto(),
             definiciones_variables: Vec::new(),
             grupos_variables: grupos_por_defecto(),
+            listas_rangos: Vec::new(),
             escala_resultado: None,
             conjuntos_parametros: crate::tablero_general::conjuntos::conjuntos_iniciales(),
             conjunto_activo: 1,
@@ -490,6 +498,17 @@ impl EstadoPartida {
                 }
             }
             DeltaPartida::EscalaResultadoCambiada(escala) => self.escala_resultado = escala.clone(),
+            DeltaPartida::ListaRangosGuardada(lista) => {
+                match self.listas_rangos.iter().position(|l| l.id == lista.id) {
+                    Some(pos) => self.listas_rangos[pos] = lista.clone(),
+                    None => self.listas_rangos.push(lista.clone()),
+                }
+                self.ajustar_a_definiciones();
+            }
+            DeltaPartida::ListaRangosBorrada(id) => {
+                self.listas_rangos.retain(|l| l.id != *id);
+                self.ajustar_a_definiciones();
+            }
             DeltaPartida::VariablesReordenadas(ids) => {
                 self.definiciones_variables
                     .sort_by_key(|d| ids.iter().position(|i| *i == d.id).unwrap_or(usize::MAX));
@@ -539,6 +558,8 @@ impl EstadoPartida {
     pub fn ajustar_a_definiciones(&mut self) {
         // Las variables sin grupo (de antes de los grupos) pasan al primero de bases
         variables::asegurar_grupos(&mut self.grupos_variables, &mut self.definiciones_variables);
+        // Cada variable con una lista de rangos lleva una copia de sus opciones (y una lista que ya no existe se quita)
+        crate::tablero_general::rangos::normalizar_rangos(&mut self.listas_rangos, &mut self.definiciones_variables);
         let vars = self.definiciones_variables.clone();
         // Un parámetro calculado no puede usar variables que ya no existen
         variables::limpiar_calculos(&mut self.definiciones_parametros, &vars);

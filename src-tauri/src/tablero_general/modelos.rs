@@ -292,7 +292,13 @@ pub struct DefinicionVariable {
     pub divisor: i16,
     #[serde(default)]
     pub constante: i16,
-    /// Solo en una derivada: si tiene opciones, cada ficha elige UNA (Sin entrenar +0, Entrenado +2...) y su bono se suma al
+    /// Solo en una derivada: la LISTA DE RANGOS (`ListaRangos.id`) de la que cada ficha elige UNO (Sin entrenar +0, Entrenado +2...). Varias
+    /// variables comparten una lista: se define una vez y se cambia en un solo sitio.
+    #[serde(default)]
+    pub rangos: Option<u16>,
+    /// Copia de las opciones de su lista de rangos (`rangos`), que Rust deja al día en `rangos::normalizar_rangos` para que la ficha, el chat y
+    /// los jugadores no necesiten buscar la lista. Nunca se escribe a mano. Si, al leer una partida o un archivo antiguos, una variable trae
+    /// opciones propias sin lista, pasan a una lista. Si tiene opciones, cada ficha elige UNA y su bono se suma al
     /// resultado. Vacío = no hay elección.
     #[serde(default)]
     pub opciones: Vec<OpcionVariable>,
@@ -303,6 +309,14 @@ pub struct DefinicionVariable {
 pub struct OpcionVariable {
     pub nombre: String,
     pub bonus: i16,
+}
+
+/// Una lista de rangos con nombre («Competencia»: Sin entrenar +0, Entrenado +2, Experto +4...). Las variables derivadas la usan por su id.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ListaRangos {
+    pub id: u16,
+    pub nombre: String,
+    pub opciones: Vec<OpcionVariable>,
 }
 
 /// Los dos tipos de grupo: variables con valor propio (Fuerza...) o calculadas a partir de ellas (Acrobacias...).
@@ -335,6 +349,9 @@ pub struct ConjuntoParametros {
     pub grupos_variables: Vec<GrupoVariables>,
     #[serde(default)]
     pub variables: Vec<DefinicionVariable>,
+    /// Las listas de rangos que usan las variables derivadas (ver rangos.rs).
+    #[serde(default)]
+    pub listas_rangos: Vec<ListaRangos>,
     /// Cómo se nombra el resultado de una comparación del chat (`1d100 <= 45`): sus niveles (extremo, difícil...) y sus críticos y
     /// pifias. Sin ella, solo «Éxito» o «Fallo». Ver escalas.rs.
     #[serde(default)]

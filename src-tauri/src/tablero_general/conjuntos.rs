@@ -52,6 +52,7 @@ fn generico() -> ConjuntoParametros {
         parametros: parametros_por_defecto(),
         grupos_variables: grupos_por_defecto(),
         variables: Vec::new(),
+        listas_rangos: Vec::new(),
         escala_resultado: None,
     }
 }
@@ -89,6 +90,7 @@ impl EstadoPartida {
             parametros: self.definiciones_parametros.clone(),
             grupos_variables: self.grupos_variables.clone(),
             variables: self.definiciones_variables.clone(),
+            listas_rangos: self.listas_rangos.clone(),
             escala_resultado: self.escala_resultado.clone(),
         }
     }
@@ -119,6 +121,7 @@ impl EstadoPartida {
         self.definiciones_parametros = nuevo.contenido.parametros;
         self.grupos_variables = nuevo.contenido.grupos_variables;
         self.definiciones_variables = nuevo.contenido.variables;
+        self.listas_rangos = nuevo.contenido.listas_rangos;
         self.escala_resultado = nuevo.contenido.escala_resultado;
         self.conjunto_activo = id;
         self.reiniciar_valores_de_fichas();
@@ -286,6 +289,7 @@ pub fn asegurar(est: &mut EstadoPartida) {
         parametros: est.definiciones_parametros.clone(),
         grupos_variables: est.grupos_variables.clone(),
         variables: est.definiciones_variables.clone(),
+        listas_rangos: est.listas_rangos.clone(),
         escala_resultado: est.escala_resultado.clone(),
     };
     let g = generico();
@@ -309,6 +313,7 @@ impl EstadoPartida {
         e.definiciones_parametros = dnd.parametros.clone();
         e.grupos_variables = dnd.grupos_variables.clone();
         e.definiciones_variables = dnd.variables.clone();
+        e.listas_rangos = dnd.listas_rangos.clone();
         e.escala_resultado = dnd.escala_resultado.clone();
         e.conjuntos_parametros =
             vec![ConjuntoGuardado { id: 1, origen: Some(CONJUNTO_POR_DEFECTO.into()), contenido: dnd, valores: Default::default() }];
@@ -394,6 +399,24 @@ pub fn validar(mut c: ConjuntoParametros) -> Result<ConjuntoParametros, String> 
         parametros.push(p);
     }
 
+    // Listas de rangos: una variable solo puede apuntar a una que exista; los rangos propios que traiga una variable (un archivo de antes de
+    // las listas) pasan a una lista; cada lista se valida y las variables reciben su copia (con los nombres ya limpios)
+    let mut listas_entrada = c.listas_rangos;
+    let mut variables_entrada = c.variables;
+    if let Some(v) = variables_entrada.iter().find(|v| v.rangos.is_some_and(|r| !listas_entrada.iter().any(|l| l.id == r))) {
+        return Err(format!("La variable «{}» usa una lista de rangos que el archivo no trae", v.nombre));
+    }
+    crate::tablero_general::rangos::normalizar_rangos(&mut listas_entrada, &mut variables_entrada);
+    let mut listas: Vec<ListaRangos> = Vec::new();
+    for l in listas_entrada {
+        if listas.iter().any(|o| o.id == l.id) {
+            return Err(format!("La lista de rangos «{}» repite el id {}", l.nombre, l.id));
+        }
+        let l = crate::tablero_general::rangos::validar_lista(&listas, l)?;
+        listas.push(l);
+    }
+    crate::tablero_general::rangos::normalizar_rangos(&mut listas, &mut variables_entrada);
+
     // Grupos de variables: ids únicos y nombres válidos y distintos
     let mut grupos: Vec<GrupoVariables> = Vec::new();
     for g in c.grupos_variables {
@@ -408,13 +431,13 @@ pub fn validar(mut c: ConjuntoParametros) -> Result<ConjuntoParametros, String> 
     }
 
     // Variables: ids únicos; las bases se validan antes que las derivadas (que dependen de ellas), da igual el orden del archivo
-    if c.variables.len() > MAX_VARIABLES {
+    if variables_entrada.len() > MAX_VARIABLES {
         return Err(format!("No puede haber más de {MAX_VARIABLES} variables"));
     }
     let mut aceptadas: Vec<DefinicionVariable> = Vec::new();
     for derivadas in [false, true] {
-        for v in c.variables.iter().filter(|v| variables::es_derivada(v) == derivadas) {
-            if c.variables.iter().filter(|o| o.id == v.id).count() > 1 {
+        for v in variables_entrada.iter().filter(|v| variables::es_derivada(v) == derivadas) {
+            if variables_entrada.iter().filter(|o| o.id == v.id).count() > 1 {
                 return Err(format!("La variable «{}» repite el id {}", v.nombre, v.id));
             }
             let v = DefinicionVariable {
@@ -427,15 +450,8 @@ pub fn validar(mut c: ConjuntoParametros) -> Result<ConjuntoParametros, String> 
         }
     }
     // Se conserva el orden del archivo (es el que siguen las fichas)
-    let variables_validadas: Vec<DefinicionVariable> = c
-        .variables
-        .iter()
-        .filter_map(|v| aceptadas.iter().find(|a| a.id == v.id).cloned())
-        .map(|v| DefinicionVariable {
-            opciones: v.opciones.iter().map(|o| OpcionVariable { nombre: o.nombre.trim().to_string(), bonus: o.bonus }).collect(),
-            ..v
-        })
-        .collect();
+    let variables_validadas: Vec<DefinicionVariable> =
+        variables_entrada.iter().filter_map(|v| aceptadas.iter().find(|a| a.id == v.id).cloned()).collect();
     // Los parámetros calculados solo pueden usar variables del propio conjunto
     for p in &parametros {
         variables::validar_parametro_calculado(p, &variables_validadas).map_err(|e| format!("{}: {e}", p.clave))?;
@@ -450,6 +466,7 @@ pub fn validar(mut c: ConjuntoParametros) -> Result<ConjuntoParametros, String> 
         parametros,
         grupos_variables: grupos,
         variables: variables_validadas,
+        listas_rangos: listas,
         escala_resultado,
     })
 }
@@ -600,7 +617,7 @@ pub fn renombrar_conjunto_en(id: u16, nombre: String, state: &AppState) -> Resul
         return Ok(());
     }
     // Se valida como el resto (largo, caracteres) y que no lo tenga otro
-    validar(ConjuntoParametros { nombre: nombre.clone(), descripcion: String::new(), parametros: vec![], grupos_variables: vec![], variables: vec![], escala_resultado: None })?;
+    validar(ConjuntoParametros { nombre: nombre.clone(), descripcion: String::new(), parametros: vec![], grupos_variables: vec![], variables: vec![], listas_rangos: vec![], escala_resultado: None })?;
     let repetido = est.conjuntos_parametros.iter().filter(|g| g.id != id).filter_map(|g| est.contenido_de(g.id)).any(|c| c.nombre.to_lowercase() == nombre.to_lowercase());
     if repetido {
         return Err(format!("Ya hay un conjunto que se llama «{nombre}»"));
@@ -700,6 +717,7 @@ mod tests {
             parametros: parametros_por_defecto(),
             grupos_variables: grupos(),
             variables: vec![var(1, "Destreza", "des", 10, 2), var(3, "Competencia", "com", 0, 1), derivada(4, "Acrobacias", "acro", &[1], &[3])],
+            listas_rangos: vec![],
             escala_resultado: None,
         }
     }
@@ -943,6 +961,84 @@ mod tests {
     }
 
     #[test]
+    fn una_lista_de_rangos_compartida_se_cambia_en_un_sitio_y_las_variables_y_las_fichas_la_siguen() {
+        use crate::tablero_general::modelos::OpcionVariable;
+        use crate::tablero_general::partida::{crear_definicion_variable_en, procesar_delta};
+        use crate::tablero_general::rangos::{borrar_lista_rangos_en, crear_lista_rangos_en, modificar_lista_rangos_en};
+        let state = estado_en_a("listas_rangos");
+        procesar_delta(&state, DeltaPartida::GrupoVariablesCreado(GrupoVariables { id: 2, nombre: "Habilidades".into(), tipo: TipoGrupoVariables::Derivadas }));
+        let rango = |n: &str, b: i16| OpcionVariable { nombre: n.into(), bonus: b };
+        let lista = ListaRangos { id: 0, nombre: "Competencia".into(), opciones: vec![rango("Sin entrenar", 0), rango("Entrenado", 2), rango("Experto", 4)] };
+
+        // Crear una lista (el id lo pone Rust); guardar lo mismo otra vez devuelve la que hay; un nombre repetido con otros rangos, error
+        let c = crear_lista_rangos_en(lista.clone(), &state).unwrap();
+        assert_eq!(c.id, 1);
+        assert_eq!(crear_lista_rangos_en(lista.clone(), &state).unwrap().id, 1);
+        assert!(crear_lista_rangos_en(ListaRangos { opciones: vec![rango("Otro", 1)], ..lista.clone() }, &state).is_err());
+        assert!(crear_lista_rangos_en(ListaRangos { opciones: vec![], ..lista.clone() }, &state).is_err());
+        assert_eq!(state.lock().listas_rangos.len(), 1);
+
+        // Variables: una base y dos derivadas que comparten la lista; una lista que no existe se rechaza
+        let des = crear_definicion_variable_en(var(0, "Destreza", "des", 10, 2), &state).unwrap();
+        let derivada_con = |nombre: &str, abreviatura: &str, rangos: Option<u16>| DefinicionVariable { rangos, ..derivada(0, nombre, abreviatura, &[des.id], &[]) };
+        assert!(crear_definicion_variable_en(derivada_con("Acrobacias", "acro", Some(9)), &state).unwrap_err().contains("lista de rangos"));
+        let acro = crear_definicion_variable_en(derivada_con("Acrobacias", "acro", Some(1)), &state).unwrap();
+        let sig = crear_definicion_variable_en(derivada_con("Sigilo", "sig", Some(1)), &state).unwrap();
+        for id in [acro.id, sig.id] {
+            let d = state.lock().definiciones_variables.iter().find(|d| d.id == id).cloned().unwrap();
+            assert_eq!((d.rangos, d.opciones.len()), (Some(1), 3), "cada variable lleva la copia de su lista");
+        }
+        // Una base no puede llevar rangos
+        assert!(crear_definicion_variable_en(DefinicionVariable { rangos: Some(1), ..var(0, "Rara", "r", 10, 2) }, &state).unwrap().rangos.is_none());
+
+        // Una ficha con Experto elegido en Acrobacias
+        {
+            let mut est = state.lock();
+            est.banco_entidades.push(ficha(1));
+            est.ajustar_a_definiciones();
+            est.banco_entidades[0].variables.iter_mut().find(|v| v.id_definicion == acro.id).unwrap().eleccion = 2;
+        }
+        // Cambiar la lista cambia las dos variables; la elección que ya no existe vuelve a la primera
+        modificar_lista_rangos_en(ListaRangos { id: 1, opciones: vec![rango("Sin entrenar", 0), rango("Entrenado", 3)], ..lista.clone() }, &state).unwrap();
+        {
+            let est = state.lock();
+            assert!(est.definiciones_variables.iter().filter(|d| d.rangos == Some(1)).all(|d| d.opciones.len() == 2 && d.opciones[1].bonus == 3));
+            assert_eq!(est.banco_entidades[0].variables.iter().find(|v| v.id_definicion == acro.id).unwrap().eleccion, 0);
+        }
+        // Sin cambios no se registra nada; renombrar, sí
+        let seq = state.lock().ultimo_seq;
+        modificar_lista_rangos_en(ListaRangos { id: 1, nombre: "Competencia".into(), opciones: vec![rango("Sin entrenar", 0), rango("Entrenado", 3)] }, &state).unwrap();
+        assert_eq!(state.lock().ultimo_seq, seq);
+        assert!(modificar_lista_rangos_en(ListaRangos { id: 7, ..lista.clone() }, &state).is_err());
+
+        // Cada conjunto tiene sus listas: al pasar a otro se van y al volver se recuperan
+        crate::tablero_general::partida::procesar_delta(&state, DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd(), valores: Default::default() }));
+        procesar_delta(&state, DeltaPartida::ConjuntoActivado(2));
+        assert!(state.lock().listas_rangos.is_empty());
+        procesar_delta(&state, DeltaPartida::ConjuntoActivado(1));
+        assert_eq!(state.lock().listas_rangos.len(), 1);
+        assert_eq!(state.lock().definiciones_variables.iter().filter(|d| d.opciones.len() == 2).count(), 2);
+
+        // Borrar la lista deja a las variables sin rangos (y no se pierde nada más)
+        borrar_lista_rangos_en(1, &state).unwrap();
+        assert!(state.lock().definiciones_variables.iter().all(|d| d.rangos.is_none() && d.opciones.is_empty()));
+        assert!(borrar_lista_rangos_en(1, &state).is_err());
+
+        // Una partida de antes de las listas, con rangos escritos en cada variable, los pasa a UNA lista al cargarla
+        let mut vieja = EstadoPartida::default();
+        let dos = vec![rango("A", 0), rango("B", 1)];
+        vieja.grupos_variables.push(GrupoVariables { id: 2, nombre: "H".into(), tipo: TipoGrupoVariables::Derivadas });
+        vieja.definiciones_variables = vec![
+            var(1, "Destreza", "des", 10, 2),
+            DefinicionVariable { opciones: dos.clone(), ..derivada(2, "Acrobacias", "acro", &[1], &[]) },
+            DefinicionVariable { opciones: dos.clone(), ..derivada(3, "Sigilo", "sig", &[1], &[]) },
+        ];
+        vieja.ajustar_a_definiciones();
+        assert_eq!(vieja.listas_rangos.len(), 1, "las dos tenían los mismos rangos: una sola lista");
+        assert!(vieja.definiciones_variables[1..].iter().all(|d| d.rangos == Some(vieja.listas_rangos[0].id) && d.opciones == dos));
+    }
+
+    #[test]
     fn una_partida_nueva_nace_con_dnd_y_una_que_ya_existe_conserva_lo_suyo() {
         use crate::tablero_general::almacen::{pruebas::dir_temporal, Almacen};
         use crate::tablero_general::estado::cargar;
@@ -1141,24 +1237,45 @@ mod tests {
     fn un_conjunto_con_calculos_y_rangos_se_exporta_importa_y_se_valida() {
         use crate::tablero_general::modelos::OpcionVariable;
         let mut c = conjunto_dnd();
-        c.variables[2].opciones = vec![OpcionVariable { nombre: "Sin entrenar".into(), bonus: 0 }, OpcionVariable { nombre: " Experto ".into(), bonus: 4 }];
+        c.listas_rangos = vec![ListaRangos {
+            id: 1,
+            nombre: " Competencia ".into(),
+            opciones: vec![OpcionVariable { nombre: "Sin entrenar".into(), bonus: 0 }, OpcionVariable { nombre: " Experto ".into(), bonus: 4 }],
+        }];
+        c.variables[2].rangos = Some(1);
         c.variables[2].constante = 2;
         c.parametros[0].calculo = Some(CalculoParametro { variables: vec![1], multiplicador: 1, divisor: 2, constante: 3 });
         let limpio = validar(c.clone()).unwrap();
-        assert_eq!(limpio.variables[2].opciones[1].nombre, "Experto", "sin espacios de los lados");
+        assert_eq!(limpio.listas_rangos[0].nombre, "Competencia");
+        assert_eq!(limpio.variables[2].opciones[1].nombre, "Experto", "sin espacios de los lados, y la variable lleva la copia de su lista");
         let texto = a_archivo(&limpio).unwrap();
         assert_eq!(de_archivo(&texto).unwrap(), limpio);
         // Un cálculo que usa una variable que el conjunto no tiene se rechaza, con el parámetro por delante
         let mut malo = c.clone();
         malo.parametros[0].calculo = Some(CalculoParametro { variables: vec![77], multiplicador: 1, divisor: 1, constante: 0 });
         assert!(validar(malo).unwrap_err().starts_with("Vida:"));
-        // Una base con fórmula o una opción repetida también
+        // Una base con fórmula, un rango repetido o una lista que no existe también
         let mut malo = c.clone();
         malo.variables[0].divisor = 2;
         assert!(validar(malo).is_err());
-        let mut malo = c;
-        malo.variables[2].opciones.push(OpcionVariable { nombre: "experto".into(), bonus: 1 });
+        let mut malo = c.clone();
+        malo.listas_rangos[0].opciones.push(OpcionVariable { nombre: "experto".into(), bonus: 1 });
         assert!(validar(malo).is_err());
+        let mut malo = c.clone();
+        malo.variables[2].rangos = Some(9);
+        assert!(validar(malo).unwrap_err().contains("lista de rangos"));
+        let mut malo = c.clone();
+        malo.listas_rangos.push(malo.listas_rangos[0].clone());
+        assert!(validar(malo).is_err(), "id y nombre repetidos");
+        // Un archivo de antes de las listas, con los rangos escritos en la variable, los pasa a una lista (no se pierde nada)
+        let mut viejo = c;
+        viejo.listas_rangos.clear();
+        viejo.variables[2].rangos = None;
+        viejo.variables[2].opciones = vec![OpcionVariable { nombre: "Sin entrenar".into(), bonus: 0 }, OpcionVariable { nombre: "Experto".into(), bonus: 4 }];
+        let migrado = validar(viejo).unwrap();
+        assert_eq!(migrado.listas_rangos.len(), 1);
+        assert_eq!(migrado.variables[2].rangos, Some(migrado.listas_rangos[0].id));
+        assert_eq!(migrado.variables[2].opciones.len(), 2);
     }
 
     #[test]

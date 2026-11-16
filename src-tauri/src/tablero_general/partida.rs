@@ -516,8 +516,18 @@ fn limpiar_variable(d: DefinicionVariable, grupos: &[GrupoVariables]) -> Definic
         multiplicador: if derivada { d.multiplicador } else { 1 },
         divisor: if derivada { d.divisor } else { 1 },
         constante: if derivada { d.constante } else { 0 },
-        opciones: if derivada { d.opciones.into_iter().map(|o| OpcionVariable { nombre: o.nombre.trim().to_string(), ..o }).collect() } else { vec![] },
+        // La lista de rangos solo en una derivada; sus opciones son una copia que Rust rellena (`rangos::normalizar_rangos`)
+        rangos: if derivada { d.rangos } else { None },
+        opciones: vec![],
         ..d
+    }
+}
+
+/// La lista de rangos que usa una derivada tiene que existir.
+fn comprobar_lista_de_rangos(est: &EstadoPartida, d: &DefinicionVariable) -> Result<(), String> {
+    match d.rangos {
+        Some(id) if !est.listas_rangos.iter().any(|l| l.id == id) => Err("Esa lista de rangos ya no existe".into()),
+        _ => Ok(()),
     }
 }
 
@@ -535,6 +545,7 @@ pub fn crear_definicion_variable_en(definicion: DefinicionVariable, state: &AppS
         return Ok(ya.clone());
     }
     variables::validar_definicion(&est.definiciones_variables, &est.grupos_variables, &definicion)?;
+    comprobar_lista_de_rangos(&est, &definicion)?;
     let id = est.definiciones_variables.iter().map(|d| d.id).max().unwrap_or(0) + 1;
     let nueva = DefinicionVariable { id, ..definicion };
     registrar(&mut est, &state.almacen, DeltaPartida::VariableCreada(nueva.clone()));
@@ -553,12 +564,17 @@ pub fn modificar_definicion_variable_en(definicion: DefinicionVariable, state: &
     let Some(actual) = est.definiciones_variables.iter().find(|d| d.id == definicion.id) else {
         return Err("La variable ya no existe".into());
     };
-    let definicion = limpiar_variable(DefinicionVariable { grupo: actual.grupo, ..definicion }, &est.grupos_variables);
+    // Las opciones son una copia de su lista de rangos (la deja Rust): no cuentan para saber si algo cambió
+    let definicion = DefinicionVariable {
+        opciones: actual.opciones.clone(),
+        ..limpiar_variable(DefinicionVariable { grupo: actual.grupo, ..definicion }, &est.grupos_variables)
+    };
     if *actual == definicion {
         return Ok(());
     }
     let otras: Vec<DefinicionVariable> = est.definiciones_variables.iter().filter(|d| d.id != definicion.id).cloned().collect();
     variables::validar_definicion(&otras, &est.grupos_variables, &definicion)?;
+    comprobar_lista_de_rangos(&est, &definicion)?;
     registrar(&mut est, &state.almacen, DeltaPartida::VariableModificada(definicion));
     Ok(())
 }

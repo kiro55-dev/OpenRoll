@@ -36,6 +36,8 @@ function crearBackend() {
     conjuntos: { activo: 1, guardados: [{ id: 1, nombre: "Genérico", descripcion: "", origen: "generico", parametros: 1, variables: 0, grupos: 1 }, { id: 2, nombre: "Otro", descripcion: "", origen: null, parametros: 1, variables: 3, grupos: 2 }], de_serie: [{ clave: "dnd", nombre: "D&D", descripcion: "", ya_anadido: false }] },
     /** La escala de resultados del conjunto activo (Rust la valida; aquí se guarda tal cual). */
     escala: null as any,
+    /** Las listas de rangos del conjunto activo. */
+    listasRangos: [] as any[],
     papelera: [] as { zonas: any[]; banco: any[] }[],
     partidas: ["A", "B"] as string[],
     actual: "A",
@@ -69,6 +71,15 @@ function crearBackend() {
         case "obtener_grupos_variables": return [{ id: 1, nombre: "Variables", tipo: "Base" }];
         case "obtener_conjuntos_parametros": return clon(b.conjuntos);
         case "obtener_escala_resultado": return clon(b.escala);
+        case "obtener_listas_rangos": return clon(b.listasRangos);
+        case "crear_lista_rangos": {
+          if (b.listasRangos.some((l: any) => l.nombre === args.lista.nombre)) throw "Ya hay una lista de rangos que se llama";
+          const l = { ...clon(args.lista), id: Math.max(0, ...b.listasRangos.map((x: any) => x.id)) + 1 };
+          b.listasRangos.push(l);
+          return clon(l);
+        }
+        case "modificar_lista_rangos": b.listasRangos = b.listasRangos.map((l: any) => (l.id === args.lista.id ? clon(args.lista) : l)); return;
+        case "borrar_lista_rangos": b.listasRangos = b.listasRangos.filter((l: any) => l.id !== args.id); return;
         case "guardar_escala_resultado": {
           if (args.escala && !args.escala.nombre_exito) throw "Acierto: el nombre debe tener entre 1 y 30 caracteres";
           b.escala = clon(args.escala);
@@ -890,6 +901,26 @@ describe("fichas: selección y vida", () => {
     backend.escala = escala;
     await partida.usarConjunto(2);
     expect(partida.escala).toEqual(escala);
+  });
+
+  it("las listas de rangos se leen con las definiciones, se crean, se cambian y se borran, y cada cambio relee las variables", async () => {
+    const partida = await nuevoStore();
+    expect(partida.listasRangos).toEqual([]);
+    const lista = { nombre: "Competencia", opciones: [{ nombre: "Sin entrenar", bonus: 0 }, { nombre: "Entrenado", bonus: 2 }] };
+    const creada = await partida.crearListaRangos(lista);
+    expect(creada).toMatchObject({ id: 1, nombre: "Competencia" });
+    expect(llamadas("crear_lista_rangos")[0].args).toEqual({ lista: { ...lista, id: 0 } });
+    expect(partida.listasRangos).toHaveLength(1);
+    // Un error de Rust llega a quien llama y no deja nada a medias
+    await expect(partida.crearListaRangos(lista)).rejects.toBeTruthy();
+    expect(partida.listasRangos).toHaveLength(1);
+    // Cambiarla relee las definiciones (las variables que la usan traen la copia nueva)
+    const antes = llamadas("obtener_definiciones_variables").length;
+    await partida.modificarListaRangos({ ...creada, opciones: [{ nombre: "Experto", bonus: 4 }] });
+    expect(partida.listasRangos[0].opciones).toEqual([{ nombre: "Experto", bonus: 4 }]);
+    expect(llamadas("obtener_definiciones_variables").length).toBeGreaterThan(antes);
+    await partida.borrarListaRangos(creada.id);
+    expect(partida.listasRangos).toEqual([]);
   });
 
   it("instanciar oculto manda `oculto` a Rust, y ocultar o mostrar una instancia se ve al momento y se confirma al releer", async () => {

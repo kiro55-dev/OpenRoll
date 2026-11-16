@@ -15,6 +15,7 @@ pub mod partidas;
 pub mod modelos;
 pub mod papelera;
 pub mod partida;
+pub mod rangos;
 pub mod recursos;
 pub mod tablero;
 pub mod variables;

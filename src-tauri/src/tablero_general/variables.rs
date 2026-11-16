@@ -253,8 +253,8 @@ pub fn validar_definicion(otras: &[DefinicionVariable], grupos: &[GrupoVariables
             if !d.bases.is_empty() || !d.opcionales.is_empty() {
                 return Err("Una variable base no depende de otras".into());
             }
-            if (d.multiplicador, d.divisor, d.constante) != (1, 1, 0) || !d.opciones.is_empty() {
-                return Err("Una variable base no lleva fórmula ni opciones".into());
+            if (d.multiplicador, d.divisor, d.constante) != (1, 1, 0) || d.rangos.is_some() || !d.opciones.is_empty() {
+                return Err("Una variable base no lleva fórmula ni rangos".into());
             }
             if !(1..=MAX_ESCALA_VARIABLE).contains(&d.escala) {
                 return Err(format!("La escala debe estar entre 1 y {MAX_ESCALA_VARIABLE}"));
@@ -281,22 +281,7 @@ pub fn validar_definicion(otras: &[DefinicionVariable], grupos: &[GrupoVariables
                 return Err("Una derivada solo puede depender de variables base".into());
             }
             validar_formula(d.multiplicador, d.divisor, d.constante)?;
-            if d.opciones.len() > MAX_OPCIONES_VARIABLE {
-                return Err(format!("Una derivada no puede tener más de {MAX_OPCIONES_VARIABLE} opciones"));
-            }
-            for (i, o) in d.opciones.iter().enumerate() {
-                let nombre = o.nombre.trim();
-                let raro = nombre.chars().any(|c| c.is_control() || crate::tablero_general::jugadores::caracter_enganoso(c));
-                if nombre.is_empty() || nombre.chars().count() > MAX_NOMBRE_OPCION || raro {
-                    return Err(format!("Las opciones necesitan un nombre de 1 a {MAX_NOMBRE_OPCION} caracteres sin símbolos raros"));
-                }
-                if d.opciones[..i].iter().any(|p| clave(&p.nombre) == clave(nombre)) {
-                    return Err(format!("La opción «{nombre}» está repetida"));
-                }
-                if o.bonus.abs() > LIMITE_VALOR_VARIABLE {
-                    return Err(format!("El bono de una opción debe estar entre -{LIMITE_VALOR_VARIABLE} y {LIMITE_VALOR_VARIABLE}"));
-                }
-            }
+            // Que la lista de rangos exista se comprueba donde están las listas (partida.rs, conjuntos.rs): aquí no se conocen
         }
     }
     Ok(())
@@ -313,7 +298,7 @@ pub fn es_la_misma(a: &DefinicionVariable, b: &DefinicionVariable) -> bool {
         && a.neutro == b.neutro
         && a.escala == b.escala
         && (a.multiplicador, a.divisor, a.constante) == (b.multiplicador, b.divisor, b.constante)
-        && a.opciones == b.opciones
+        && a.rangos == b.rangos
 }
 
 /// Comprueba el nombre de un grupo contra los DEMÁS (al crear: todos; al renombrar: todos menos él).
@@ -387,6 +372,7 @@ pub fn asegurar_grupos(grupos: &mut Vec<GrupoVariables>, defs: &mut [DefinicionV
         d.bases.clear();
         d.opcionales.clear();
         d.opciones.clear();
+        d.rangos = None;
         (d.multiplicador, d.divisor, d.constante) = (1, 1, 0);
     }
 }
@@ -400,7 +386,7 @@ pub mod pruebas {
     pub fn var(id: u16, nombre: &str, abreviatura: &str, neutro: i16, escala: i16) -> DefinicionVariable {
         DefinicionVariable {
             id, nombre: nombre.into(), abreviatura: abreviatura.into(), neutro, escala, grupo: 1, bases: vec![], opcionales: vec![],
-            multiplicador: 1, divisor: 1, constante: 0, opciones: vec![],
+            multiplicador: 1, divisor: 1, constante: 0, opciones: vec![], rangos: None,
         }
     }
 
@@ -408,7 +394,7 @@ pub mod pruebas {
     pub fn derivada(id: u16, nombre: &str, abreviatura: &str, bases: &[u16], opcionales: &[u16]) -> DefinicionVariable {
         DefinicionVariable {
             id, nombre: nombre.into(), abreviatura: abreviatura.into(), neutro: 0, escala: 1, grupo: 2,
-            bases: bases.to_vec(), opcionales: opcionales.to_vec(), multiplicador: 1, divisor: 1, constante: 0, opciones: vec![],
+            bases: bases.to_vec(), opcionales: opcionales.to_vec(), multiplicador: 1, divisor: 1, constante: 0, opciones: vec![], rangos: None,
         }
     }
 
@@ -695,20 +681,15 @@ pub mod pruebas {
         let ok = DefinicionVariable { multiplicador: 2, divisor: 3, constante: -4, ..derivada(5, "Acrobacias", "acro", &[1], &[3]) };
         assert!(validar_definicion(&otras, &g, &ok).is_ok());
         let rango = |n: &str, b: i16| OpcionVariable { nombre: n.into(), bonus: b };
-        let con = |opciones: Vec<OpcionVariable>| DefinicionVariable { opciones, ..derivada(5, "Acrobacias", "acro", &[1], &[]) };
-        assert!(validar_definicion(&otras, &g, &con(vec![rango("Sin entrenar", 0), rango("Entrenado", 2)])).is_ok());
+        assert!(validar_definicion(&otras, &g, &DefinicionVariable { rangos: Some(1), ..derivada(5, "Acrobacias", "acro", &[1], &[]) }).is_ok());
         for mala in [
             DefinicionVariable { multiplicador: 0, ..derivada(5, "Acrobacias", "acro", &[1], &[]) },
             DefinicionVariable { divisor: 0, ..derivada(5, "Acrobacias", "acro", &[1], &[]) },
             DefinicionVariable { divisor: 101, ..derivada(5, "Acrobacias", "acro", &[1], &[]) },
             DefinicionVariable { constante: 10000, ..derivada(5, "Acrobacias", "acro", &[1], &[]) },
-            con(vec![rango("", 1)]),
-            con(vec![rango("Experto", 1), rango(" experto ", 2)]),
-            con(vec![rango("Maestro", 10000)]),
-            con(vec![rango("a\u{202e}b", 1)]),
-            con((0..13).map(|i| rango(&format!("R{i}"), i)).collect()),
-            // Una base no lleva fórmula ni opciones
+            // Una base no lleva fórmula ni rangos
             DefinicionVariable { multiplicador: 2, ..var(6, "Rara", "r", 10, 2) },
+            DefinicionVariable { rangos: Some(1), ..var(6, "Rara", "r", 10, 2) },
             DefinicionVariable { opciones: vec![rango("X", 1)], ..var(6, "Rara", "r", 10, 2) },
         ] {
             assert!(validar_definicion(&otras, &g, &mala).is_err(), "{mala:?}");
@@ -716,7 +697,7 @@ pub mod pruebas {
         assert!(validar_definicion(&otras, &g, &var(6, "Versus", "vs", 10, 2)).is_err(), "«vs» está reservado");
         // Las que cambian la fórmula o las opciones no son «la misma»
         assert!(!es_la_misma(&derivada(5, "A", "a", &[1], &[]), &DefinicionVariable { constante: 1, ..derivada(5, "A", "a", &[1], &[]) }));
-        assert!(!es_la_misma(&derivada(5, "A", "a", &[1], &[]), &con(vec![rango("X", 1)])));
+        assert!(!es_la_misma(&derivada(5, "A", "a", &[1], &[]), &DefinicionVariable { rangos: Some(1), ..derivada(5, "A", "a", &[1], &[]) }));
 
         // Cálculos de parámetro
         let c = |variables: Vec<u16>, multiplicador, divisor, constante| CalculoParametro { variables, multiplicador, divisor, constante };

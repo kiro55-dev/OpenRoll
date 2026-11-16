@@ -27,6 +27,7 @@ fn base(id: u16, nombre: &str, abreviatura: &str, grupo: u16, neutro: i16, escal
         divisor: 1,
         constante: 0,
         opciones: vec![],
+        rangos: None,
     }
 }
 
@@ -142,6 +143,7 @@ pub fn dnd5e() -> ConjuntoParametros {
             grupo(HABILIDADES, "Habilidades", TipoGrupoVariables::Derivadas),
         ],
         variables,
+        listas_rangos: vec![],
         escala_resultado: Some(escala("dnd")),
     }
 }
@@ -179,12 +181,15 @@ pub fn pathfinder2e() -> ConjuntoParametros {
     const SALVACIONES: u16 = 2;
     const HABILIDADES: u16 = 3;
     let nivel = 7;
-    let rangos = || {
-        [("Sin entrenar", 0), ("Entrenado", 2), ("Experto", 4), ("Maestro", 6), ("Legendario", 8)]
+    // UNA lista de rangos que usan todas las salvaciones y habilidades
+    let mut listas = vec![ListaRangos {
+        id: 1,
+        nombre: "Competencia".into(),
+        opciones: [("Sin entrenar", 0), ("Entrenado", 2), ("Experto", 4), ("Maestro", 6), ("Legendario", 8)]
             .map(|(nombre, bonus)| OpcionVariable { nombre: nombre.into(), bonus })
-            .to_vec()
-    };
-    let con_rangos = |d: DefinicionVariable| DefinicionVariable { opciones: rangos(), ..d };
+            .to_vec(),
+    }];
+    let con_rangos = |d: DefinicionVariable| DefinicionVariable { rangos: Some(1), ..d };
 
     let mut variables: Vec<DefinicionVariable> =
         SEIS.iter().enumerate().map(|(i, (n, a))| base(i as u16 + 1, n, a, CARACTERISTICAS, 10, 2)).collect();
@@ -199,6 +204,9 @@ pub fn pathfinder2e() -> ConjuntoParametros {
         id += 1;
         variables.push(con_rangos(derivada(id, nombre, abreviatura, HABILIDADES, id_de(caracteristica), &[nivel])));
     }
+
+    // Cada variable lleva la copia de las opciones de su lista (como en cualquier conjunto ya validado)
+    crate::tablero_general::rangos::normalizar_rangos(&mut listas, &mut variables);
 
     let por_defecto = parametros_por_defecto();
     ConjuntoParametros {
@@ -215,6 +223,7 @@ pub fn pathfinder2e() -> ConjuntoParametros {
             grupo(HABILIDADES, "Habilidades", TipoGrupoVariables::Derivadas),
         ],
         variables,
+        listas_rangos: listas,
         escala_resultado: None,
     }
 }
@@ -322,6 +331,7 @@ pub fn cthulhu7e() -> ConjuntoParametros {
             grupo(HABILIDADES, "Habilidades", TipoGrupoVariables::Base),
         ],
         variables,
+        listas_rangos: vec![],
         escala_resultado: Some(escala("cthulhu")),
     }
 }
@@ -410,7 +420,9 @@ mod tests {
         assert_eq!(por_abreviatura(&c, "refl").bases, [por_abreviatura(&c, "des").id]);
         assert_eq!(por_abreviatura(&c, "vol").bases, [por_abreviatura(&c, "sab").id]);
         assert_eq!(c.variables.len(), 6 + 1 + 3 + 18);
-        assert!(c.variables.iter().filter(|d| d.grupo != CARACTERISTICAS).all(|d| d.opciones.len() == 5 && d.opcionales == [por_abreviatura(&c, "niv").id]));
+        // Una sola lista de rangos, compartida por las 21 derivadas
+        assert_eq!(c.listas_rangos.len(), 1);
+        assert!(c.variables.iter().filter(|d| d.grupo != CARACTERISTICAS).all(|d| d.rangos == Some(1) && d.opciones.len() == 5 && d.opcionales == [por_abreviatura(&c, "niv").id]));
         assert_eq!(c.escala_resultado, None);
         assert_eq!(c.parametros.iter().map(|p| p.clave.as_str()).collect::<Vec<_>>(), ["Vida", "CA", "Velocidad"]);
     }

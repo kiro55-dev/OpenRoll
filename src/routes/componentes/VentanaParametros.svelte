@@ -143,6 +143,7 @@
   class="ventana-flotante"
   style="left: {pos.x}px; top: {pos.y}px;"
   style:width={pestana === "variables" || pestana === "resultados" ? "560px" : null}
+  style:max-height="calc(100vh - {pos.y}px - 12px)"
   role="dialog"
   aria-label="Parámetros de la partida"
   tabindex="-1"
@@ -342,7 +343,10 @@
   .btn-cerrar { background: none; border: none; color: #a1a1aa; cursor: pointer; font-size: 13px; }
   .btn-cerrar:hover { color: white; }
 
-  .cuerpo { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  /* Si la ventana no cabe por abajo, el cuerpo hace scroll (la cabecera se queda a la vista) */
+  .cuerpo { padding: 10px; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+  .cuerpo::-webkit-scrollbar { width: 4px; }
+  .cuerpo::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
 
   .subpestanas { display: flex; gap: 2px; border-bottom: 1px solid #27272a; margin-top: -2px; }
   .subpestanas button {
@@ -353,7 +357,8 @@
   .subpestanas button.activa { color: white; border-bottom-color: #3b82f6; }
   .ayuda { margin: 0; color: #a1a1aa; font-size: 10px; }
 
-  .lista { display: flex; flex-direction: column; gap: 3px; max-height: 240px; overflow-y: auto; }
+  /* Sin scroll propio: la lista crece y el que hace scroll es el cuerpo de toda la ventana */
+  .lista { display: flex; flex-direction: column; gap: 3px; }
   .fila-param {
     display: flex; align-items: center; gap: 8px; padding: 5px 8px; cursor: grab;
     background: #111113; border: 1px solid #27272a; border-radius: 5px;
