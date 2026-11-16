@@ -56,11 +56,20 @@ fn generico() -> ConjuntoParametros {
     }
 }
 
-/// Los conjuntos que trae el programa, definidos en código. Para añadir uno: otra entrada aquí (y pasa solo por el test que
-/// comprueba que toda entrada es válida).
+/// Los conjuntos que trae el programa, definidos en código (ver conjuntos_serie.rs). Para añadir uno: otra entrada aquí (y pasa solo por
+/// el test que comprueba que toda entrada es válida).
 pub fn integrados() -> Vec<Integrado> {
-    vec![Integrado { clave: "generico", contenido: generico() }]
+    use crate::tablero_general::conjuntos_serie::{cthulhu7e, dnd5e, pathfinder2e};
+    vec![
+        Integrado { clave: "dnd5e", contenido: dnd5e() },
+        Integrado { clave: "pathfinder2e", contenido: pathfinder2e() },
+        Integrado { clave: "cthulhu7e", contenido: cthulhu7e() },
+        Integrado { clave: "generico", contenido: generico() },
+    ]
 }
+
+/// El conjunto con el que nace una partida NUEVA: D&D 5e.
+pub const CONJUNTO_POR_DEFECTO: &str = "dnd5e";
 
 fn integrado(clave: &str) -> Option<Integrado> {
     integrados().into_iter().find(|i| i.clave == clave)
@@ -290,7 +299,26 @@ pub fn asegurar(est: &mut EstadoPartida) {
     est.conjunto_activo = 1;
 }
 
-/// El conjunto con el que nace una partida nueva.
+impl EstadoPartida {
+    /// El estado de una partida NUEVA: D&D 5e como conjunto activo (sus parámetros, variables, grupos y escala son las definiciones
+    /// vivas). `default()` sigue siendo el genérico: es la base de las partidas anteriores a los conjuntos y de casi todas las pruebas.
+    /// Una partida que ya existe no pasa por aquí: conserva lo que tiene (`asegurar`).
+    pub fn para_partida_nueva() -> Self {
+        let dnd = integrado(CONJUNTO_POR_DEFECTO).expect("el conjunto por defecto existe").contenido;
+        let mut e = Self::default();
+        e.definiciones_parametros = dnd.parametros.clone();
+        e.grupos_variables = dnd.grupos_variables.clone();
+        e.definiciones_variables = dnd.variables.clone();
+        e.escala_resultado = dnd.escala_resultado.clone();
+        e.conjuntos_parametros =
+            vec![ConjuntoGuardado { id: 1, origen: Some(CONJUNTO_POR_DEFECTO.into()), contenido: dnd, valores: Default::default() }];
+        e.conjunto_activo = 1;
+        e.ajustar_a_definiciones();
+        e
+    }
+}
+
+/// El conjunto genérico con el que nace un `EstadoPartida::default()` (no una partida nueva de verdad: ver `para_partida_nueva`).
 pub fn conjuntos_iniciales() -> Vec<ConjuntoGuardado> {
     vec![ConjuntoGuardado { id: 1, origen: Some("generico".into()), contenido: generico(), valores: Default::default() }]
 }
@@ -915,6 +943,91 @@ mod tests {
     }
 
     #[test]
+    fn una_partida_nueva_nace_con_dnd_y_una_que_ya_existe_conserva_lo_suyo() {
+        use crate::tablero_general::almacen::{pruebas::dir_temporal, Almacen};
+        use crate::tablero_general::estado::cargar;
+        let nueva = EstadoPartida::para_partida_nueva();
+        assert_eq!(nueva.conjunto_activo, 1);
+        assert_eq!(nueva.conjuntos_parametros.len(), 1);
+        assert_eq!(nueva.conjuntos_parametros[0].origen.as_deref(), Some("dnd5e"));
+        assert_eq!(nueva.conjuntos_parametros[0].contenido.nombre, "D&D 5e");
+        assert_eq!(nueva.grupos_variables.len(), 3);
+        assert_eq!(nueva.definiciones_variables.len(), 31);
+        assert_eq!(nueva.definiciones_parametros, parametros_por_defecto(), "vida, armadura, velocidad y rango de arma como siempre");
+        assert!(nueva.escala_resultado.is_some());
+        // Las definiciones vivas SON las del conjunto activo
+        assert_eq!(nueva.contenido_de(1).unwrap().variables, nueva.definiciones_variables);
+        // El genérico sigue ahí para añadirlo, y `default()` no cambia (es el de las partidas anteriores a los conjuntos)
+        assert!(integrados().iter().any(|i| i.clave == "generico"));
+        assert!(EstadoPartida::default().definiciones_variables.is_empty());
+
+        // Carpeta vacía y partida.json roto: partida nueva, con D&D
+        let dir = dir_temporal("partida_nueva_dnd");
+        let almacen = Almacen::abrir(dir.clone()).unwrap();
+        let (e, informe) = cargar(&almacen).unwrap();
+        assert!(informe.partida_nueva);
+        assert_eq!(e.conjuntos_parametros[0].origen.as_deref(), Some("dnd5e"));
+        std::fs::write(dir.join("partida.json"), "{esto no es json").unwrap();
+        let (e, informe) = cargar(&almacen).unwrap();
+        assert!(informe.partida_nueva && e.conjuntos_parametros[0].origen.as_deref() == Some("dnd5e"));
+
+        // Una partida de antes de los conjuntos, con sus propias definiciones: las conserva y se queda como «Personalizado»
+        let mut propia = EstadoPartida::default();
+        propia.definiciones_parametros.pop();
+        propia.definiciones_variables = vec![var(1, "Fuerza", "f", 10, 2)];
+        propia.conjuntos_parametros.clear();
+        let dir = dir_temporal("partida_propia");
+        let almacen = Almacen::abrir(dir.clone()).unwrap();
+        std::fs::write(dir.join("partida.json"), serde_json::to_string(&propia).unwrap()).unwrap();
+        let (e, informe) = cargar(&almacen).unwrap();
+        assert!(!informe.partida_nueva);
+        assert_eq!(e.definiciones_parametros.len(), 3);
+        assert_eq!(e.definiciones_variables.len(), 1);
+        assert_eq!(e.conjuntos_parametros.len(), 1);
+        assert_eq!(e.conjuntos_parametros[0].contenido.nombre, "Personalizado");
+        assert_eq!(e.conjuntos_parametros[0].origen, None);
+        assert_eq!(e.conjunto_activo, 1);
+        // Una guardada con los parámetros de serie y nada más (la de antes de los conjuntos) sigue siendo «Genérico», no D&D
+        let mut generica = EstadoPartida::default();
+        generica.conjuntos_parametros.clear();
+        let dir = dir_temporal("partida_generica");
+        let almacen = Almacen::abrir(dir.clone()).unwrap();
+        std::fs::write(dir.join("partida.json"), serde_json::to_string(&generica).unwrap()).unwrap();
+        let (e, _) = cargar(&almacen).unwrap();
+        assert_eq!(e.conjuntos_parametros[0].contenido.nombre, "Genérico");
+        assert!(e.definiciones_variables.is_empty());
+    }
+
+    #[test]
+    fn cada_conjunto_de_serie_se_exporta_e_importa_con_sus_rangos_calculos_y_escala_y_se_puede_usar() {
+        let state = estado_en_a("series_ida_y_vuelta");
+        for clave in ["dnd5e", "pathfinder2e", "cthulhu7e"] {
+            let id = anadir_conjunto_de_serie_en(clave, &state).unwrap();
+            let original = state.lock().contenido_de(id).unwrap();
+            assert_eq!(original, integrado(clave).unwrap().contenido, "{clave}: la copia es igual al original");
+            // Exportar y volver a importar da lo mismo (con la escala, los rangos y los cálculos de parámetros)
+            let archivo = state.raiz.join(format!("{clave}.json"));
+            exportar_conjunto_en(id, archivo.to_str().unwrap(), &state).unwrap();
+            let copia = importar_conjunto_en(archivo.to_str().unwrap(), &state).unwrap();
+            let importado = state.lock().contenido_de(copia).unwrap();
+            assert_eq!(importado.escala_resultado, original.escala_resultado, "{clave}");
+            assert_eq!(importado.variables, original.variables, "{clave}");
+            assert_eq!(importado.parametros, original.parametros, "{clave}");
+            assert_eq!(importado.nombre, format!("{} (2)", original.nombre), "ya había uno con ese nombre");
+        }
+        // Se puede usar cada uno: trae su escala y sus parámetros, y las fichas siguen siendo coherentes
+        let ids: Vec<(String, u16)> = state.lock().conjuntos_parametros.iter().filter_map(|g| g.origen.clone().map(|o| (o, g.id))).collect();
+        for (origen, id) in ids.into_iter().filter(|(o, _)| o != "generico") {
+            usar_conjunto_en(id, &state).unwrap();
+            let est = state.lock();
+            let esperado = integrado(&origen).unwrap().contenido;
+            assert_eq!(est.definiciones_variables, esperado.variables, "{origen}");
+            assert_eq!(est.escala_resultado, esperado.escala_resultado, "{origen}");
+            assert_eq!(est.definiciones_parametros, esperado.parametros, "{origen}");
+        }
+    }
+
+    #[test]
     fn la_escala_de_resultados_se_aplica_en_el_chat_y_cada_conjunto_guarda_la_suya() {
         use crate::tablero_general::dados::tirar_dado_de;
         use crate::tablero_general::escalas::{ejemplos, guardar_escala_resultado_en};
@@ -1083,7 +1196,10 @@ mod tests {
         assert!(anadir_conjunto_de_serie_en("no_existe", &state).is_err());
         let serie = anadir_conjunto_de_serie_en("generico", &state).unwrap();
         assert_eq!(serie, 1, "ya había una copia del genérico (la del activo)");
-        assert_eq!(resumen(&state.lock()).de_serie.iter().map(|s| s.ya_anadido).collect::<Vec<_>>(), vec![true]);
+        // Hay cuatro de serie y solo el genérico está en la partida
+        let de_serie = resumen(&state.lock()).de_serie;
+        assert_eq!(de_serie.iter().map(|s| (s.clave.as_str(), s.ya_anadido)).collect::<Vec<_>>(),
+            vec![("dnd5e", false), ("pathfinder2e", false), ("cthulhu7e", false), ("generico", true)]);
 
         // Usar: no el que ya se usa ni uno que no existe, ni con una ficha nueva abierta; y entonces las fichas se reinician
         assert!(usar_conjunto_en(1, &state).is_err() && usar_conjunto_en(99, &state).is_err());

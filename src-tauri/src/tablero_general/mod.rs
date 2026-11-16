@@ -3,6 +3,7 @@ pub mod almacen;
 pub mod archivos;
 pub mod cambios_entidad;
 pub mod conjuntos;
+pub mod conjuntos_serie;
 pub mod dados;
 pub mod escalas;
 pub mod estado;

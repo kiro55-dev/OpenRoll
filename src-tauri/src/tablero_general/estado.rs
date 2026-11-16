@@ -597,7 +597,7 @@ pub fn cargar(almacen: &Almacen) -> Result<(EstadoPartida, InformeCarga), String
     {
         None => {
             informe.partida_nueva = true;
-            EstadoPartida::default()
+            EstadoPartida::para_partida_nueva()
         }
         Some(json) => match serde_json::from_str::<EstadoPartida>(&json) {
             Ok(mut e) => {
@@ -609,7 +609,7 @@ pub fn cargar(almacen: &Almacen) -> Result<(EstadoPartida, InformeCarga), String
                 eprintln!("[partida] partida.json ilegible ({err}); se aparta y se empieza vacío");
                 informe.partida_corrupta_respaldada_en = almacen.respaldar_partida_corrupta();
                 informe.partida_nueva = true;
-                EstadoPartida::default()
+                EstadoPartida::para_partida_nueva()
             }
         },
     };
