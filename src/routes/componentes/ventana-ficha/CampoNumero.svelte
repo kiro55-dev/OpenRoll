@@ -9,6 +9,7 @@
     min = 0,
     max = 32767,
     estrecho = false,
+    soloLectura = false,
     titulo = "Rueda del ratón para subir/bajar"
   }: {
     value: number;
@@ -18,11 +19,14 @@
     max?: number;
     /** Más estrecho y centrado (para el cuerpo X × Y) */
     estrecho?: boolean;
+    /** Se ve el valor pero no se escribe (un parámetro que se calcula con las variables). */
+    soloLectura?: boolean;
     titulo?: string;
   } = $props();
 
   function alRueda(e: WheelEvent) {
     e.preventDefault();
+    if (soloLectura) return;
     const paso = e.deltaY < 0 ? 1 : -1;
     value = Math.min(max, Math.max(min, Math.round(Number(value) || 0) + paso));
   }
@@ -30,7 +34,7 @@
 
 <label title={ayuda(titulo)}>
   {etiqueta}
-  <input type="number" class:estrecho {min} {max} bind:value onwheel={alRueda} />
+  <input type="number" class:estrecho class:calculado={soloLectura} {min} {max} readonly={soloLectura} bind:value onwheel={alRueda} />
   {#if sufijo}<span class="sufijo">{sufijo}</span>{/if}
 </label>
 
@@ -41,5 +45,6 @@
     padding: 2px 4px; border-radius: 4px; font-size: 11px;
   }
   input.estrecho { width: 34px; text-align: center; }
+  input.calculado { color: #93c5fd; background: #111113; cursor: default; }
   .sufijo { color: #71717a; font-size: 10px; }
 </style>

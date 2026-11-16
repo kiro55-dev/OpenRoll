@@ -121,6 +121,8 @@
               <CampoNumero
                 etiqueta="{d.clave}{d.tiene_maximo ? ' max' : ''}:"
                 sufijo={d.unidad ?? ""}
+                soloLectura={editor.esCalculado(d.id)}
+                titulo={editor.descripcionCalculo(d.id) ?? "Rueda del ratón para subir/bajar"}
                 bind:value={() => editor.numero(d.id), (v) => editor.ponerNumero(d.id, v)}
               />
             {/each}
@@ -277,9 +279,23 @@
                               <span>+ {etiquetaVariable(opcional)}</span>
                             </label>
                           {/if}
-                        {:else}
-                          <span class="sin">—</span>
                         {/each}
+                        <!-- Los rangos de la derivada (Sin entrenar +0, Entrenado +2...): cada ficha elige uno y su bono se suma -->
+                        {#if (d.opciones?.length ?? 0) > 0}
+                          <select
+                            class="rango"
+                            aria-label="Rango de {d.nombre}"
+                            title={ayuda("El bono del rango elegido se suma al resultado")}
+                            value={editor.eleccion(d.id)}
+                            onchange={(e) => editor.elegirOpcion(d.id, Number(e.currentTarget.value))}
+                          >
+                            {#each d.opciones ?? [] as o, i (i)}
+                              <option value={i}>{o.nombre} ({textoModificador(o.bonus)})</option>
+                            {/each}
+                          </select>
+                        {:else if d.opcionales.length === 0}
+                          <span class="sin">—</span>
+                        {/if}
                        </div>
                       </td>
                       <td class="resultado" class:positivo={resultado > 0} class:negativo={resultado < 0} title={editor.desgloseVariable(d)}>
@@ -347,6 +363,9 @@
   .titulo-grupo { margin: 6px 0 0; font-size: 11px; font-weight: 700; color: #d4d4d8; text-transform: uppercase; letter-spacing: 0.03em; }
   .titulo-grupo:first-child { margin-top: 0; }
   .tabla-variables td { vertical-align: middle; }
+  .rango {
+    background: #09090b; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; padding: 1px 4px; font-size: 11px; max-width: 100%;
+  }
   .opcionales { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; min-height: 18px; }
   .grupos-ficha { display: flex; flex-wrap: wrap; gap: 3px; }
   .grupo-ficha {

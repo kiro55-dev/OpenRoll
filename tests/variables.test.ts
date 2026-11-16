@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { DefinicionVariable } from "$lib/partida.svelte";
 import {
   avisoDeBorrar,
+  bonoElegido,
+  calcularParametro,
+  desgloseResultado,
+  formulaVariable,
+  recalcularParametros,
+  textoCalculo,
+  tieneFormula,
   efectoDeBorrar,
   etiquetaVariable,
   modificadorVariable,
@@ -46,8 +53,8 @@ describe("resultado de una variable (igual que variables::modificador en Rust)",
 
   it("normalizar deja una por definición, en su orden, con el neutro en las que faltan", () => {
     expect(normalizarVariables([fuerza, cordura], [{ id_definicion: 2, valor: 9 }, { id_definicion: 9, valor: 1 }])).toEqual([
-      { id_definicion: 1, valor: 10, opcionales: [] },
-      { id_definicion: 2, valor: 9, opcionales: [] }
+      { id_definicion: 1, valor: 10, opcionales: [], eleccion: 0 },
+      { id_definicion: 2, valor: 9, opcionales: [], eleccion: 0 }
     ]);
   });
 });
@@ -103,6 +110,70 @@ describe("variables derivadas (igual que variables::resultado en Rust)", () => {
     expect(avisoDeBorrar(defs, [4])).toBeNull(); // una derivada no la usa nadie
     // El grupo de bases entero: todas las derivadas se quedan sin bases
     expect(efectoDeBorrar(defs, [1, 2, 3, 6]).borradas.sort()).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+});
+
+describe("fórmula y rangos de una derivada (igual que variables::resultado en Rust)", () => {
+  const rangos = [{ nombre: "Sin entrenar", bonus: 0 }, { nombre: "Entrenado", bonus: 2 }, { nombre: "Experto", bonus: 4 }];
+  const nivel = base(3, "Nivel", "niv", 0, 1);
+  const destreza = base(1, "Destreza", "des", 10, 2);
+
+  it("la fórmula redondea hacia abajo y suma la constante", () => {
+    expect(formulaVariable(7)).toBe(7);
+    expect(formulaVariable(7, 1, 2)).toBe(3);
+    expect(formulaVariable(-7, 1, 2)).toBe(-4);
+    expect(formulaVariable(3, 2, 1, 10)).toBe(16);
+    expect(formulaVariable(5, 3, 2, -1)).toBe(6);
+    expect(tieneFormula({})).toBe(false);
+    expect(tieneFormula({ divisor: 2 })).toBe(true);
+  });
+
+  it("el rango elegido suma su bono; una elección perdida vuelve al primero", () => {
+    const acro: DefinicionVariable = { ...derivada(4, "Acrobacias", "acro", [1, 3]), opciones: rangos };
+    const defs = [destreza, nivel, acro];
+    const valores = [
+      { id_definicion: 1, valor: 14 },
+      { id_definicion: 3, valor: 3 },
+      { id_definicion: 4, valor: 0, eleccion: 0 }
+    ];
+    expect(resultadoVariable(defs, valores, acro)).toBe(2 + 3);
+    valores[2].eleccion = 2;
+    expect(resultadoVariable(defs, valores, acro)).toBe(2 + 3 + 4);
+    expect(bonoElegido(acro, valores[2])).toBe(4);
+    expect(desgloseResultado(defs, valores, acro)).toBe("des (+2) + niv (+3) + Experto (+4)");
+    valores[2].eleccion = 9;
+    expect(normalizarVariables(defs, valores)[2].eleccion).toBe(0);
+    expect(normalizarVariables([destreza, nivel, derivada(4, "Acrobacias", "acro", [1, 3])], [{ id_definicion: 4, valor: 0, eleccion: 2 }])[2].eleccion).toBe(0);
+  });
+
+  it("con multiplicador, divisor y constante", () => {
+    const esq = base(1, "Esquivar", "esq", 0, 1);
+    const mitad: DefinicionVariable = { ...derivada(2, "Esquivar difícil", "esqd", [1]), divisor: 2 };
+    const valores = [{ id_definicion: 1, valor: 65 }, { id_definicion: 2, valor: 0 }];
+    expect(resultadoVariable([esq, mitad], valores, mitad)).toBe(32);
+    expect(desgloseResultado([esq, mitad], valores, mitad)).toBe("(esq (+65)) ÷2");
+    const con: DefinicionVariable = { ...mitad, multiplicador: 2, divisor: 3, constante: -1 };
+    expect(resultadoVariable([esq, con], valores, con)).toBe(Math.floor((65 * 2) / 3) - 1);
+    expect(desgloseResultado([esq, con], valores, con)).toBe("(esq (+65)) ×2 ÷3 - 1");
+  });
+
+  it("un parámetro calculado sigue a las variables y se queda entre 0 y 9999", () => {
+    const con = base(1, "Constitución", "con", 0, 1);
+    const tam = base(2, "Tamaño", "tam", 0, 1);
+    const defs = [con, tam];
+    const valores = [{ id_definicion: 1, valor: 60 }, { id_definicion: 2, valor: 55 }];
+    const calculo = { variables: [1, 2], multiplicador: 1, divisor: 10, constante: 0 };
+    expect(calcularParametro(calculo, defs, valores)).toBe(11);
+    expect(calcularParametro({ ...calculo, constante: -100 }, defs, valores)).toBe(0);
+    expect(calcularParametro({ ...calculo, multiplicador: 100, divisor: 1, constante: 9999 }, defs, valores)).toBe(9999);
+    expect(textoCalculo(calculo, defs)).toBe("(con + tam) ÷10");
+    const ficha = {
+      parametros: [{ id_definicion: 1, valor: { Numero: 99 }, publico: false }, { id_definicion: 2, valor: { Numero: 4 }, publico: false }],
+      variables: valores
+    } as never;
+    const dp = (id: number, calculo: unknown) => ({ id, clave: "P", valor_por_defecto: { Numero: 0 }, tiene_maximo: false, representar_mapa: null, visibilidad: "Variable", unidad: null, atenuar_si_negativo: false, calculo }) as never;
+    recalcularParametros([dp(1, calculo), dp(2, null)], defs, ficha);
+    expect((ficha as { parametros: { valor: unknown }[] }).parametros.map((p) => p.valor)).toEqual([{ Numero: 11 }, { Numero: 4 }]);
   });
 });
 

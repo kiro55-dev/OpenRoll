@@ -1,7 +1,8 @@
 <!-- src/routes/componentes/ventana-parametros/FilaVariable.svelte -->
 <!-- Una variable de la partida en la tabla del host, editable en línea. En un grupo de BASES: nombre, abreviatura, neutro y
      escala. En uno de DERIVADAS: nombre, abreviatura, de qué bases depende (se suman) y sus opcionales (cada ficha las marca
-     o no). Se guarda al salir de la fila o con Enter, si cambió algo; Escape deshace lo escrito. Sin `definicion` es una
+     o no). Con el botón «ƒ» una derivada también tiene una fórmula (× multiplicador ÷ divisor + constante, redondeando hacia abajo)
+     y RANGOS (Sin entrenar +0, Entrenado +2...: cada ficha elige uno y su bono se suma). Se guarda al salir de la fila o con Enter, si cambió algo; Escape deshace lo escrito. Sin `definicion` es una
      fila nueva (borrador): se crea en Rust en cuanto tiene nombre (y, si es derivada, al menos una base). Borrar una base
      que usan derivadas pide confirmar y dice qué pasará (en cascada). -->
 <script lang="ts">
@@ -12,7 +13,10 @@
     LIMITE_VALOR_VARIABLE,
     MAX_ABREVIATURA_VARIABLE,
     MAX_ESCALA_VARIABLE,
+    MAX_FACTOR_FORMULA,
+    MAX_NOMBRE_OPCION,
     MAX_NOMBRE_VARIABLE,
+    MAX_OPCIONES_VARIABLE,
     VARIABLE_NUEVA,
     avisoDeBorrar,
     esDerivada
@@ -67,11 +71,29 @@
   let dependeDe = $state<number[]>([...(definicion?.bases ?? [])]);
   // svelte-ignore state_referenced_locally
   let opcionales = $state<number[]>([...(definicion?.opcionales ?? [])]);
+  // svelte-ignore state_referenced_locally
+  let multiplicador = $state<number | null>(definicion?.multiplicador ?? 1);
+  // svelte-ignore state_referenced_locally
+  let divisor = $state<number | null>(definicion?.divisor ?? 1);
+  // svelte-ignore state_referenced_locally
+  let constante = $state<number | null>(definicion?.constante ?? 0);
+  // svelte-ignore state_referenced_locally
+  let rangos = $state<{ nombre: string; bonus: number | null }[]>((definicion?.opciones ?? []).map((o) => ({ ...o })));
+  /** El panel de la fórmula y los rangos: se abre solo si la variable ya tiene alguno. */
+  // svelte-ignore state_referenced_locally
+  let avanzado = $state(tieneAvanzado(definicion));
   let guardando = false;
   /** El borrador ya se creó en Rust: esta fila está a punto de sustituirse por la guardada y no debe crear otra. */
   let creada = false;
   /** El aviso de borrar en cascada, mientras se espera la confirmación. */
   let confirmando = $state<string | null>(null);
+
+  function tieneAvanzado(d: DefinicionVariable | null) {
+    return !!d && ((d.multiplicador ?? 1) !== 1 || (d.divisor ?? 1) !== 1 || (d.constante ?? 0) !== 0 || (d.opciones?.length ?? 0) > 0);
+  }
+
+  /** Los rangos con nombre (uno recién añadido y sin escribir no cuenta). */
+  const rangosValidos = () => rangos.filter((r) => r.nombre.trim() !== "").map((r) => ({ nombre: r.nombre.trim(), bonus: Number(r.bonus ?? 0) }));
 
   /** Vuelve a lo que tiene Rust (tras guardar, o al deshacer con Escape). */
   function deshacer() {
@@ -82,13 +104,17 @@
     escala = definicion.escala;
     dependeDe = [...definicion.bases];
     opcionales = [...definicion.opcionales];
+    multiplicador = definicion.multiplicador ?? 1;
+    divisor = definicion.divisor ?? 1;
+    constante = definicion.constante ?? 0;
+    rangos = (definicion.opciones ?? []).map((o) => ({ ...o }));
   }
 
   // Si la lista se relee (al guardar esta u otra), se toma lo de Rust, salvo en la fila donde se está escribiendo
   $effect(() => {
     if (!definicion) return;
     const d = definicion;
-    void [d.nombre, d.abreviatura, d.neutro, d.escala, d.bases, d.opcionales];
+    void [d.nombre, d.abreviatura, d.neutro, d.escala, d.bases, d.opcionales, d.multiplicador, d.divisor, d.constante, d.opciones];
     if (fila?.contains(document.activeElement)) return;
     deshacer();
   });
@@ -108,7 +134,11 @@
       escala: derivada ? 1 : Number(escala),
       grupo: definicion?.grupo ?? grupo,
       bases: derivada ? [...dependeDe] : [],
-      opcionales: derivada ? [...opcionales] : []
+      opcionales: derivada ? [...opcionales] : [],
+      multiplicador: derivada ? Number(multiplicador ?? 0) : 1,
+      divisor: derivada ? Number(divisor ?? 0) : 1,
+      constante: derivada ? Number(constante ?? 0) : 0,
+      opciones: derivada ? rangosValidos() : []
     };
     // Un borrador a medias se queda como está, sin error y sin guardarse: sin nombre, o una derivada sin ninguna base
     if (!definicion && (!datos.nombre || (derivada && datos.bases.length === 0))) return;
@@ -123,7 +153,11 @@
       datos.neutro === definicion.neutro &&
       datos.escala === definicion.escala &&
       iguales(datos.bases, definicion.bases) &&
-      iguales(datos.opcionales, definicion.opcionales)
+      iguales(datos.opcionales, definicion.opcionales) &&
+      datos.multiplicador === (definicion.multiplicador ?? 1) &&
+      datos.divisor === (definicion.divisor ?? 1) &&
+      datos.constante === (definicion.constante ?? 0) &&
+      JSON.stringify(datos.opciones) === JSON.stringify(definicion.opciones ?? [])
     ) {
       return;
     }
@@ -216,7 +250,7 @@
   function alPulsar(e: PointerEvent) {
     punteroDentro = true;
     // Desde un campo, un botón o un selector no se arrastra (se escribe o se pulsa)
-    if ((e.target as HTMLElement).closest("input, button, label, .selector")) return;
+    if ((e.target as HTMLElement).closest("input, button, label, .selector, .avanzado")) return;
     onIniciarArrastre?.(e);
   }
 </script>
@@ -295,6 +329,43 @@
     <button type="button" class="btn-borrar" onclick={() => borrar()}>{definicion ? "Borrar" : "Quitar"}</button>
   </div>
 
+  {#if derivada}
+    <!-- Fórmula y rangos: se abren con «ƒ» y quedan dentro de la fila (así tocarlos no cuenta como salir de ella) -->
+    <div class="barra-avanzado">
+      <button
+        type="button"
+        class="btn-avanzado"
+        class:con-datos={tieneAvanzado(definicion) || rangos.length > 0 || multiplicador !== 1 || divisor !== 1 || constante !== 0}
+        aria-expanded={avanzado}
+        title={ayuda("Fórmula (× ÷ +) y rangos de esta variable")}
+        onclick={() => (avanzado = !avanzado)}
+      >ƒ Fórmula y rangos {avanzado ? "▴" : "▾"}</button>
+    </div>
+    {#if avanzado}
+      <div class="avanzado">
+        <div class="formula">
+          <span class="texto">Resultado = (suma de las variables)</span>
+          <label>× <input type="number" class="campo numero" min="1" max={MAX_FACTOR_FORMULA} aria-label="Multiplicador" bind:value={multiplicador} /></label>
+          <label>÷ <input type="number" class="campo numero" min="1" max={MAX_FACTOR_FORMULA} aria-label="Divisor" title={ayuda("Redondea hacia abajo")} bind:value={divisor} /></label>
+          <label>+ <input type="number" class="campo numero" min={-LIMITE_VALOR_VARIABLE} max={LIMITE_VALOR_VARIABLE} aria-label="Constante" bind:value={constante} /></label>
+        </div>
+        <div class="rangos">
+          <span class="texto" title={ayuda("Cada ficha elige uno y su bono se suma al resultado (Sin entrenar +0, Entrenado +2...)")}>Rangos que elige cada ficha:</span>
+          {#each rangos as r, i (i)}
+            <div class="rango">
+              <input type="text" class="campo" maxlength={MAX_NOMBRE_OPCION} placeholder="Entrenado" aria-label="Nombre del rango" bind:value={r.nombre} />
+              <input type="number" class="campo numero" min={-LIMITE_VALOR_VARIABLE} max={LIMITE_VALOR_VARIABLE} aria-label="Bono del rango" bind:value={r.bonus} />
+              <button type="button" class="btn-borrar" aria-label="Quitar el rango" onclick={() => (rangos = rangos.filter((_, j) => j !== i))}>✕</button>
+            </div>
+          {/each}
+          {#if rangos.length < MAX_OPCIONES_VARIABLE}
+            <button type="button" class="btn-mas" onclick={() => (rangos = [...rangos, { nombre: "", bonus: 0 }])}>+ Añadir rango</button>
+          {/if}
+        </div>
+      </div>
+    {/if}
+  {/if}
+
   {#if confirmando}
     <div class="confirmar" role="alert">
       <span>{confirmando}</span>
@@ -309,6 +380,19 @@
     display: flex; flex-direction: column; gap: 4px;
     padding: 4px 6px; background: #111113; border: 1px solid #27272a; border-radius: 5px; cursor: grab;
   }
+  .barra-avanzado { display: flex; }
+  .btn-avanzado {
+    background: none; border: none; color: #71717a; cursor: pointer; font-size: 10px; padding: 0 2px; font-weight: 600;
+  }
+  .btn-avanzado:hover, .btn-avanzado.con-datos { color: #93c5fd; }
+  .avanzado { display: flex; flex-direction: column; gap: 5px; padding: 5px 6px; background: #0c0c0e; border-radius: 4px; cursor: default; }
+  .formula, .rangos { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
+  .formula label { display: flex; align-items: center; gap: 3px; color: #a1a1aa; font-size: 11px; }
+  .formula .numero { width: 48px; }
+  .texto { color: #a1a1aa; font-size: 10px; }
+  .rango { display: grid; grid-template-columns: 130px 54px 22px; gap: 4px; align-items: center; }
+  .btn-mas { background: none; border: 1px dashed #3f3f46; color: #a1a1aa; border-radius: 4px; font-size: 10px; padding: 2px 8px; cursor: pointer; }
+  .btn-mas:hover { color: white; border-color: #71717a; }
   .campos { display: grid; grid-template-columns: 14px 1fr 64px 50px 44px 46px; gap: 4px; align-items: center; }
   .campos.derivada { grid-template-columns: 14px 1fr 54px 1fr 1fr 46px; }
   .fila-variable:hover { border-color: #3f3f46; }

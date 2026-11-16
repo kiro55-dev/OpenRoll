@@ -529,18 +529,22 @@ impl EstadoPartida {
     }
 
     pub fn ajustar_a_definiciones(&mut self) {
-        let defs = self.definiciones_parametros.clone();
         // Las variables sin grupo (de antes de los grupos) pasan al primero de bases
         variables::asegurar_grupos(&mut self.grupos_variables, &mut self.definiciones_variables);
         let vars = self.definiciones_variables.clone();
+        // Un parámetro calculado no puede usar variables que ya no existen
+        variables::limpiar_calculos(&mut self.definiciones_parametros, &vars);
+        let defs = self.definiciones_parametros.clone();
         for e in self.banco_entidades.iter_mut() {
             normalizar_parametros(&defs, &mut e.parametros);
             normalizar_variables(&vars, &mut e.variables);
+            variables::recalcular_parametros(&defs, &vars, e);
             normalizar_pasos(&defs, &mut e.pasos_valor);
         }
         for i in self.instancias_activas.iter_mut() {
             normalizar_parametros(&defs, &mut i.base.parametros);
             normalizar_variables(&vars, &mut i.base.variables);
+            variables::recalcular_parametros(&defs, &vars, &mut i.base);
             normalizar_pasos(&defs, &mut i.base.pasos_valor);
             // Un valor actual por cada parámetro con máximo, en el orden de las definiciones. Uno que
             // gana el máximo después de crearse la instancia empieza lleno (en el valor de la ficha).
@@ -716,6 +720,7 @@ mod tests {
             visibilidad: Visibilidad::Variable,
             unidad: None,
             atenuar_si_negativo: false,
+            calculo: None,
         }
     }
 

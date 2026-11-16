@@ -12,6 +12,7 @@
   import ArrastreFlotante from "./comunes/ArrastreFlotante.svelte";
   import TablaVariables from "./ventana-parametros/TablaVariables.svelte";
   import ConjuntosParametros from "./ventana-parametros/ConjuntosParametros.svelte";
+  import SelectorVariables from "./ventana-parametros/SelectorVariables.svelte";
 
   let { onCerrar }: { onCerrar: () => void } = $props();
 
@@ -243,6 +244,32 @@
               </label>
             {/if}
           </div>
+          <!-- Un parámetro calculado no se escribe en la ficha: sale de sus variables (los puntos de vida de Cthulhu = (CON + TAM) ÷ 10) -->
+          {#if partida.definicionesVariables.length > 0 || formulario.calcular}
+            <div class="fila">
+              <label class="check" title={ayuda("En vez de escribirlo en cada ficha, se calcula con sus variables: floor(suma × multiplicador ÷ divisor) + constante")}>
+                <input type="checkbox" bind:checked={formulario.calcular} />
+                <span>Se calcula con las variables de la ficha</span>
+              </label>
+            </div>
+            {#if formulario.calcular}
+              <div class="fila">
+                <SelectorVariables
+                  opciones={partida.definicionesVariables}
+                  bind:elegidas={formulario.calculoVariables}
+                  vacio="Elegir variables…"
+                  etiquetaAria="Variables del cálculo"
+                  titulo="Se suma el valor de cada una (en una base, el valor escrito; en una derivada, su resultado)"
+                />
+                <span>×</span>
+                <input type="number" class="input-num" min="1" max="100" aria-label="Multiplicador" bind:value={formulario.calculoMultiplicador} />
+                <span>÷</span>
+                <input type="number" class="input-num" min="1" max="100" aria-label="Divisor" title={ayuda("Redondea hacia abajo")} bind:value={formulario.calculoDivisor} />
+                <span>+</span>
+                <input type="number" class="input-num" min="-9999" max="9999" aria-label="Constante" bind:value={formulario.calculoConstante} />
+              </div>
+            {/if}
+          {/if}
           <div class="fila">
             <label for="p-unidad">Unidad:</label>
             <input id="p-unidad" type="text" class="input-num" maxlength="8" placeholder="m" bind:value={formulario.unidad} />

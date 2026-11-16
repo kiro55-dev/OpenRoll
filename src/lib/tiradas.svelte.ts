@@ -17,6 +17,17 @@ export interface Tirada {
   autor?: string;
   /** `false`: solo la ve el host (una tirada privada). */
   publica?: boolean;
+  /** Solo en una tirada `vs` (`1d100 vs acro`): el resultado frente al objetivo. Son palabras fijas de Rust. */
+  veredicto?: string;
+}
+
+/** La clase de color de un veredicto de una tirada `vs`. */
+export function claseVeredicto(v: string | undefined): string {
+  if (!v) return "";
+  if (v === "Crítico") return "critico";
+  if (v === "Pifia") return "pifia";
+  if (v === "Fallo") return "fallo";
+  return "exito";
 }
 
 const MAX_TIRADAS = 20;
@@ -126,8 +137,8 @@ class Tiradas {
   /** Carga el historial guardado en Rust. */
   async cargar() {
     // El chat es de todos: cada tirada lleva el nombre de quien la hizo (`autor`, vacío si fue el host)
-    const guardadas = await invoke<{ hora: string; comando: string; total: number; autor?: string; publica?: boolean }[]>("obtener_historial_tiradas");
-    this.historial = guardadas.map((t) => ({ hora: t.hora, comando: t.comando, total: t.total, autor: t.autor ?? "", publica: t.publica ?? true }));
+    const guardadas = await invoke<{ hora: string; comando: string; total: number; autor?: string; publica?: boolean; veredicto?: string }[]>("obtener_historial_tiradas");
+    this.historial = guardadas.map((t) => ({ hora: t.hora, comando: t.comando, total: t.total, autor: t.autor ?? "", publica: t.publica ?? true, veredicto: t.veredicto ?? "" }));
     this.#salirDelHistorial(); // los comandos anteriores (↑ ↓) también son de la partida abierta
   }
 

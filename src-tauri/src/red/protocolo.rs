@@ -32,7 +32,9 @@ use crate::tablero_general::tablero::AvisoTablero;
 /// 11: variables de las fichas (`definiciones_variables` en la vista, `Entidad.variables`, `idInstancia` en `tirar_dado`).
 /// 12: `Entidad.pasos_valor` y la acción `poner_paso_valor` (el paso de los botones − / +, por ficha).
 /// 13: grupos de variables (`grupos_variables` en la vista; derivadas con `bases`/`opcionales`; `ValorVariable.opcionales`).
-pub const VERSION_PROTOCOLO: u32 = 13;
+/// 14: fórmulas y rangos en las variables derivadas (`DefinicionVariable.multiplicador/divisor/constante/opciones`,
+///     `ValorVariable.eleccion`), parámetros calculados (`DefinicionParametro.calculo`) y `Tiradas.veredicto` (tiradas `vs`).
+pub const VERSION_PROTOCOLO: u32 = 14;
 
 /// Primer byte de un trozo binario: de una imagen que baja (host → jugador) o que sube (jugador → host).
 pub const TROZO_BAJADA: u8 = 1;

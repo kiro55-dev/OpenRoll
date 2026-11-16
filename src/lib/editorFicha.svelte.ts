@@ -9,7 +9,18 @@
 // Rust nunca borra lo que la partida guardada referencia, así que pasarle de más no es peligroso.
 import { invoke } from "$lib/backend";
 import { partida, type DefinicionParametro, type DefinicionVariable, type Entidad, type GrupoVariables, type Parametro } from "$lib/partida.svelte";
-import { LIMITE_VALOR_VARIABLE, esDerivada, etiquetaVariable, modificadorVariable, normalizarVariables, partesResultado, textoModificador } from "$lib/variables";
+import {
+  LIMITE_VALOR_VARIABLE,
+  calcularParametro,
+  desgloseResultado,
+  esDerivada,
+  etiquetaVariable,
+  modificadorVariable,
+  normalizarVariables,
+  resultadoVariable as resultadoDe,
+  textoCalculo,
+  textoModificador
+} from "$lib/variables";
 import { importarImagen, urlDeImagen } from "$lib/imagenes";
 import { cargarImagen, encuadreCentrado, miniaturaWebp, type Encuadre } from "$lib/recorteFoto";
 
@@ -140,8 +151,20 @@ export class EditorFicha {
   }
 
   numero(id: number): number {
+    // Un parámetro calculado no se escribe: sale de las variables de la ficha, y se ve cambiar al tocarlas
+    const calculo = this.definiciones.find((d) => d.id === id)?.calculo;
+    if (calculo) return calcularParametro(calculo, this.variables, this.entidad.variables);
     const v = this.#parametro(id)?.valor;
     return v && "Numero" in v ? v.Numero : 0;
+  }
+  /** ¿Se calcula con las variables (y por tanto no se puede escribir)? */
+  esCalculado(id: number): boolean {
+    return !!this.definiciones.find((d) => d.id === id)?.calculo;
+  }
+  /** Cómo se calcula, para el título del campo: «Se calcula con (con + tam) ÷10». `undefined` si se escribe a mano. */
+  descripcionCalculo(id: number): string | undefined {
+    const calculo = this.definiciones.find((d) => d.id === id)?.calculo;
+    return calculo ? `Se calcula con las variables: ${textoCalculo(calculo, this.variables)}` : undefined;
   }
   /** Guarda lo que haya en el campo tal cual (aunque esté vacío): `guardar` lo valida. */
   ponerNumero(id: number, n: number) {
@@ -182,7 +205,7 @@ export class EditorFicha {
   /** El resultado que vale en el chat con lo escrito (`null` si el campo de una base no es un número). Una derivada se
    *  recalcula sola al cambiar sus bases o sus checks. */
   resultadoVariable(d: DefinicionVariable): number | null {
-    if (esDerivada(d)) return partesResultado(this.variables, this.entidad.variables, d).reduce((s, p) => s + p.valor, 0);
+    if (esDerivada(d)) return resultadoDe(this.variables, this.entidad.variables, d);
     const valor: unknown = this.valorVariable(d.id); // un campo vacío deja null
     return typeof valor === "number" && Number.isFinite(valor) ? modificadorVariable(d, valor) : null;
   }
@@ -198,9 +221,16 @@ export class EditorFicha {
 
   /** De dónde sale el resultado de una derivada, para el `title`: «des (+3) + com (+2)». */
   desgloseVariable(d: DefinicionVariable): string {
-    return partesResultado(this.variables, this.entidad.variables, d)
-      .map((p) => `${p.etiqueta} (${textoModificador(p.valor)})`)
-      .join(" + ");
+    return desgloseResultado(this.variables, this.entidad.variables, d);
+  }
+
+  /** El rango que esta ficha ha elegido en una derivada con rangos (su posición en `opciones`). */
+  eleccion(idDerivada: number): number {
+    return this.entidad.variables.find((x) => x.id_definicion === idDerivada)?.eleccion ?? 0;
+  }
+  elegirOpcion(idDerivada: number, indice: number) {
+    const v = this.entidad.variables.find((x) => x.id_definicion === idDerivada);
+    if (v) v.eleccion = indice;
   }
 
   /** Las variables de un grupo, en su orden. */

@@ -286,6 +286,12 @@ su pantalla relee. Las peticiones de un jugador se ejecutan **en orden**, una a 
 - **Grupos de variables (protocolo 13).** `VistaJugador.grupos_variables` / `Cambios.grupos_variables` (la lista entera si
   cambia); `DefinicionVariable` lleva `grupo`, `bases` y `opcionales`, y `ValorVariable.opcionales` los checks de una
   ficha (solo llegan a host y propietarios, como los valores). Definir grupos y variables sigue siendo solo del host.
+- **Fórmulas, rangos, parámetros calculados y tiradas `vs` (protocolo 14).** `DefinicionVariable` lleva `multiplicador`/`divisor`/`constante`/`opciones`
+  (de una derivada), `ValorVariable.eleccion` es el rango que ha elegido cada ficha (solo llega a host y propietarios, como los demás
+  valores), `DefinicionParametro.calculo` hace que el valor de un parámetro lo calcule el host con las variables de la ficha (el jugador
+  recibe ya el resultado, y al guardar su ficha el host lo recalcula: lo que mande en ese parámetro se ignora) y `Tiradas.veredicto` es el
+  resultado de una tirada `vs` («Éxito difícil», «Fallo»...), palabras fijas que se ven en el chat de todos. Una tirada `vs` usa el mismo
+  `tirar_dado` (mismo permiso y mismos topes de longitud); el objetivo no admite dados.
 - **Conjuntos de parámetros.** Importar, exportar y cambiar de conjunto son solo del host (no están en la lista blanca). Al activar
   otro, los jugadores reciben el diff de siempre (`definiciones`, `grupos_variables`, sus fichas reiniciadas); no hay mensajes
   nuevos ni cambio de protocolo.

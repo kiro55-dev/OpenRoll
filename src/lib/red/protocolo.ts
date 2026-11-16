@@ -8,7 +8,7 @@ import type { DefinicionParametro, DefinicionVariable, GrupoVariables, Entidad, 
 /** 11: variables de las fichas (`definiciones_variables`, `Entidad.variables`, `idInstancia` en `tirar_dado`).
  *  12: `Entidad.pasos_valor` y la acción `poner_paso_valor` (el paso de los botones − / +, por ficha).
  *  13: grupos de variables (`grupos_variables`; derivadas con `bases`/`opcionales`; `ValorVariable.opcionales`). */
-export const VERSION_PROTOCOLO = 13;
+export const VERSION_PROTOCOLO = 14;
 
 export interface Jugador {
   id: number;
@@ -22,6 +22,8 @@ export interface TiradaChat {
   hora: string;
   jugador: number;
   autor: string;
+  /** Solo en una tirada `vs`: «Éxito difícil», «Fallo»... (palabras fijas de Rust). */
+  veredicto?: string;
 }
 
 /** `red::vista::VistaJugador`: lo que ve este jugador de la partida (lo mismo que lee la app, filtrado). */

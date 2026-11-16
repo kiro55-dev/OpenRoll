@@ -3,7 +3,7 @@
 // Formulario para crear un parámetro de la partida (VentanaParametros.svelte). Convierte lo que
 // escribe el usuario en una `DefinicionParametro` sin id (lo pone Rust). Las reglas de aquí solo
 // dan el mensaje cuanto antes: Rust vuelve a validar todo.
-import { hexARgba, rgbAHex, type DefinicionParametro, type Forma, type Visibilidad } from "$lib/partida.svelte";
+import { hexARgba, rgbAHex, type CalculoParametro, type DefinicionParametro, type Forma, type Visibilidad } from "$lib/partida.svelte";
 
 export type TipoParametro = "Numero" | "Texto";
 export type TipoForma = "ninguna" | "Rombo" | "Circulo" | "Cuadrado" | "BarraVida" | "Resumen";
@@ -47,6 +47,12 @@ export class FormularioParametro {
   /** Solo con máximo: la ficha se atenúa si el valor actual llega a 0 o menos */
   atenuar = $state(false);
   color = $state("#3b82f6");
+  /** Solo en números: el valor no se escribe, sale de las variables de la ficha (`calculo`). */
+  calcular = $state(false);
+  calculoVariables = $state<number[]>([]);
+  calculoMultiplicador = $state<number | null>(1);
+  calculoDivisor = $state<number | null>(1);
+  calculoConstante = $state<number | null>(0);
 
   get tieneMaximo() {
     return this.#tieneMaximo;
@@ -96,7 +102,18 @@ export class FormularioParametro {
       representar_mapa: forma,
       visibilidad: this.visibilidad,
       unidad: this.esNumero && this.unidad.trim() ? this.unidad.trim() : null,
-      atenuar_si_negativo: this.esNumero && this.tieneMaximo && this.atenuar
+      atenuar_si_negativo: this.esNumero && this.tieneMaximo && this.atenuar,
+      calculo: this.esNumero && this.calcular ? this.#calculo() : null
+    };
+  }
+
+  #calculo(): CalculoParametro {
+    if (this.calculoVariables.length === 0) throw new Error("Elige al menos una variable para el cálculo");
+    return {
+      variables: [...this.calculoVariables],
+      multiplicador: Number(this.calculoMultiplicador ?? 0),
+      divisor: Number(this.calculoDivisor ?? 0),
+      constante: Number(this.calculoConstante ?? 0)
     };
   }
 
@@ -112,7 +129,12 @@ export class FormularioParametro {
       this.visibilidad,
       this.forma,
       this.atenuar,
-      this.color
+      this.color,
+      this.calcular,
+      this.calculoVariables,
+      this.calculoMultiplicador,
+      this.calculoDivisor,
+      this.calculoConstante
     ]);
   }
 
@@ -128,6 +150,11 @@ export class FormularioParametro {
     this.atenuar = d.atenuar_si_negativo ?? false;
     this.unidad = d.unidad ?? "";
     this.visibilidad = d.visibilidad;
+    this.calcular = !!d.calculo;
+    this.calculoVariables = [...(d.calculo?.variables ?? [])];
+    this.calculoMultiplicador = d.calculo?.multiplicador ?? 1;
+    this.calculoDivisor = d.calculo?.divisor ?? 1;
+    this.calculoConstante = d.calculo?.constante ?? 0;
     const forma = d.representar_mapa;
     const nombre = forma ? (Object.keys(forma)[0] as TipoForma) : "ninguna";
     this.forma = nombre;
@@ -149,6 +176,11 @@ export class FormularioParametro {
     this.visibilidad = "Variable";
     this.forma = "ninguna";
     this.color = "#3b82f6";
+    this.calcular = false;
+    this.calculoVariables = [];
+    this.calculoMultiplicador = 1;
+    this.calculoDivisor = 1;
+    this.calculoConstante = 0;
   }
 }
 
@@ -157,6 +189,7 @@ export function resumenDefinicion(d: DefinicionParametro): string {
   const partes = ["Numero" in d.valor_por_defecto ? "Número" : "Texto"];
   if (d.tiene_maximo) partes.push("con máximo");
   if (d.atenuar_si_negativo) partes.push("atenúa");
+  if (d.calculo) partes.push("calculado");
   if (d.unidad) partes.push(d.unidad);
   if (d.representar_mapa) {
     const nombre = Object.keys(d.representar_mapa)[0];

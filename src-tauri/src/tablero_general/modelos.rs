@@ -85,6 +85,26 @@ pub struct DefinicionParametro {
     /// Solo con `tiene_maximo`: si el valor actual de una instancia llega a 0 o menos, la ficha se ve
     /// atenuada (en gris) en el tablero y en «Fichas activas». Es lo que hace la vida.
     pub atenuar_si_negativo: bool,
+    /// Si lo hay, el valor de este parámetro NO se escribe: se calcula con las variables de la ficha (los puntos de vida de
+    /// Cthulhu = (CON + TAM) / 10). Solo números. Lo recalcula Rust al guardar la ficha y al cambiar las variables.
+    pub calculo: Option<CalculoParametro>,
+}
+
+/// Cómo se calcula un parámetro a partir de las variables de la ficha: `floor(suma · multiplicador / divisor) + constante`,
+/// donde `suma` es el valor de cada variable de la lista (en una base, el valor escrito; en una derivada, su resultado).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct CalculoParametro {
+    pub variables: Vec<u16>,
+    #[serde(default = "uno")]
+    pub multiplicador: i16,
+    #[serde(default = "uno")]
+    pub divisor: i16,
+    #[serde(default)]
+    pub constante: i16,
+}
+
+fn uno() -> i16 {
+    1
 }
 
 /// Forma en que se LEE una `DefinicionParametro`: las partidas guardadas antes de `atenuar_si_negativo`
@@ -103,6 +123,8 @@ struct DefinicionGuardada {
     unidad: Option<String>,
     #[serde(default)]
     atenuar_si_negativo: Option<bool>,
+    #[serde(default)]
+    calculo: Option<CalculoParametro>,
 }
 
 impl From<DefinicionGuardada> for DefinicionParametro {
@@ -116,6 +138,7 @@ impl From<DefinicionGuardada> for DefinicionParametro {
             representar_mapa: g.representar_mapa,
             visibilidad: g.visibilidad,
             unidad: g.unidad,
+            calculo: g.calculo,
         }
     }
 }
@@ -187,6 +210,7 @@ pub fn parametros_por_defecto() -> Vec<DefinicionParametro> {
             unidad: unidad.map(Into::into),
             // La vida: a 0 o menos, la ficha se ve atenuada
             atenuar_si_negativo: id == ID_VIDA,
+            calculo: None,
         }
     };
     vec![
@@ -260,6 +284,25 @@ pub struct DefinicionVariable {
     /// Solo en un grupo de derivadas: variables BASE que cada ficha puede sumar o no (un check «+ com»).
     #[serde(default)]
     pub opcionales: Vec<u16>,
+    /// Solo en una derivada: `resultado = floor(suma · multiplicador / divisor) + constante (+ el bono del rango elegido)`,
+    /// donde `suma` son los resultados de sus bases y de las opcionales marcadas. Sin tocar son 1, 1 y 0 (la suma tal cual).
+    #[serde(default = "uno")]
+    pub multiplicador: i16,
+    #[serde(default = "uno")]
+    pub divisor: i16,
+    #[serde(default)]
+    pub constante: i16,
+    /// Solo en una derivada: si tiene opciones, cada ficha elige UNA (Sin entrenar +0, Entrenado +2...) y su bono se suma al
+    /// resultado. Vacío = no hay elección.
+    #[serde(default)]
+    pub opciones: Vec<OpcionVariable>,
+}
+
+/// Una opción de una variable derivada con rangos (la competencia de Pathfinder: Entrenado +2, Experto +4...).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct OpcionVariable {
+    pub nombre: String,
+    pub bonus: i16,
 }
 
 /// Los dos tipos de grupo: variables con valor propio (Fuerza...) o calculadas a partir de ellas (Acrobacias...).
@@ -351,6 +394,9 @@ pub struct ValorVariable {
     /// Solo en una derivada: las opcionales que esta ficha tiene marcadas (se suman).
     #[serde(default)]
     pub opcionales: Vec<u16>,
+    /// Solo en una derivada con opciones: la que ha elegido esta ficha (su posición en `DefinicionVariable.opciones`).
+    #[serde(default)]
+    pub eleccion: u16,
 }
 
 /// Cuánto suman o restan los botones − / + de un valor actual (vida...) en una ficha. Solo se guardan los que no son 1.
@@ -641,6 +687,10 @@ pub struct Tiradas {
     /// Si los jugadores la ven. Solo el host puede tirar en privado; las de los jugadores son siempre públicas.
     #[serde(default = "tirada_publica")]
     pub publica: bool,
+    /// Solo en las tiradas «bajo objetivo» (`1d100 vs acro`): el resultado frente al objetivo («Éxito difícil», «Fallo»,
+    /// «Crítico»...). Son palabras fijas, nunca texto escrito. Vacío en una tirada normal.
+    #[serde(default)]
+    pub veredicto: String,
 }
 
 fn tirada_publica() -> bool {

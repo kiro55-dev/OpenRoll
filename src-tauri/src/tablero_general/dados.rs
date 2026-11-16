@@ -202,6 +202,13 @@ fn parsear_comando(
 /// Devuelve el desglose (sin el total) y el total. Se calcula en i64 y se comprueba al final que cabe
 /// en i32: con dados de muchas caras el total se desbordaba (panic en debug, número basura en release).
 fn ejecutar_tiradas(tiradas: &[Tirada]) -> Result<(String, i32), String> {
+    ejecutar_con_natural(tiradas).map(|(desglose, total, _)| (desglose, total))
+}
+
+/// Como `ejecutar_tiradas`, y además el resultado natural `(cara, caras)` cuando la tirada es UN solo dado normal, sin
+/// ventaja ni multiplicador (lo que hace falta para los críticos y las pifias de una tirada `vs`).
+fn ejecutar_con_natural(tiradas: &[Tirada]) -> Result<(String, i32, Option<(i32, i32)>), String> {
+    let mut natural: Option<(i32, i32)> = None;
     let mut resultado = String::new();
     let mut total: i64 = 0;
     let mut primero = true;
@@ -276,6 +283,7 @@ fn ejecutar_tiradas(tiradas: &[Tirada]) -> Result<(String, i32), String> {
             } else {
                 // Tirada normal directa
                 let r = rand::random_range(1..=t.d);
+                natural = Some((r, t.d));
                 subtotal_dados += i64::from(r);
                 let _ = write!(resultado, "{}", formatear_num(r, t.d));
             }
@@ -291,7 +299,57 @@ fn ejecutar_tiradas(tiradas: &[Tirada]) -> Result<(String, i32), String> {
     }
 
     let total = i32::try_from(total).map_err(|_| "El resultado es demasiado grande".to_string())?;
-    Ok((resultado, total))
+    let un_dado_normal = tiradas.iter().filter(|t| t.bonificador.is_none()).count() == 1
+        && tiradas.iter().any(|t| t.bonificador.is_none() && t.veces == 1 && t.signo > 0 && t.multiplicador == 1 && !t.ventaja && !t.desventaja);
+    Ok((resultado, total, if un_dado_normal { natural } else { None }))
+}
+
+/// Parte un comando en la tirada y su objetivo por una palabra `vs` suelta (`1d100 vs acro`): la tirada es lo de la izquierda y
+/// el objetivo lo de la derecha. Sin `vs`, todo es tirada. Un `vs` pegado a letras (parte de un nombre) no cuenta.
+fn dividir_vs(comando: &str) -> Result<(&str, Option<&str>), String> {
+    let mut pos = None;
+    for (i, c) in comando.char_indices() {
+        if !(c == 'v' || c == 'V') || !comando[i..].get(..2).is_some_and(|p| p.eq_ignore_ascii_case("vs")) {
+            continue;
+        }
+        let antes = comando[..i].chars().next_back().is_some_and(char::is_alphabetic);
+        let despues = comando[i + 2..].chars().next().is_some_and(char::is_alphabetic);
+        if antes || despues {
+            continue;
+        }
+        if pos.is_some() {
+            return Err("Solo puede haber un «vs» en la tirada".into());
+        }
+        pos = Some(i);
+    }
+    Ok(match pos {
+        Some(i) => (&comando[..i], Some(&comando[i + 2..])),
+        None => (comando, None),
+    })
+}
+
+/// El resultado de una tirada contra su objetivo, con palabras fijas: «Crítico» (un 1 natural que acierta), «Pifia» (el máximo
+/// natural que falla; en un d100, del 96 al 100 si el objetivo es menor de 50), «Éxito extremo» (hasta la quinta parte del
+/// objetivo), «Éxito difícil» (hasta la mitad), «Éxito» (hasta el objetivo) y «Fallo». Un objetivo de 0 o menos siempre falla.
+pub fn veredicto_bajo_objetivo(total: i32, objetivo: i32, natural: Option<(i32, i32)>) -> String {
+    let acierta = objetivo > 0 && total <= objetivo;
+    if let Some((cara, caras)) = natural {
+        if acierta && cara == 1 {
+            return "Crítico".into();
+        }
+        if !acierta && (cara == caras || (caras == 100 && cara >= 96 && objetivo < 50)) {
+            return "Pifia".into();
+        }
+    }
+    if !acierta {
+        "Fallo".into()
+    } else if total <= objetivo / 5 {
+        "Éxito extremo".into()
+    } else if total <= objetivo / 2 {
+        "Éxito difícil".into()
+    } else {
+        "Éxito".into()
+    }
 }
 
 #[tauri::command]
@@ -319,18 +377,38 @@ pub fn tirar_dado_de(
     if jugador != ID_HOST && es_comando_limpiar(comando) {
         return Err("Solo el host puede limpiar el chat".into());
     }
-    let tiradas = parsear_comando(comando, &mut |texto| resolver_variable(&state.lock(), jugador, id_instancia, texto))?;
-    let (desglose, total) = ejecutar_tiradas(&tiradas)?;
+    // `1d100 vs acro`: la tirada y, a la derecha, el objetivo (números y variables, sin dados)
+    if comando.chars().count() > MAX_LONGITUD_COMANDO {
+        return Err(format!("El comando no puede pasar de {MAX_LONGITUD_COMANDO} caracteres"));
+    }
+    let (izquierda, objetivo) = dividir_vs(comando)?;
+    let mut resolver = |texto: &str| resolver_variable(&state.lock(), jugador, id_instancia, texto);
+    let tiradas = parsear_comando(izquierda, &mut resolver)?;
+    let (mut desglose, total, natural) = ejecutar_con_natural(&tiradas)?;
+    let mut veredicto = String::new();
+    if let Some(objetivo) = objetivo {
+        let del_objetivo = parsear_comando(objetivo, &mut resolver)?;
+        if del_objetivo.iter().any(|t| t.bonificador.is_none()) {
+            return Err("El objetivo de «vs» es un número o una variable, sin dados".into());
+        }
+        let (desglose_objetivo, valor_objetivo) = ejecutar_tiradas(&del_objetivo)?;
+        veredicto = veredicto_bajo_objetivo(total, valor_objetivo, natural);
+        let _ = write!(desglose, " vs {desglose_objetivo}");
+    }
 
     // 1. Registra en el estado de la partida / deltas (con el total tal cual, sin releerlo de un texto)
-    registrar_tirada(state, jugador, &desglose, total, publica || jugador != ID_HOST);
+    registrar_tirada(state, jugador, &desglose, total, publica || jugador != ID_HOST, &veredicto);
 
     // 2. El historial personal (↑ ↓) es de quien tira: se guarda en el disco del host, uno por jugador (así lo
     //    recupera al reconectar; se borra al quitarlo de la partida)
     state.almacen.anadir_historial_de(jugador, comando);
 
     // El front espera "desglose = total"
-    Ok(format!("{desglose} = {total}"))
+    if veredicto.is_empty() {
+        Ok(format!("{desglose} = {total}"))
+    } else {
+        Ok(format!("{desglose} = {total} · {veredicto}"))
+    }
 }
 
 /// `clean` o `c` (sin nada más, da igual mayúsculas) es la orden de vaciar el chat de tiradas.
@@ -378,7 +456,7 @@ mod tests {
         e.definiciones_variables = vec![var(1, "Fuerza", "f", 10, 2), var(2, "Cordura", "cor", 7, 3)];
         let ficha = |id: u16, propietarios: Vec<u16>, fuerza: i16| Entidad {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Jugador, parametros: vec![],
-            variables: vec![ValorVariable { id_definicion: 1, valor: fuerza, opcionales: vec![] }, ValorVariable { id_definicion: 2, valor: 9, opcionales: vec![] }],
+            variables: vec![ValorVariable { id_definicion: 1, valor: fuerza, opcionales: vec![], eleccion: 0 }, ValorVariable { id_definicion: 2, valor: 9, opcionales: vec![], eleccion: 0 }],
             pasos_valor: vec![],
             cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
             archivos_adjuntos: vec![], es_unico: false, propietarios,
@@ -390,6 +468,53 @@ mod tests {
         e.jugadores = vec![Jugador { id: 3, nombre: "Ana".into() }];
         e.instancias_activas = vec![inst(1, ficha(1, vec![3], 12)), inst(2, ficha(2, vec![], 4))];
         e
+    }
+
+    #[test]
+    fn el_vs_separa_la_tirada_del_objetivo_sin_confundirse_con_nombres() {
+        assert_eq!(dividir_vs("1d100 vs 45").unwrap(), ("1d100 ", Some(" 45")));
+        assert_eq!(dividir_vs("1d100VS acro").unwrap(), ("1d100", Some(" acro")));
+        assert_eq!(dividir_vs("1d100vs45").unwrap(), ("1d100", Some("45")));
+        assert_eq!(dividir_vs("1d20 + avs").unwrap(), ("1d20 + avs", None), "pegado a letras es un nombre");
+        assert_eq!(dividir_vs("1d20 + vsa").unwrap(), ("1d20 + vsa", None));
+        assert_eq!(dividir_vs("1d6").unwrap(), ("1d6", None));
+        assert!(dividir_vs("1d100 vs 40 vs 30").is_err());
+    }
+
+    #[test]
+    fn el_veredicto_de_una_tirada_bajo_objetivo() {
+        let v = |total, objetivo, natural| veredicto_bajo_objetivo(total, objetivo, natural);
+        // Objetivo 60: la mitad es 30 y la quinta parte 12
+        assert_eq!(v(60, 60, Some((60, 100))), "Éxito");
+        assert_eq!(v(31, 60, Some((31, 100))), "Éxito");
+        assert_eq!(v(30, 60, Some((30, 100))), "Éxito difícil");
+        assert_eq!(v(12, 60, Some((12, 100))), "Éxito extremo");
+        assert_eq!(v(61, 60, Some((61, 100))), "Fallo");
+        assert_eq!(v(1, 60, Some((1, 100))), "Crítico");
+        assert_eq!(v(100, 60, Some((100, 100))), "Pifia");
+        // Con un objetivo menor de 50, del 96 en adelante es pifia en un d100
+        assert_eq!(v(96, 45, Some((96, 100))), "Pifia");
+        assert_eq!(v(96, 60, Some((96, 100))), "Fallo");
+        // Sin un único dado normal no hay crítico ni pifia
+        assert_eq!(v(1, 60, None), "Éxito extremo");
+        assert_eq!(v(100, 60, None), "Fallo");
+        // Un objetivo de 0 o menos siempre falla; un crítico necesita acertar
+        assert_eq!(v(1, 0, Some((1, 100))), "Fallo");
+        assert_eq!(v(11, 5, Some((1, 100))), "Fallo");
+        assert_eq!(v(20, 14, Some((20, 20))), "Pifia");
+    }
+
+    #[test]
+    fn solo_un_dado_normal_da_resultado_natural() {
+        let natural = |cmd: &str| ejecutar_con_natural(&parsear_comando(cmd).unwrap()).unwrap().2;
+        let (cara, caras) = natural("1d100").unwrap();
+        assert!((1..=100).contains(&cara) && caras == 100);
+        assert!(natural("1d100 + 5").is_some(), "el bonificador no quita el natural");
+        assert!(natural("2d6").is_none());
+        assert!(natural("1d20 + 1d4").is_none());
+        assert!(natural("1d20adv").is_none());
+        assert!(natural("2*1d6").is_none());
+        assert!(natural("7").is_none());
     }
 
     fn tirar_con(e: &EstadoPartida, jugador: IdJugador, foco: Option<u16>, cmd: &str) -> Result<(String, i32), String> {
@@ -457,7 +582,7 @@ mod tests {
         }
 
         let mut e = crate::tablero_general::estado::EstadoPartida::default();
-        let t = crate::tablero_general::modelos::Tiradas { total: 3, comando: "1d6 (3)".into(), hora: "10:00".into(), jugador: 0, autor: String::new(), publica: true };
+        let t = crate::tablero_general::modelos::Tiradas { total: 3, comando: "1d6 (3)".into(), hora: "10:00".into(), jugador: 0, autor: String::new(), publica: true, veredicto: String::new() };
         e.aplicar_delta(&DeltaPartida::TiradaRealizada(t));
         e.aplicar_delta(&DeltaPartida::HistorialTiradasLimpiado);
         assert!(e.historial_tiradas.is_empty());

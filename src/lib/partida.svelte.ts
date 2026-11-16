@@ -65,6 +65,23 @@ export interface DefinicionParametro {
   unidad: string | null;
   /** Solo con máximo: si el valor actual llega a 0 o menos, la ficha se ve atenuada (como la vida) */
   atenuar_si_negativo: boolean;
+  /** Si lo hay, el valor NO se escribe: lo calcula Rust con las variables de la ficha (`CalculoParametro`). */
+  calculo?: CalculoParametro | null;
+}
+
+/** `floor(suma · multiplicador / divisor) + constante`, con `suma` = el valor de cada variable (en una base, el valor escrito;
+ *  en una derivada, su resultado). */
+export interface CalculoParametro {
+  variables: number[];
+  multiplicador: number;
+  divisor: number;
+  constante: number;
+}
+
+/** Un rango de una derivada (Entrenado +2...): cada ficha elige uno y su bono se suma. */
+export interface OpcionVariable {
+  nombre: string;
+  bonus: number;
 }
 
 export interface Parametro {
@@ -91,6 +108,12 @@ export interface DefinicionVariable {
   bases: number[];
   /** Solo derivadas: variables base que cada ficha puede sumar o no (un check «+ com»). */
   opcionales: number[];
+  /** Solo derivadas: `floor(suma · multiplicador / divisor) + constante (+ el bono del rango elegido)`. Sin tocar: 1, 1 y 0. */
+  multiplicador?: number;
+  divisor?: number;
+  constante?: number;
+  /** Solo derivadas: si hay rangos, cada ficha elige uno (`ValorVariable.eleccion`) y su bono se suma. */
+  opciones?: OpcionVariable[];
 }
 
 /** Los dos tipos de grupo de variables (`TipoGrupoVariables` en Rust). */
@@ -145,6 +168,8 @@ export interface ValorVariable {
   valor: number;
   /** Solo en una derivada: las opcionales que esta ficha tiene marcadas. */
   opcionales?: number[];
+  /** Solo en una derivada con rangos: el que ha elegido esta ficha (su posición en `DefinicionVariable.opciones`). */
+  eleccion?: number;
 }
 
 /** Ids de los parámetros de serie (fijos en Rust: `ID_VIDA`...). */

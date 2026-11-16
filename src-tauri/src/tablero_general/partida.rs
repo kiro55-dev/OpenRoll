@@ -98,7 +98,8 @@ pub fn procesar_delta(state: &AppState, delta: DeltaPartida) {
 // Recibe el desglose y el total por separado: releer el total de un texto con `parse().unwrap_or(0)`
 // guardaba un 0 silencioso cuando el número no cabía.
 // `jugador` es quien tiró (`ID_HOST` o un jugador de la sala): su nombre se guarda en la tirada para el chat.
-pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, total: i32, publica: bool) {
+// `veredicto`: el resultado frente al objetivo en una tirada `vs` («Éxito difícil»...); vacío en las demás.
+pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, total: i32, publica: bool, veredicto: &str) {
     let mut est = state.lock();
     let autor = est.jugadores.iter().find(|j| j.id == jugador).map(|j| j.nombre.clone()).unwrap_or_default();
     let tirada = Tiradas {
@@ -108,6 +109,7 @@ pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, to
         jugador,
         autor,
         publica,
+        veredicto: veredicto.to_string(),
     };
 
     registrar(&mut est, &state.almacen, DeltaPartida::TiradaRealizada(tirada));
@@ -419,6 +421,7 @@ pub fn crear_definicion_parametro(
 ) -> Result<DefinicionParametro, String> {
     let mut est = state.lock();
     validar_definicion(&est.definiciones_parametros, &definicion)?;
+    variables::validar_parametro_calculado(&definicion, &est.definiciones_variables)?;
 
     // Un id nunca usado por ninguna definición actual (los de las borradas ya no están en ninguna ficha)
     let id = est.definiciones_parametros.iter().map(|d| d.id).max().unwrap_or(0) + 1;
@@ -452,6 +455,7 @@ pub fn modificar_definicion_parametro(
     let otras: Vec<DefinicionParametro> =
         est.definiciones_parametros.iter().filter(|d| d.id != definicion.id).cloned().collect();
     validar_definicion(&otras, &definicion)?;
+    variables::validar_parametro_calculado(&definicion, &est.definiciones_variables)?;
 
     let nueva = DefinicionParametro {
         clave: definicion.clave.trim().to_string(),
@@ -506,6 +510,11 @@ fn limpiar_variable(d: DefinicionVariable, grupos: &[GrupoVariables]) -> Definic
         abreviatura: d.abreviatura.trim().to_string(),
         neutro: if derivada { 0 } else { d.neutro },
         escala: if derivada { 1 } else { d.escala },
+        // Una base no lleva fórmula ni opciones
+        multiplicador: if derivada { d.multiplicador } else { 1 },
+        divisor: if derivada { d.divisor } else { 1 },
+        constante: if derivada { d.constante } else { 0 },
+        opciones: if derivada { d.opciones.into_iter().map(|o| OpcionVariable { nombre: o.nombre.trim().to_string(), ..o }).collect() } else { vec![] },
         ..d
     }
 }
@@ -1215,8 +1224,7 @@ pub fn iniciar_borrador_entidad_en(zona_id: u16, foto_url: Option<String>, state
     normalizar_parametros(&est.definiciones_parametros, &mut parametros);
     let mut variables = Vec::new();
     normalizar_variables(&est.definiciones_variables, &mut variables);
-
-    Ok(Entidad {
+    let mut ficha = Entidad {
         id,
         nombre: "Nueva Ficha".into(),
         tipo: TipoEntidad::Enemigo,
@@ -1231,7 +1239,10 @@ pub fn iniciar_borrador_entidad_en(zona_id: u16, foto_url: Option<String>, state
         archivos_adjuntos: vec![],
         es_unico: false,
         propietarios: vec![],
-    })
+    };
+    // Los parámetros calculados nacen ya con el valor que dan las variables de por defecto
+    variables::recalcular_parametros(&est.definiciones_parametros, &est.definiciones_variables, &mut ficha);
+    Ok(ficha)
 }
 
 /// Cancela una ficha nueva: libera su id, borra su carpeta y descarta lo creado en la sesión
@@ -1351,6 +1362,7 @@ pub fn crear_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<Entida
     }
     normalizar_parametros(&est.definiciones_parametros, &mut entidad.parametros);
     normalizar_variables(&est.definiciones_variables, &mut entidad.variables);
+    variables::recalcular_parametros(&est.definiciones_parametros, &est.definiciones_variables, &mut entidad);
     entidad.pasos_valor.clear(); // solo los cambia `poner_paso_valor`
     validar_entidad(&est, &state.almacen.dir(), &entidad)?;
     entidad.miniatura_url = None; // solo la pone `guardar_miniatura_ficha`
@@ -1384,6 +1396,7 @@ pub fn modificar_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<()
     }
     normalizar_parametros(&est.definiciones_parametros, &mut entidad.parametros);
     normalizar_variables(&est.definiciones_variables, &mut entidad.variables);
+    variables::recalcular_parametros(&est.definiciones_parametros, &est.definiciones_variables, &mut entidad);
     // Los pasos de − / + son de Rust (los cambia `poner_paso_valor`): se conservan los guardados
     entidad.pasos_valor = est.banco_entidades.iter().find(|e| e.id == entidad.id).map(|e| e.pasos_valor.clone()).unwrap_or_default();
     validar_entidad(&est, &state.almacen.dir(), &entidad)?;
@@ -1688,6 +1701,7 @@ mod tests {
             visibilidad: Visibilidad::Variable,
             unidad: None,
             atenuar_si_negativo: false,
+            calculo: None,
         }];
         let ps = vec![Parametro { id_definicion: 9, valor: ValorParametro::Texto("Bob".into()), publico: false }];
         assert!(validar_parametros(&defs, &ps).is_err());
@@ -1708,6 +1722,7 @@ mod tests_definiciones {
             visibilidad: Visibilidad::Variable,
             unidad: None,
             atenuar_si_negativo: false,
+            calculo: None,
         }
     }
 

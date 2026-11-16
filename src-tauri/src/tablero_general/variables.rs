@@ -10,7 +10,10 @@
 // Nombre y abreviatura son solo letras (y espacios dentro del nombre): así se distinguen de los dados y
 // números en el chat, y nada de lo que escribe el host puede meter HTML en el desglose de una tirada.
 // Mismo espejo en el front: src/lib/variables.ts.
-use crate::tablero_general::modelos::{DefinicionVariable, GrupoVariables, TipoGrupoVariables, ValorVariable};
+use crate::tablero_general::modelos::{
+    CalculoParametro, DefinicionParametro, DefinicionVariable, Entidad, GrupoVariables, TipoGrupoVariables, ValorParametro,
+    ValorVariable,
+};
 
 pub const MAX_VARIABLES: usize = 80;
 pub const MAX_NOMBRE_VARIABLE: usize = 30;
@@ -18,8 +21,15 @@ pub const MAX_ABREVIATURA_VARIABLE: usize = 10;
 pub const MAX_ESCALA_VARIABLE: i16 = 100;
 /// Tope del valor de una variable en una ficha y de su valor neutro (en positivo y en negativo).
 pub const LIMITE_VALOR_VARIABLE: i16 = 9999;
-/// Palabras del chat que no pueden ser variables: limpiar el chat, el dado y la ventaja/desventaja.
-pub const PALABRAS_RESERVADAS: [&str; 6] = ["c", "clean", "d", "adv", "desv", "dis"];
+/// Palabras del chat que no pueden ser variables: limpiar el chat, el dado, la ventaja/desventaja y «vs» (tirada bajo objetivo).
+pub const PALABRAS_RESERVADAS: [&str; 7] = ["c", "clean", "d", "adv", "desv", "dis", "vs"];
+/// Tope del multiplicador y del divisor de una fórmula.
+pub const MAX_FACTOR_FORMULA: i16 = 100;
+/// Tope de opciones (rangos) de una derivada y de la longitud del nombre de una.
+pub const MAX_OPCIONES_VARIABLE: usize = 12;
+pub const MAX_NOMBRE_OPCION: usize = 30;
+/// Tope del valor de un parámetro calculado (los parámetros no son negativos).
+pub const LIMITE_PARAMETRO_CALCULADO: i32 = 9999;
 pub const MAX_GRUPOS_VARIABLES: usize = 20;
 pub const MAX_NOMBRE_GRUPO: usize = 30;
 /// Tope de bases (y de opcionales) de una derivada.
@@ -36,8 +46,15 @@ pub fn es_derivada(def: &DefinicionVariable) -> bool {
     !def.bases.is_empty()
 }
 
+/// `floor(suma · multiplicador / divisor) + constante`, redondeando hacia abajo también en negativo. Un divisor menor que 1
+/// cuenta como 1.
+pub fn formula(suma: i32, multiplicador: i16, divisor: i16, constante: i16) -> i32 {
+    (suma * i32::from(multiplicador)).div_euclid(i32::from(divisor.max(1))) + i32::from(constante)
+}
+
 /// Lo que vale una variable en una ficha (sus `valores`): una base, su `modificador`; una derivada, la suma de los de sus
-/// bases y de sus opcionales que la ficha tiene marcadas. Un valor que falte cuenta como el neutro (0).
+/// bases y de sus opcionales que la ficha tiene marcadas, pasada por su fórmula (multiplicador, divisor y constante) más el
+/// bono de la opción que la ficha ha elegido. Un valor que falte cuenta como el neutro (0).
 pub fn resultado(defs: &[DefinicionVariable], valores: &[ValorVariable], def: &DefinicionVariable) -> i32 {
     let valor_de = |id: u16| valores.iter().find(|v| v.id_definicion == id);
     let de_base = |id: u16| {
@@ -49,8 +66,91 @@ pub fn resultado(defs: &[DefinicionVariable], valores: &[ValorVariable], def: &D
         return de_base(def.id);
     }
     let marcadas: &[u16] = valor_de(def.id).map_or(&[], |v| v.opcionales.as_slice());
-    def.bases.iter().map(|&b| de_base(b)).sum::<i32>()
-        + def.opcionales.iter().filter(|o| marcadas.contains(o)).map(|&o| de_base(o)).sum::<i32>()
+    let suma = def.bases.iter().map(|&b| de_base(b)).sum::<i32>()
+        + def.opcionales.iter().filter(|o| marcadas.contains(o)).map(|&o| de_base(o)).sum::<i32>();
+    let bono = bono_elegido(def, valor_de(def.id));
+    formula(suma, def.multiplicador, def.divisor, def.constante) + bono
+}
+
+/// El bono de la opción que la ficha ha elegido en esta derivada (0 si no tiene opciones).
+pub fn bono_elegido(def: &DefinicionVariable, valor: Option<&ValorVariable>) -> i32 {
+    let i = valor.map_or(0, |v| usize::from(v.eleccion));
+    def.opciones.get(i).or_else(|| def.opciones.first()).map_or(0, |o| i32::from(o.bonus))
+}
+
+/// Lo que cuenta de una variable al calcular un parámetro: en una base, el valor escrito; en una derivada, su resultado.
+pub fn valor_para_calculo(defs: &[DefinicionVariable], valores: &[ValorVariable], id: u16) -> i32 {
+    match defs.iter().find(|d| d.id == id) {
+        None => 0,
+        Some(d) if es_derivada(d) => resultado(defs, valores, d),
+        Some(d) => i32::from(valores.iter().find(|v| v.id_definicion == id).map_or(d.neutro, |v| v.valor)),
+    }
+}
+
+/// El valor de un parámetro calculado en una ficha con esas variables: `floor(suma · multiplicador / divisor) + constante`,
+/// dentro de 0 y `LIMITE_PARAMETRO_CALCULADO` (un parámetro no es negativo).
+pub fn calcular_parametro(calculo: &CalculoParametro, defs: &[DefinicionVariable], valores: &[ValorVariable]) -> i16 {
+    let suma: i32 = calculo.variables.iter().map(|&v| valor_para_calculo(defs, valores, v)).sum();
+    let v = formula(suma, calculo.multiplicador, calculo.divisor, calculo.constante);
+    v.clamp(0, LIMITE_PARAMETRO_CALCULADO) as i16
+}
+
+/// Pone en la ficha el valor de cada parámetro calculado. Hay que llamarla tras normalizar parámetros y variables, y
+/// siempre que cambien las variables de la ficha.
+pub fn recalcular_parametros(defs: &[DefinicionParametro], vars: &[DefinicionVariable], e: &mut Entidad) {
+    for d in defs {
+        let Some(c) = &d.calculo else { continue };
+        let nuevo = calcular_parametro(c, vars, &e.variables);
+        if let Some(p) = e.parametros.iter_mut().find(|p| p.id_definicion == d.id) {
+            p.valor = ValorParametro::Numero(nuevo);
+        }
+    }
+}
+
+/// Quita de los cálculos las variables que ya no existen (y el cálculo entero si no le queda ninguna): el parámetro
+/// se queda con el último valor y pasa a escribirse a mano.
+pub fn limpiar_calculos(defs: &mut [DefinicionParametro], vars: &[DefinicionVariable]) {
+    for d in defs.iter_mut() {
+        if let Some(c) = &mut d.calculo {
+            c.variables.retain(|v| vars.iter().any(|x| x.id == *v));
+            if c.variables.is_empty() {
+                d.calculo = None;
+            }
+        }
+    }
+}
+
+/// Comprueba un cálculo de parámetro contra las variables que existen.
+pub fn validar_calculo(c: &CalculoParametro, vars: &[DefinicionVariable]) -> Result<(), String> {
+    if c.variables.is_empty() || c.variables.len() > MAX_BASES_DERIVADA {
+        return Err(format!("Un parámetro calculado usa de 1 a {MAX_BASES_DERIVADA} variables"));
+    }
+    if (1..c.variables.len()).any(|i| c.variables[..i].contains(&c.variables[i])) {
+        return Err("Una variable no puede repetirse en el cálculo".into());
+    }
+    if !c.variables.iter().all(|v| vars.iter().any(|x| x.id == *v)) {
+        return Err("El cálculo usa una variable que no existe".into());
+    }
+    validar_formula(c.multiplicador, c.divisor, c.constante)
+}
+
+/// Si el parámetro es calculado, comprueba que sea un número y que su cálculo valga contra las variables que existen.
+pub fn validar_parametro_calculado(d: &DefinicionParametro, vars: &[DefinicionVariable]) -> Result<(), String> {
+    let Some(c) = &d.calculo else { return Ok(()) };
+    if !matches!(d.valor_por_defecto, ValorParametro::Numero(_)) {
+        return Err("Solo un número puede calcularse con variables".into());
+    }
+    validar_calculo(c, vars)
+}
+
+fn validar_formula(multiplicador: i16, divisor: i16, constante: i16) -> Result<(), String> {
+    if !(1..=MAX_FACTOR_FORMULA).contains(&multiplicador) || !(1..=MAX_FACTOR_FORMULA).contains(&divisor) {
+        return Err(format!("El multiplicador y el divisor deben estar entre 1 y {MAX_FACTOR_FORMULA}"));
+    }
+    if constante.abs() > LIMITE_VALOR_VARIABLE {
+        return Err(format!("La constante debe estar entre -{LIMITE_VALOR_VARIABLE} y {LIMITE_VALOR_VARIABLE}"));
+    }
+    Ok(())
 }
 
 /// Deja una variable por definición y en su orden: las que faltan nacen con el valor neutro; las de
@@ -61,8 +161,12 @@ pub fn normalizar_variables(defs: &[DefinicionVariable], valores: &mut Vec<Valor
     for d in defs {
         let mut v = match anteriores.iter().position(|v| v.id_definicion == d.id) {
             Some(i) => anteriores.swap_remove(i),
-            None => ValorVariable { id_definicion: d.id, valor: d.neutro, opcionales: vec![] },
+            None => ValorVariable { id_definicion: d.id, valor: d.neutro, opcionales: vec![], eleccion: 0 },
         };
+        // La opción elegida existe, o se vuelve a la primera (y sin opciones no hay elección)
+        if usize::from(v.eleccion) >= d.opciones.len() {
+            v.eleccion = 0;
+        }
         let mut marcadas = Vec::new();
         for o in v.opcionales.iter().filter(|o| d.opcionales.contains(o)) {
             if !marcadas.contains(o) {
@@ -149,6 +253,9 @@ pub fn validar_definicion(otras: &[DefinicionVariable], grupos: &[GrupoVariables
             if !d.bases.is_empty() || !d.opcionales.is_empty() {
                 return Err("Una variable base no depende de otras".into());
             }
+            if (d.multiplicador, d.divisor, d.constante) != (1, 1, 0) || !d.opciones.is_empty() {
+                return Err("Una variable base no lleva fórmula ni opciones".into());
+            }
             if !(1..=MAX_ESCALA_VARIABLE).contains(&d.escala) {
                 return Err(format!("La escala debe estar entre 1 y {MAX_ESCALA_VARIABLE}"));
             }
@@ -173,6 +280,23 @@ pub fn validar_definicion(otras: &[DefinicionVariable], grupos: &[GrupoVariables
             if !todas.iter().all(es_base) {
                 return Err("Una derivada solo puede depender de variables base".into());
             }
+            validar_formula(d.multiplicador, d.divisor, d.constante)?;
+            if d.opciones.len() > MAX_OPCIONES_VARIABLE {
+                return Err(format!("Una derivada no puede tener más de {MAX_OPCIONES_VARIABLE} opciones"));
+            }
+            for (i, o) in d.opciones.iter().enumerate() {
+                let nombre = o.nombre.trim();
+                let raro = nombre.chars().any(|c| c.is_control() || crate::tablero_general::jugadores::caracter_enganoso(c));
+                if nombre.is_empty() || nombre.chars().count() > MAX_NOMBRE_OPCION || raro {
+                    return Err(format!("Las opciones necesitan un nombre de 1 a {MAX_NOMBRE_OPCION} caracteres sin símbolos raros"));
+                }
+                if d.opciones[..i].iter().any(|p| clave(&p.nombre) == clave(nombre)) {
+                    return Err(format!("La opción «{nombre}» está repetida"));
+                }
+                if o.bonus.abs() > LIMITE_VALOR_VARIABLE {
+                    return Err(format!("El bono de una opción debe estar entre -{LIMITE_VALOR_VARIABLE} y {LIMITE_VALOR_VARIABLE}"));
+                }
+            }
         }
     }
     Ok(())
@@ -188,6 +312,8 @@ pub fn es_la_misma(a: &DefinicionVariable, b: &DefinicionVariable) -> bool {
         && a.opcionales == b.opcionales
         && a.neutro == b.neutro
         && a.escala == b.escala
+        && (a.multiplicador, a.divisor, a.constante) == (b.multiplicador, b.divisor, b.constante)
+        && a.opciones == b.opciones
 }
 
 /// Comprueba el nombre de un grupo contra los DEMÁS (al crear: todos; al renombrar: todos menos él).
@@ -260,6 +386,8 @@ pub fn asegurar_grupos(grupos: &mut Vec<GrupoVariables>, defs: &mut [DefinicionV
         d.grupo = base;
         d.bases.clear();
         d.opcionales.clear();
+        d.opciones.clear();
+        (d.multiplicador, d.divisor, d.constante) = (1, 1, 0);
     }
 }
 
@@ -272,6 +400,7 @@ pub mod pruebas {
     pub fn var(id: u16, nombre: &str, abreviatura: &str, neutro: i16, escala: i16) -> DefinicionVariable {
         DefinicionVariable {
             id, nombre: nombre.into(), abreviatura: abreviatura.into(), neutro, escala, grupo: 1, bases: vec![], opcionales: vec![],
+            multiplicador: 1, divisor: 1, constante: 0, opciones: vec![],
         }
     }
 
@@ -279,12 +408,12 @@ pub mod pruebas {
     pub fn derivada(id: u16, nombre: &str, abreviatura: &str, bases: &[u16], opcionales: &[u16]) -> DefinicionVariable {
         DefinicionVariable {
             id, nombre: nombre.into(), abreviatura: abreviatura.into(), neutro: 0, escala: 1, grupo: 2,
-            bases: bases.to_vec(), opcionales: opcionales.to_vec(),
+            bases: bases.to_vec(), opcionales: opcionales.to_vec(), multiplicador: 1, divisor: 1, constante: 0, opciones: vec![],
         }
     }
 
     pub fn valor(id: u16, valor: i16) -> ValorVariable {
-        ValorVariable { id_definicion: id, valor, opcionales: vec![] }
+        ValorVariable { id_definicion: id, valor, opcionales: vec![], eleccion: 0 }
     }
 
     /// El grupo de serie (bases, id 1) y «Habilidades» (derivadas, id 2).
@@ -339,11 +468,11 @@ pub mod pruebas {
             valor(2, 9),
             valor(99, 1),
             valor(2, 1),
-            ValorVariable { id_definicion: 3, valor: 0, opcionales: vec![2, 2, 1, 77] },
+            ValorVariable { id_definicion: 3, valor: 0, opcionales: vec![2, 2, 1, 77], eleccion: 0 },
         ];
         vs[0].opcionales = vec![1]; // una base no lleva opcionales
         normalizar_variables(&defs, &mut vs);
-        assert_eq!(vs, vec![valor(1, 10), valor(2, 9), ValorVariable { id_definicion: 3, valor: 0, opcionales: vec![2] }]);
+        assert_eq!(vs, vec![valor(1, 10), valor(2, 9), ValorVariable { id_definicion: 3, valor: 0, opcionales: vec![2], eleccion: 0 }]);
     }
 
     #[test]
@@ -477,6 +606,134 @@ pub mod pruebas {
         assert_eq!((vieja.grupo, vieja.bases.len()), (0, 0));
         let valor_viejo: ValorVariable = serde_json::from_str(r#"{"id_definicion":1,"valor":12}"#).unwrap();
         assert!(valor_viejo.opcionales.is_empty());
+    }
+
+    #[test]
+    fn la_formula_de_una_derivada_redondea_hacia_abajo_y_suma_la_constante() {
+        assert_eq!(formula(7, 1, 1, 0), 7, "sin tocar, la suma tal cual");
+        assert_eq!(formula(7, 1, 2, 0), 3);
+        assert_eq!(formula(-7, 1, 2, 0), -4, "hacia abajo también en negativo");
+        assert_eq!(formula(3, 2, 1, 10), 16);
+        assert_eq!(formula(5, 3, 2, -1), 6);
+        // Cthulhu: la mitad de una habilidad
+        let defs = vec![var(1, "Esquivar", "esq", 0, 1), DefinicionVariable { divisor: 2, ..derivada(2, "Esquivar difícil", "esqd", &[1], &[]) }];
+        let valores = vec![valor(1, 65), valor(2, 0)];
+        assert_eq!(resultado(&defs, &valores, &defs[1]), 32);
+    }
+
+    #[test]
+    fn la_opcion_elegida_suma_su_bono_y_una_eleccion_perdida_vuelve_a_la_primera() {
+        use crate::tablero_general::modelos::OpcionVariable;
+        // Pathfinder: habilidad = Destreza + nivel (base) + rango elegido
+        let rangos = vec![
+            OpcionVariable { nombre: "Sin entrenar".into(), bonus: 0 },
+            OpcionVariable { nombre: "Entrenado".into(), bonus: 2 },
+            OpcionVariable { nombre: "Experto".into(), bonus: 4 },
+        ];
+        let defs = vec![var(1, "Destreza", "des", 10, 2), var(2, "Nivel", "niv", 0, 1), DefinicionVariable { opciones: rangos, ..derivada(3, "Acrobacias", "acro", &[1, 2], &[]) }];
+        let mut valores = vec![valor(1, 14), valor(2, 3), valor(3, 0)];
+        assert_eq!(resultado(&defs, &valores, &defs[2]), 2 + 3, "sin entrenar: +0");
+        valores[2].eleccion = 2;
+        assert_eq!(resultado(&defs, &valores, &defs[2]), 2 + 3 + 4);
+        // Una elección que ya no existe (se quitó una opción) vuelve a la primera al normalizar
+        valores[2].eleccion = 7;
+        normalizar_variables(&defs, &mut valores);
+        assert_eq!(valores[2].eleccion, 0);
+        // Sin opciones no hay elección ni bono
+        let mut sin = valores.clone();
+        sin[2].eleccion = 1;
+        normalizar_variables(&[defs[0].clone(), defs[1].clone(), derivada(3, "Acrobacias", "acro", &[1, 2], &[])], &mut sin);
+        assert_eq!(sin[2].eleccion, 0);
+    }
+
+    #[test]
+    fn un_parametro_calculado_sigue_a_las_variables_y_no_sale_de_su_rango() {
+        use crate::tablero_general::modelos::{normalizar_parametros, parametros_por_defecto, Cuerpo, TipoEntidad};
+        // Cthulhu: vida = (CON + TAM) / 10
+        let vars = vec![var(1, "Constitución", "con", 0, 1), var(2, "Tamaño", "tam", 0, 1)];
+        let mut defs = parametros_por_defecto();
+        defs[0].calculo = Some(CalculoParametro { variables: vec![1, 2], multiplicador: 1, divisor: 10, constante: 0 });
+        let mut ps = Vec::new();
+        normalizar_parametros(&defs, &mut ps);
+        let mut f = Entidad {
+            id: 1, nombre: "A".into(), tipo: TipoEntidad::Jugador, parametros: ps, variables: vec![valor(1, 60), valor(2, 55)], pasos_valor: vec![],
+            cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
+            archivos_adjuntos: vec![], es_unico: false, propietarios: vec![],
+        };
+        recalcular_parametros(&defs, &vars, &mut f);
+        assert_eq!(f.parametros[0].valor, ValorParametro::Numero(11), "(60 + 55) / 10");
+        f.variables[0].valor = 5;
+        recalcular_parametros(&defs, &vars, &mut f);
+        assert_eq!(f.parametros[0].valor, ValorParametro::Numero(6));
+        assert_eq!(f.parametros[1].valor, ValorParametro::Numero(10), "los demás no se tocan");
+        // Un resultado negativo se queda en 0
+        defs[0].calculo = Some(CalculoParametro { variables: vec![1], multiplicador: 1, divisor: 1, constante: -50 });
+        recalcular_parametros(&defs, &vars, &mut f);
+        assert_eq!(f.parametros[0].valor, ValorParametro::Numero(0));
+        // Una derivada también cuenta, por su resultado
+        let mut con_derivada = vars.clone();
+        con_derivada.push(derivada(3, "Resistencia", "res", &[1], &[]));
+        f.variables.push(valor(3, 0));
+        defs[0].calculo = Some(CalculoParametro { variables: vec![3], multiplicador: 2, divisor: 1, constante: 4 });
+        f.variables[0].valor = 9;
+        recalcular_parametros(&defs, &con_derivada, &mut f);
+        assert_eq!(f.parametros[0].valor, ValorParametro::Numero(22), "2 · 9 + 4");
+
+        // Si desaparece la variable, el cálculo se limpia (y sin ninguna, el parámetro vuelve a ser manual)
+        limpiar_calculos(&mut defs, &[vars[1].clone()]);
+        assert!(defs[0].calculo.is_none());
+        defs[0].calculo = Some(CalculoParametro { variables: vec![1, 2], multiplicador: 1, divisor: 1, constante: 0 });
+        limpiar_calculos(&mut defs, &[vars[1].clone()]);
+        assert_eq!(defs[0].calculo.as_ref().unwrap().variables, vec![2]);
+    }
+
+    #[test]
+    fn validacion_de_formulas_opciones_y_calculos() {
+        use crate::tablero_general::modelos::OpcionVariable;
+        let g = grupos();
+        let otras = vec![var(1, "Destreza", "des", 10, 2), var(3, "Competencia", "com", 0, 1)];
+        let ok = DefinicionVariable { multiplicador: 2, divisor: 3, constante: -4, ..derivada(5, "Acrobacias", "acro", &[1], &[3]) };
+        assert!(validar_definicion(&otras, &g, &ok).is_ok());
+        let rango = |n: &str, b: i16| OpcionVariable { nombre: n.into(), bonus: b };
+        let con = |opciones: Vec<OpcionVariable>| DefinicionVariable { opciones, ..derivada(5, "Acrobacias", "acro", &[1], &[]) };
+        assert!(validar_definicion(&otras, &g, &con(vec![rango("Sin entrenar", 0), rango("Entrenado", 2)])).is_ok());
+        for mala in [
+            DefinicionVariable { multiplicador: 0, ..derivada(5, "Acrobacias", "acro", &[1], &[]) },
+            DefinicionVariable { divisor: 0, ..derivada(5, "Acrobacias", "acro", &[1], &[]) },
+            DefinicionVariable { divisor: 101, ..derivada(5, "Acrobacias", "acro", &[1], &[]) },
+            DefinicionVariable { constante: 10000, ..derivada(5, "Acrobacias", "acro", &[1], &[]) },
+            con(vec![rango("", 1)]),
+            con(vec![rango("Experto", 1), rango(" experto ", 2)]),
+            con(vec![rango("Maestro", 10000)]),
+            con(vec![rango("a\u{202e}b", 1)]),
+            con((0..13).map(|i| rango(&format!("R{i}"), i)).collect()),
+            // Una base no lleva fórmula ni opciones
+            DefinicionVariable { multiplicador: 2, ..var(6, "Rara", "r", 10, 2) },
+            DefinicionVariable { opciones: vec![rango("X", 1)], ..var(6, "Rara", "r", 10, 2) },
+        ] {
+            assert!(validar_definicion(&otras, &g, &mala).is_err(), "{mala:?}");
+        }
+        assert!(validar_definicion(&otras, &g, &var(6, "Versus", "vs", 10, 2)).is_err(), "«vs» está reservado");
+        // Las que cambian la fórmula o las opciones no son «la misma»
+        assert!(!es_la_misma(&derivada(5, "A", "a", &[1], &[]), &DefinicionVariable { constante: 1, ..derivada(5, "A", "a", &[1], &[]) }));
+        assert!(!es_la_misma(&derivada(5, "A", "a", &[1], &[]), &con(vec![rango("X", 1)])));
+
+        // Cálculos de parámetro
+        let c = |variables: Vec<u16>, multiplicador, divisor, constante| CalculoParametro { variables, multiplicador, divisor, constante };
+        assert!(validar_calculo(&c(vec![1, 3], 1, 10, 0), &otras).is_ok());
+        for malo in [c(vec![], 1, 1, 0), c(vec![1, 1], 1, 1, 0), c(vec![9], 1, 1, 0), c(vec![1], 0, 1, 0), c(vec![1], 1, 0, 0), c(vec![1], 1, 1, 10000)] {
+            assert!(validar_calculo(&malo, &otras).is_err(), "{malo:?}");
+        }
+        let mut texto = crate::tablero_general::modelos::parametros_por_defecto().remove(0);
+        texto.valor_por_defecto = ValorParametro::Texto(String::new());
+        texto.tiene_maximo = false;
+        texto.calculo = Some(c(vec![1], 1, 1, 0));
+        assert!(validar_parametro_calculado(&texto, &otras).is_err(), "un texto no se calcula");
+        // Una partida guardada antes de esto se lee igual (multiplicador y divisor 1)
+        let vieja: DefinicionVariable = serde_json::from_str(r#"{"id":1,"nombre":"Fuerza","abreviatura":"f","neutro":10,"escala":2}"#).unwrap();
+        assert_eq!((vieja.multiplicador, vieja.divisor, vieja.constante, vieja.opciones.len()), (1, 1, 0, 0));
+        let vieja: CalculoParametro = serde_json::from_str(r#"{"variables":[1]}"#).unwrap();
+        assert_eq!((vieja.multiplicador, vieja.divisor), (1, 1));
     }
 
     #[test]

@@ -395,8 +395,19 @@ pub fn validar(mut c: ConjuntoParametros) -> Result<ConjuntoParametros, String> 
         }
     }
     // Se conserva el orden del archivo (es el que siguen las fichas)
-    let variables_validadas: Vec<DefinicionVariable> =
-        c.variables.iter().filter_map(|v| aceptadas.iter().find(|a| a.id == v.id).cloned()).collect();
+    let variables_validadas: Vec<DefinicionVariable> = c
+        .variables
+        .iter()
+        .filter_map(|v| aceptadas.iter().find(|a| a.id == v.id).cloned())
+        .map(|v| DefinicionVariable {
+            opciones: v.opciones.iter().map(|o| OpcionVariable { nombre: o.nombre.trim().to_string(), bonus: o.bonus }).collect(),
+            ..v
+        })
+        .collect();
+    // Los parámetros calculados solo pueden usar variables del propio conjunto
+    for p in &parametros {
+        variables::validar_parametro_calculado(p, &variables_validadas).map_err(|e| format!("{}: {e}", p.clave))?;
+    }
 
     Ok(ConjuntoParametros { nombre: c.nombre, descripcion: c.descripcion, parametros, grupos_variables: grupos, variables: variables_validadas })
 }
@@ -886,6 +897,64 @@ mod tests {
         partidas::crear(&raiz, "A").unwrap();
         let almacen = Almacen::abrir(partidas::ruta_partida(&raiz, "A")).unwrap();
         AppState::nuevo(EstadoPartida::default(), almacen, raiz)
+    }
+
+    #[test]
+    fn un_parametro_calculado_se_recalcula_al_guardar_la_ficha_y_al_borrar_su_variable() {
+        use crate::tablero_general::partida::{crear_definicion_variable_en, crear_entidad_en, iniciar_borrador_entidad_en, modificar_entidad_en, procesar_delta};
+        let state = estado_en_a("parametro_calculado");
+        state.lock().zonas = vec![Zona { id: 1, nombre: "Z".into(), orden: 0 }];
+        let con = crear_definicion_variable_en(var(0, "Constitución", "con", 0, 1), &state).unwrap();
+        let tam = crear_definicion_variable_en(var(0, "Tamaño", "tam", 0, 1), &state).unwrap();
+        // La vida pasa a ser (CON + TAM) / 10
+        let mut vida = state.lock().definiciones_parametros[0].clone();
+        vida.calculo = Some(CalculoParametro { variables: vec![con.id, tam.id], multiplicador: 1, divisor: 10, constante: 0 });
+        procesar_delta(&state, DeltaPartida::ParametroModificado(vida));
+
+        let mut f = iniciar_borrador_entidad_en(1, None, &state).unwrap();
+        assert_eq!(f.parametros[0].valor, ValorParametro::Numero(0), "las variables de por defecto valen 0");
+        f.variables[0].valor = 60;
+        f.variables[1].valor = 55;
+        f.parametros[0].valor = ValorParametro::Numero(99); // lo escrito a mano no cuenta
+        let f = crear_entidad_en(f, &state).unwrap();
+        assert_eq!(f.parametros[0].valor, ValorParametro::Numero(11));
+
+        // Cambiar una variable al guardar mueve el parámetro, y el delta lleva los dos cambios
+        let mut g = state.lock().banco_entidades[0].clone();
+        g.variables[0].valor = 5;
+        modificar_entidad_en(g, &state).unwrap();
+        assert_eq!(state.lock().banco_entidades[0].parametros[0].valor, ValorParametro::Numero(6));
+
+        // Si se borra una variable del cálculo, se quita de él; si se borran todas, el parámetro vuelve a ser manual
+        procesar_delta(&state, DeltaPartida::VariableBorrada(con.id));
+        assert_eq!(state.lock().definiciones_parametros[0].calculo.as_ref().unwrap().variables, vec![tam.id]);
+        procesar_delta(&state, DeltaPartida::VariableBorrada(tam.id));
+        assert!(state.lock().definiciones_parametros[0].calculo.is_none());
+        assert_eq!(state.lock().banco_entidades[0].parametros[0].valor, ValorParametro::Numero(5), "se queda con el último valor (solo contaba Tamaño: 55 / 10)");
+    }
+
+    #[test]
+    fn un_conjunto_con_calculos_y_rangos_se_exporta_importa_y_se_valida() {
+        use crate::tablero_general::modelos::OpcionVariable;
+        let mut c = conjunto_dnd();
+        c.variables[2].opciones = vec![OpcionVariable { nombre: "Sin entrenar".into(), bonus: 0 }, OpcionVariable { nombre: " Experto ".into(), bonus: 4 }];
+        c.variables[2].constante = 2;
+        c.parametros[0].calculo = Some(CalculoParametro { variables: vec![1], multiplicador: 1, divisor: 2, constante: 3 });
+        let limpio = validar(c.clone()).unwrap();
+        assert_eq!(limpio.variables[2].opciones[1].nombre, "Experto", "sin espacios de los lados");
+        let texto = a_archivo(&limpio).unwrap();
+        assert_eq!(de_archivo(&texto).unwrap(), limpio);
+        // Un cálculo que usa una variable que el conjunto no tiene se rechaza, con el parámetro por delante
+        let mut malo = c.clone();
+        malo.parametros[0].calculo = Some(CalculoParametro { variables: vec![77], multiplicador: 1, divisor: 1, constante: 0 });
+        assert!(validar(malo).unwrap_err().starts_with("Vida:"));
+        // Una base con fórmula o una opción repetida también
+        let mut malo = c.clone();
+        malo.variables[0].divisor = 2;
+        assert!(validar(malo).is_err());
+        let mut malo = c;
+        malo.variables[2].opciones.push(OpcionVariable { nombre: "experto".into(), bonus: 1 });
+        assert!(validar(malo).is_err());
     }
 
     #[test]
