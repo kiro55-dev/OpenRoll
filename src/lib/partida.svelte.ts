@@ -634,8 +634,10 @@ class Partida {
   }
 
   /**
-   * Pasa a usar el conjunto `id`. Las fichas empiezan de cero: la pantalla avisa ANTES. Lo que estaba pendiente de mandar
-   * (cambios de vida...) era de las fichas viejas y se descarta, y la ficha abierta en el editor se cierra sin guardar.
+   * Pasa a usar el conjunto `id`. Las fichas pasan a los valores que tenían con ese conjunto (o a los de por defecto si es la
+   * primera vez) y lo de ahora se guarda en el que se deja: la pantalla avisa ANTES. Lo que estaba pendiente de mandar (cambios del
+   * valor actual de un parámetro con máximo...) era del conjunto anterior y se descarta, y la ficha abierta en el editor se cierra
+   * sin guardar.
    */
   async usarConjunto(id: number) {
     if (this.#temporizadorValores) clearTimeout(this.#temporizadorValores);

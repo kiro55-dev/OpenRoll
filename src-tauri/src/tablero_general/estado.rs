@@ -423,6 +423,7 @@ impl EstadoPartida {
             }
             DeltaPartida::InstanciaBorrada(id) => {
                 self.instancias_activas.retain(|i| i.id_instancia != *id);
+                self.podar_valores_guardados(); // su id puede reutilizarse: la nueva no hereda lo de la vieja en otros conjuntos
             }
             DeltaPartida::InstanciasReordenadas(ids) => {
                 for inst in self.instancias_activas.iter_mut() {
@@ -488,7 +489,10 @@ impl EstadoPartida {
             }
             DeltaPartida::EnviadoAPapelera(grupo) => papelera::aplicar_envio(self, grupo),
             DeltaPartida::RestauradoDePapelera(id) => papelera::aplicar_restauracion(self, *id),
-            DeltaPartida::PapeleraVaciada => self.papelera.clear(),
+            DeltaPartida::PapeleraVaciada => {
+                self.papelera.clear();
+                self.podar_valores_guardados(); // las fichas y instancias que se iban a restaurar ya no existen
+            }
             DeltaPartida::JugadorRegistrado(jugador) => match self.jugadores.iter().position(|j| j.id == jugador.id) {
                 Some(pos) => self.jugadores[pos] = jugador.clone(),
                 None => self.jugadores.push(jugador.clone()),

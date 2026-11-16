@@ -304,6 +304,37 @@ pub struct ConjuntoGuardado {
     /// Del activo, esto puede estar desfasado: sus definiciones de verdad son las «vivas» del estado
     /// (`EstadoPartida::contenido_de`).
     pub contenido: ConjuntoParametros,
+    /// Lo que tenía cada ficha cuando se dejó de usar este conjunto (solo el que NO está activo lo lleva al día). Es de la partida
+    /// y no del conjunto: no se exporta. Cada conjunto guarda lo suyo y solo lo recupera él: nada pasa de uno a otro aunque
+    /// los ids de sus parámetros coincidan.
+    #[serde(default)]
+    pub valores: ValoresDeFichas,
+}
+
+/// Los valores que las fichas tenían bajo un conjunto: de cada ficha, los de sus parámetros y variables y la variación de − y +;
+/// de cada instancia, el valor actual de sus parámetros con máximo.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct ValoresDeFichas {
+    #[serde(default)]
+    pub fichas: Vec<ValoresFicha>,
+    #[serde(default)]
+    pub instancias: Vec<ValoresInstancia>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ValoresFicha {
+    pub id_entidad: u16,
+    pub parametros: Vec<Parametro>,
+    pub variables: Vec<ValorVariable>,
+    pub pasos_valor: Vec<PasoValor>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ValoresInstancia {
+    pub id_instancia: u16,
+    /// La ficha de esa instancia: si el id de la instancia se reutilizó para otra ficha, no se le devuelve nada.
+    pub id_entidad: u16,
+    pub valores_actuales: Vec<ValorActual>,
 }
 
 /// El grupo con el que nace una partida (y al que van las variables de las partidas anteriores a los grupos).

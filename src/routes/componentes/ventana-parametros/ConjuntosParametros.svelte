@@ -1,8 +1,9 @@
 <!-- src/routes/componentes/ventana-parametros/ConjuntosParametros.svelte -->
 <!-- El conjunto de parámetros que usa la partida (parámetros visuales + variables), arriba de la ventana de parámetros: un
      selector para cambiar de conjunto y «Gestionar…» para importar, exportar, renombrar y borrar los que guarda. Un conjunto
-     define el rol que se juega (D&D…): la partida guarda varios y usa uno. Cambiar de conjunto reinicia los valores de las
-     fichas, así que SIEMPRE pide confirmar y lo dice. -->
+     define el rol que se juega (D&D…): la partida guarda varios y usa uno. Cada conjunto guarda lo que tenían las fichas cuando lo
+     dejaste y lo recupera al volver; nada se comparte de uno a otro. Cambiar de conjunto cambia los valores de TODAS las fichas,
+     así que SIEMPRE pide confirmar y lo explica. -->
 <script lang="ts">
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { ayuda } from "$lib/ajustesVista.svelte";
@@ -182,9 +183,11 @@
     }}
   >
     <p>
-      Vas a usar «{confirmando.nombre}». <strong>Los parámetros y variables específicos de TODAS las fichas</strong> (sus valores, la
-      variación de − y + y la vida actual) <strong>dejarán de existir</strong> y no se pueden recuperar.
-      {#if activo}Tus conjuntos no se borran: puedes volver a «{activo.nombre}» cuando quieras, pero con las fichas de cero.{/if}
+      Vas a usar «{confirmando.nombre}». <strong>Los parámetros y variables específicos de TODAS las fichas cambiarán</strong>: sus
+      valores, la variación de − y + y el valor actual de los parámetros con máximo serán los que tenían con ese conjunto (si ya lo
+      usaste antes) o los de por defecto (si es la primera vez).
+      {#if activo}Lo que tienen ahora se guarda en «{activo.nombre}»: si vuelves a él, lo recuperas.{/if}
+      Los conjuntos son independientes: no se comparte ningún valor entre ellos.
       {#if partida.entidadEnEdicion && !partida.editorEsBorrador}La ficha que tienes abierta se cerrará sin guardar.{/if}
     </p>
     {#if partida.hayFichaNuevaAbierta}
@@ -291,15 +294,15 @@
 
   .confirmar {
     display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 5px;
-    background: rgba(127, 29, 29, 0.35); border: 1px solid #7f1d1d; color: #fecaca; font-size: 11px;
+    background: rgba(120, 80, 10, 0.3); border: 1px solid #854d0e; color: #fde68a; font-size: 11px;
   }
   .confirmar p { margin: 0; line-height: 1.4; }
   .confirmar strong { color: #fff; }
   .confirmar .bloqueo { color: #fca5a5; font-weight: 700; }
   .botones { display: flex; justify-content: flex-end; gap: 6px; }
   .botones button { border: none; border-radius: 4px; padding: 4px 12px; font-size: 11px; font-weight: 700; cursor: pointer; }
-  .botones .si { background: #b91c1c; color: white; }
-  .botones .si:hover:not(:disabled) { background: #dc2626; }
+  .botones .si { background: #2563eb; color: white; }
+  .botones .si:hover:not(:disabled) { background: #1d4ed8; }
   .botones .si:disabled { opacity: 0.4; cursor: default; }
   .botones .no { background: #27272a; color: #d4d4d8; }
 

@@ -90,28 +90,140 @@ impl EstadoPartida {
         self.conjuntos_parametros.iter().find(|c| c.id == id).map(|c| c.contenido.clone())
     }
 
-    /// Cambia al conjunto `id`: el que se deja guarda lo editado, se cargan las definiciones del elegido y las fichas empiezan
-    /// de cero (los ids se repiten entre conjuntos: sin vaciarlas, un parámetro con el mismo id heredaría el valor del otro).
+    /// Cambia al conjunto `id`. El que se deja guarda lo editado Y lo que tenía cada ficha; se cargan las definiciones del elegido y
+    /// las fichas reciben lo que ESE conjunto tenía guardado (o los valores por defecto si es la primera vez). Nada pasa de un
+    /// conjunto a otro: se vacía todo antes de restaurar, aunque los ids de sus parámetros coincidan.
     pub(crate) fn activar_conjunto(&mut self, id: u16) {
         if id == self.conjunto_activo || !self.conjuntos_parametros.iter().any(|c| c.id == id) {
             return;
         }
         let vivo = self.contenido_vivo();
-        if let Some(c) = self.conjuntos_parametros.iter_mut().find(|c| c.id == self.conjunto_activo) {
+        let valores = self.recoger_valores();
+        let antes = self.conjunto_activo;
+        if let Some(c) = self.conjuntos_parametros.iter_mut().find(|c| c.id == antes) {
             c.contenido = vivo;
+            c.valores = valores;
         }
-        let nuevo = self.conjuntos_parametros.iter().find(|c| c.id == id).map(|c| c.contenido.clone()).expect("existe");
-        self.definiciones_parametros = nuevo.parametros;
-        self.grupos_variables = nuevo.grupos_variables;
-        self.definiciones_variables = nuevo.variables;
+        let nuevo = self.conjuntos_parametros.iter().find(|c| c.id == id).cloned().expect("existe");
+        self.definiciones_parametros = nuevo.contenido.parametros;
+        self.grupos_variables = nuevo.contenido.grupos_variables;
+        self.definiciones_variables = nuevo.contenido.variables;
         self.conjunto_activo = id;
         self.reiniciar_valores_de_fichas();
+        self.restaurar_valores(&nuevo.valores);
         self.ajustar_a_definiciones();
     }
 
-    /// Vacía todo lo que las fichas guardan de las definiciones (valores de parámetros y variables, variación de − y +, vida
-    /// actual de las instancias): el banco, las instancias y lo que hay en la papelera. `ajustar_a_definiciones` lo rellena
-    /// con los valores por defecto del conjunto nuevo.
+    /// Las fichas de la partida (banco y papelera) y sus instancias (activas y de la papelera), para guardar y restaurar valores.
+    fn fichas(&self) -> Vec<&Entidad> {
+        use crate::tablero_general::papelera::Borrado;
+        let mut v: Vec<&Entidad> = self.banco_entidades.iter().collect();
+        for g in &self.papelera {
+            for b in &g.borrados {
+                match b {
+                    Borrado::Entidad { entidad, .. } => v.push(entidad),
+                    Borrado::Zona { entidades, .. } => v.extend(entidades.iter()),
+                    Borrado::Mapa { .. } => {}
+                }
+            }
+        }
+        v
+    }
+
+    fn instancias(&self) -> Vec<&Instancia> {
+        use crate::tablero_general::papelera::Borrado;
+        let mut v: Vec<&Instancia> = self.instancias_activas.iter().collect();
+        for g in &self.papelera {
+            for b in &g.borrados {
+                match b {
+                    Borrado::Entidad { instancias, .. } => v.extend(instancias.iter()),
+                    Borrado::Mapa { instancias, retiradas, .. } | Borrado::Zona { instancias, retiradas, .. } => {
+                        v.extend(instancias.iter().chain(retiradas.iter()))
+                    }
+                }
+            }
+        }
+        v
+    }
+
+    /// Lo que tienen ahora las fichas y sus instancias: lo que se guarda en el conjunto que se deja.
+    fn recoger_valores(&self) -> ValoresDeFichas {
+        let mut v = ValoresDeFichas::default();
+        for e in self.fichas() {
+            if !v.fichas.iter().any(|f| f.id_entidad == e.id) {
+                v.fichas.push(ValoresFicha {
+                    id_entidad: e.id,
+                    parametros: e.parametros.clone(),
+                    variables: e.variables.clone(),
+                    pasos_valor: e.pasos_valor.clone(),
+                });
+            }
+        }
+        for i in self.instancias() {
+            if !v.instancias.iter().any(|x| x.id_instancia == i.id_instancia) {
+                v.instancias.push(ValoresInstancia {
+                    id_instancia: i.id_instancia,
+                    id_entidad: i.base.id,
+                    valores_actuales: i.valores_actuales.clone(),
+                });
+            }
+        }
+        v
+    }
+
+    /// Devuelve a las fichas lo que tenían guardado (ya vacías): lo que no esté guardado se queda vacío y
+    /// `ajustar_a_definiciones` lo rellena con los valores por defecto del conjunto. Las instancias solo recuperan su valor actual si
+    /// siguen siendo de la misma ficha (el id de una instancia borrada puede reutilizarse para otra).
+    fn restaurar_valores(&mut self, v: &ValoresDeFichas) {
+        use crate::tablero_general::papelera::Borrado;
+        let poner_ficha = |e: &mut Entidad| {
+            if let Some(g) = v.fichas.iter().find(|g| g.id_entidad == e.id) {
+                e.parametros = g.parametros.clone();
+                e.variables = g.variables.clone();
+                e.pasos_valor = g.pasos_valor.clone();
+            }
+        };
+        let poner_instancia = |i: &mut Instancia| {
+            poner_ficha(&mut i.base);
+            if let Some(g) = v.instancias.iter().find(|g| g.id_instancia == i.id_instancia && g.id_entidad == i.base.id) {
+                i.valores_actuales = g.valores_actuales.clone();
+            }
+        };
+        self.banco_entidades.iter_mut().for_each(poner_ficha);
+        self.instancias_activas.iter_mut().for_each(poner_instancia);
+        for grupo in self.papelera.iter_mut() {
+            for borrado in grupo.borrados.iter_mut() {
+                match borrado {
+                    Borrado::Entidad { entidad, instancias } => {
+                        poner_ficha(entidad);
+                        instancias.iter_mut().for_each(poner_instancia);
+                    }
+                    Borrado::Mapa { instancias, retiradas, .. } => {
+                        instancias.iter_mut().chain(retiradas.iter_mut()).for_each(poner_instancia);
+                    }
+                    Borrado::Zona { entidades, instancias, retiradas, .. } => {
+                        entidades.iter_mut().for_each(poner_ficha);
+                        instancias.iter_mut().chain(retiradas.iter_mut()).for_each(poner_instancia);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Quita lo guardado de fichas o instancias que ya no existen (ni en la partida ni en la papelera): sus ids pueden reutilizarse
+    /// para otras nuevas, y esas no deben heredar nada. Se llama al borrar una instancia y al vaciar la papelera.
+    pub(crate) fn podar_valores_guardados(&mut self) {
+        let fichas: Vec<u16> = self.fichas().iter().map(|e| e.id).collect();
+        let instancias: Vec<(u16, u16)> = self.instancias().iter().map(|i| (i.id_instancia, i.base.id)).collect();
+        for c in self.conjuntos_parametros.iter_mut() {
+            c.valores.fichas.retain(|g| fichas.contains(&g.id_entidad));
+            c.valores.instancias.retain(|g| instancias.contains(&(g.id_instancia, g.id_entidad)));
+        }
+    }
+
+    /// Vacía todo lo que las fichas guardan de las definiciones (valores de parámetros y variables, variación de − y +, valor
+    /// actual de los parámetros con máximo de las instancias): el banco, las instancias y lo que hay en la papelera.
+    /// `ajustar_a_definiciones` lo rellena con los valores por defecto del conjunto en uso.
     pub(crate) fn reiniciar_valores_de_fichas(&mut self) {
         let vaciar = |e: &mut Entidad| {
             e.parametros.clear();
@@ -170,13 +282,13 @@ pub fn asegurar(est: &mut EstadoPartida) {
     } else {
         ConjuntoParametros { nombre: "Personalizado".into(), descripcion: "Los parámetros y variables que tenía esta partida.".into(), ..vivo }
     };
-    est.conjuntos_parametros = vec![ConjuntoGuardado { id: 1, origen: es_generico.then(|| "generico".to_string()), contenido }];
+    est.conjuntos_parametros = vec![ConjuntoGuardado { id: 1, origen: es_generico.then(|| "generico".to_string()), contenido, valores: Default::default() }];
     est.conjunto_activo = 1;
 }
 
 /// El conjunto con el que nace una partida nueva.
 pub fn conjuntos_iniciales() -> Vec<ConjuntoGuardado> {
-    vec![ConjuntoGuardado { id: 1, origen: Some("generico".into()), contenido: generico() }]
+    vec![ConjuntoGuardado { id: 1, origen: Some("generico".into()), contenido: generico(), valores: Default::default() }]
 }
 
 // ------------------------------------------------------------------
@@ -380,7 +492,7 @@ fn anadir(est: &mut EstadoPartida, state: &AppState, origen: Option<String>, mut
         return Err(format!("Una partida no puede guardar más de {MAX_CONJUNTOS} conjuntos: borra alguno"));
     }
     contenido.nombre = nombre_libre(est, &contenido.nombre);
-    let guardado = ConjuntoGuardado { id: id_libre(est), origen, contenido };
+    let guardado = ConjuntoGuardado { id: id_libre(est), origen, contenido, valores: Default::default() };
     registrar(est, &state.almacen, DeltaPartida::ConjuntoAnadido(guardado.clone()));
     Ok(guardado)
 }
@@ -632,10 +744,10 @@ mod tests {
     }
 
     #[test]
-    fn cambiar_de_conjunto_guarda_lo_editado_reinicia_las_fichas_y_se_puede_volver() {
+    fn cada_conjunto_guarda_lo_suyo_y_al_volver_las_fichas_recuperan_lo_que_tenian() {
         let mut e = EstadoPartida::default();
-        e.aplicar_delta(&DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd() }));
-        // Una ficha con valores del conjunto 1, una instancia con la vida tocada y un paso de − y +
+        e.aplicar_delta(&DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd(), valores: Default::default() }));
+        // Una ficha con valores del conjunto 1, una instancia con el valor actual de su parámetro con máximo tocado y un paso de − y +
         let mut f = ficha(1);
         f.parametros[0].valor = ValorParametro::Numero(77);
         f.pasos_valor = vec![PasoValor { id_definicion: ID_VIDA, paso: 5 }];
@@ -647,26 +759,123 @@ mod tests {
         e.aplicar_delta(&DeltaPartida::ParametroBorrado(ID_ARMADURA));
         assert_eq!(e.contenido_de(1).unwrap().parametros.len(), 3, "lo vivo cuenta, aunque lo guardado esté desfasado");
 
+        // Primera vez en el 2: todo por defecto, NADA heredado del 1 aunque el parámetro tenga el mismo id (1)
         e.aplicar_delta(&DeltaPartida::ConjuntoActivado(2));
         assert_eq!(e.conjunto_activo, 2);
         assert_eq!(e.definiciones_variables.len(), 3);
-        // Los valores empiezan de cero con los del conjunto nuevo (aunque el id 1 existía en los dos)
         let f = &e.banco_entidades[0];
-        assert_eq!(f.parametros[0].valor, ValorParametro::Numero(10), "vida del conjunto nuevo, no 77");
-        assert!(f.pasos_valor.is_empty());
+        assert_eq!(f.parametros[0].valor, ValorParametro::Numero(10), "el valor del conjunto nuevo, no el 77 del otro");
+        assert!(f.pasos_valor.is_empty(), "ni la variación de − y +");
         assert_eq!(f.variables.len(), 3);
-        assert_eq!(e.instancias_activas[0].valores_actuales[0].valor, 10);
+        assert_eq!(e.instancias_activas[0].valores_actuales[0].valor, 10, "ni el valor actual");
         assert_eq!(e.instancias_activas[0].base.variables.len(), 3);
 
-        // Volver al 1: tiene lo que se editó (sin Armadura) y las fichas vuelven a empezar
+        // En el 2 se toca todo otra vez: sus valores no deben acabar en el 1
+        e.banco_entidades[0].parametros[0].valor = ValorParametro::Numero(55);
+        e.instancias_activas[0].base.parametros[0].valor = ValorParametro::Numero(55);
+        e.instancias_activas[0].valores_actuales[0].valor = 8;
+        e.banco_entidades[0].variables[0].valor = 16;
+        e.instancias_activas[0].base.variables[0].valor = 16;
+
+        // Volver al 1: sus definiciones editadas (sin Armadura) y LO QUE TENÍAN las fichas
         e.aplicar_delta(&DeltaPartida::ConjuntoActivado(1));
         assert_eq!(e.definiciones_parametros.len(), 3);
         assert!(e.definiciones_variables.is_empty());
-        assert_eq!(e.banco_entidades[0].parametros.len(), 3);
+        let f = &e.banco_entidades[0];
+        assert_eq!(f.parametros.len(), 3);
+        assert_eq!(f.parametros[0].valor, ValorParametro::Numero(77));
+        assert_eq!(f.pasos_valor, vec![PasoValor { id_definicion: ID_VIDA, paso: 5 }]);
+        assert!(f.variables.is_empty());
+        assert_eq!(e.instancias_activas[0].valores_actuales[0].valor, 3);
+        assert_eq!(e.instancias_activas[0].base.parametros[0].valor, ValorParametro::Numero(77), "la copia de la instancia también");
+
+        // Y al volver al 2, lo del 2 (no lo del 1)
+        e.aplicar_delta(&DeltaPartida::ConjuntoActivado(2));
+        assert_eq!(e.banco_entidades[0].parametros[0].valor, ValorParametro::Numero(55));
+        assert_eq!(e.banco_entidades[0].variables[0].valor, 16);
+        assert_eq!(e.instancias_activas[0].valores_actuales[0].valor, 8);
+        assert!(e.banco_entidades[0].pasos_valor.is_empty());
+
         // Activar el que ya está, o uno que no existe, no hace nada
-        e.aplicar_delta(&DeltaPartida::ConjuntoActivado(1));
+        e.aplicar_delta(&DeltaPartida::ConjuntoActivado(2));
         e.aplicar_delta(&DeltaPartida::ConjuntoActivado(99));
-        assert_eq!(e.conjunto_activo, 1);
+        assert_eq!(e.conjunto_activo, 2);
+    }
+
+    #[test]
+    fn una_ficha_creada_en_otro_conjunto_no_hereda_nada_y_un_id_de_instancia_reutilizado_tampoco() {
+        let mut e = EstadoPartida::default();
+        e.aplicar_delta(&DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd(), valores: Default::default() }));
+        let mut f = ficha(1);
+        f.parametros[0].valor = ValorParametro::Numero(77);
+        e.banco_entidades.push(f.clone());
+        let mut inst = instancia(5, f.clone());
+        inst.valores_actuales[0].valor = 2;
+        e.instancias_activas.push(inst);
+
+        e.aplicar_delta(&DeltaPartida::ConjuntoActivado(2));
+        // En el 2: la instancia 5 se borra y se crea otra con el MISMO id; y nace una ficha nueva (la 9)
+        e.aplicar_delta(&DeltaPartida::InstanciaBorrada(5));
+        let mut nueva = instancia(5, ficha(1));
+        nueva.base.parametros.clear();
+        e.aplicar_delta(&DeltaPartida::InstanciaCreada(nueva));
+        e.banco_entidades.push(ficha(9));
+        e.ajustar_a_definiciones();
+
+        e.aplicar_delta(&DeltaPartida::ConjuntoActivado(1));
+        assert_eq!(e.banco_entidades.iter().find(|x| x.id == 1).unwrap().parametros[0].valor, ValorParametro::Numero(77), "la ficha de siempre sí");
+        let nueva = e.banco_entidades.iter().find(|x| x.id == 9).unwrap();
+        assert_eq!(nueva.parametros[0].valor, ValorParametro::Numero(10), "la ficha 9 nació en el 2: por defecto");
+        // La instancia 5 nueva empieza en el máximo de su ficha (77), no en el 2 que tenía la vieja con el mismo id
+        assert_eq!(e.instancias_activas[0].valores_actuales[0].valor, 77, "no hereda el valor actual de la instancia borrada");
+        assert!(e.conjuntos_parametros.iter().find(|c| c.id == 1).unwrap().valores.instancias.is_empty(), "lo guardado de la instancia vieja se podó");
+    }
+
+    #[test]
+    fn lo_que_esta_en_la_papelera_tambien_vuelve_y_al_vaciarla_se_poda() {
+        use crate::tablero_general::papelera::{Borrado, GrupoPapelera};
+        let mut e = EstadoPartida::default();
+        e.aplicar_delta(&DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd(), valores: Default::default() }));
+        let mut f = ficha(4);
+        f.parametros[0].valor = ValorParametro::Numero(31);
+        // Una ficha borrada (en la papelera) con una instancia
+        let mut inst = instancia(8, f.clone());
+        inst.valores_actuales[0].valor = 6;
+        e.papelera.push(GrupoPapelera { id: 1, borrados: vec![Borrado::Entidad { entidad: f, instancias: vec![inst] }] });
+
+        e.aplicar_delta(&DeltaPartida::ConjuntoActivado(2));
+        let Borrado::Entidad { entidad, instancias } = &e.papelera[0].borrados[0] else { panic!() };
+        assert!(entidad.parametros.is_empty(), "en el 2 lo de la papelera está vacío hasta restaurarla");
+        assert!(instancias[0].valores_actuales.is_empty());
+
+        e.aplicar_delta(&DeltaPartida::ConjuntoActivado(1));
+        let Borrado::Entidad { entidad, instancias } = &e.papelera[0].borrados[0] else { panic!() };
+        assert_eq!(entidad.parametros[0].valor, ValorParametro::Numero(31));
+        assert_eq!(instancias[0].valores_actuales[0].valor, 6);
+
+        // Vaciar la papelera: lo guardado de esas fichas se descarta (sus ids se pueden reutilizar)
+        e.aplicar_delta(&DeltaPartida::ConjuntoActivado(2));
+        assert!(!e.conjuntos_parametros.iter().find(|c| c.id == 1).unwrap().valores.fichas.is_empty());
+        e.aplicar_delta(&DeltaPartida::PapeleraVaciada);
+        assert!(e.conjuntos_parametros.iter().all(|c| c.valores.fichas.is_empty() && c.valores.instancias.is_empty()));
+    }
+
+    #[test]
+    fn lo_guardado_por_conjunto_sobrevive_a_guardar_y_cargar_y_no_se_exporta() {
+        let mut e = EstadoPartida::default();
+        e.aplicar_delta(&DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd(), valores: Default::default() }));
+        let mut f = ficha(1);
+        f.parametros[0].valor = ValorParametro::Numero(77);
+        e.banco_entidades.push(f);
+        e.aplicar_delta(&DeltaPartida::ConjuntoActivado(2));
+        let leido: EstadoPartida = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
+        assert_eq!(leido.conjuntos_parametros[0].valores.fichas[0].parametros[0].valor, ValorParametro::Numero(77));
+        // El archivo de un conjunto solo lleva sus definiciones
+        let texto = a_archivo(&leido.contenido_de(1).unwrap()).unwrap();
+        assert!(!texto.contains("valores") && !texto.contains("id_entidad"), "{texto}");
+        // Una partida guardada antes de esto (conjuntos sin `valores`) se lee igual
+        let vieja: ConjuntoGuardado = serde_json::from_str(&serde_json::to_string(&leido.conjuntos_parametros[1]).unwrap().replace(",\"valores\":{\"fichas\":[],\"instancias\":[]}", "")).unwrap();
+        assert!(vieja.valores.fichas.is_empty());
     }
 
     fn estado_en_a(nombre: &str) -> AppState {
@@ -752,7 +961,7 @@ mod tests {
         // El log lleva el contenido entero: no depende de lo que traiga el código de serie
         let mut e = EstadoPartida::default();
         let deltas = [
-            DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd() }),
+            DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd(), valores: Default::default() }),
             DeltaPartida::ConjuntoActivado(2),
             DeltaPartida::VariableCreada(var(9, "Extra", "ex", 10, 2)),
             DeltaPartida::ConjuntoActivado(1),
@@ -770,7 +979,7 @@ mod tests {
     #[test]
     fn borrar_y_renombrar_conjuntos_y_nunca_el_activo() {
         let mut e = EstadoPartida::default();
-        e.aplicar_delta(&DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd() }));
+        e.aplicar_delta(&DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd(), valores: Default::default() }));
         e.aplicar_delta(&DeltaPartida::ConjuntoRenombrado { id: 2, nombre: "Otro".into() });
         assert_eq!(e.contenido_de(2).unwrap().nombre, "Otro");
         e.aplicar_delta(&DeltaPartida::ConjuntoRenombrado { id: 1, nombre: "Mío".into() });
