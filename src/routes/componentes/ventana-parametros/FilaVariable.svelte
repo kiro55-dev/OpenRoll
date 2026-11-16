@@ -180,17 +180,41 @@
     }
   }
 
+  /**
+   * ¿Se ha pulsado dentro de la fila y aún no fuera? Pulsar sobre algo que no admite foco (el texto de una opción del
+   * desplegable) hace caer el foco a la página ANTES de que llegue el `mousedown`, y no se puede evitar: por eso «perder el
+   * foco» no basta para saber que has salido de la fila (la guardaría a medias y la sustituiría por la ya creada, con el
+   * desplegable abierto dentro). Se sale de verdad al pulsar FUERA, o cuando el foco pasa a otro elemento de fuera.
+   */
+  let punteroDentro = false;
+
   function alSalir(e: FocusEvent) {
     if (fila?.contains(e.relatedTarget as Node | null)) return;
-    // `relatedTarget` puede venir vacío aunque el foco pase a otro campo de la fila: se mira dónde queda el foco
-    // cuando termina el cambio, y si la fila ya no está en la página (se está quitando) no se guarda nada
+    // El foco pasa a otro elemento de fuera (Tab, o un clic en algo que admite foco): sin duda se sale. Si no va a ningún
+    // sitio (null), puede ser un clic sobre texto de dentro: se decide con \`punteroDentro\`
+    if (e.relatedTarget) punteroDentro = false;
     setTimeout(() => {
-      if (!fila?.isConnected || fila.contains(document.activeElement)) return;
+      // La fila ya no está en la página, el foco sigue dentro, o se está pulsando dentro (el foco cayó a la página): no es salir
+      const sigue = !fila?.isConnected || fila.contains(document.activeElement) || punteroDentro;
+      if (sigue) return;
       void guardar();
     }, 0);
   }
 
+  // Pulsar fuera de la fila, cuando se había pulsado dentro: ahí sí se sale (el foco ya estaba en la página y no habrá otro `focusout`)
+  $effect(() => {
+    const fuera = (e: PointerEvent) => {
+      if (!fila || fila.contains(e.target as Node)) return;
+      if (!punteroDentro) return; // si el foco estaba en un campo de la fila, lo gestiona `alSalir`
+      punteroDentro = false;
+      void guardar();
+    };
+    window.addEventListener("pointerdown", fuera, true);
+    return () => window.removeEventListener("pointerdown", fuera, true);
+  });
+
   function alPulsar(e: PointerEvent) {
+    punteroDentro = true;
     // Desde un campo, un botón o un selector no se arrastra (se escribe o se pulsa)
     if ((e.target as HTMLElement).closest("input, button, label, .selector")) return;
     onIniciarArrastre?.(e);

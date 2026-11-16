@@ -92,7 +92,19 @@
   </button>
 
   {#if abierto}
-    <div class="lista" style:left="{pos.x}px" style:top="{pos.y}px" style:min-width="{pos.ancho}px" role="listbox" aria-multiselectable="true">
+    <!-- Pulsar dentro (también sobre el texto, que no admite foco) no debe quitarle el foco al botón: si no, la fila cree que
+         has salido, guarda el borrador a medias y la fila nueva sustituye a esta con la lista abierta. El clic sigue
+         marcando la opción (un \`mousedown\` cancelado no cancela el clic del \`label\`). -->
+    <div
+      class="lista"
+      style:left="{pos.x}px"
+      style:top="{pos.y}px"
+      style:min-width="{pos.ancho}px"
+      role="listbox"
+      tabindex="-1"
+      aria-multiselectable="true"
+      onmousedown={(e) => e.preventDefault()}
+    >
       {#each opciones as o (o.id)}
         {@const bloqueada = excluidas.includes(o.id)}
         <label class="opcion" class:bloqueada>
