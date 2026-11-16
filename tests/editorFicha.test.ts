@@ -221,6 +221,13 @@ describe("variables", () => {
     const ed = await conVariables(entidad(), variables, grupos);
     const acrobacias = ed.variables[2];
     expect(ed.variablesDe(ed.gruposVariables[1]).map((d) => d.nombre)).toEqual(["Acrobacias"]);
+    // Por defecto se ven todos los grupos («Todos»); al elegir uno solo el suyo, y si ese grupo desaparece, vuelve a «Todos»
+    expect(ed.grupoVistaEfectivo).toBeNull();
+    ed.grupoVista = 2;
+    expect(ed.grupoVistaEfectivo).toBe(2);
+    ed.grupoVista = 99;
+    expect(ed.grupoVistaEfectivo).toBeNull();
+    ed.grupoVista = null;
     ed.ponerValorVariable(1, 16);
     ed.ponerValorVariable(3, 2);
     expect(ed.resultadoVariable(acrobacias)).toBe(3);

@@ -70,6 +70,13 @@ export class EditorFicha {
 
   /** Subpestaña de la ventana: lo de siempre («Ficha») o sus variables. */
   seccion = $state<"ficha" | "variables">("ficha");
+  /** Qué grupo de variables se ve en la pestaña «Variables»: `null` = «Todos» (todas las secciones, una tras otra). */
+  grupoVista = $state<number | null>(null);
+
+  /** El grupo que se ve de verdad: el elegido si sigue existiendo y, si no, «Todos». */
+  get grupoVistaEfectivo(): number | null {
+    return this.gruposVariables.some((g) => g.id === this.grupoVista) ? this.grupoVista : null;
+  }
 
   /** true mientras se guarda o se borra: los botones se desactivan y no se puede cancelar. */
   guardando = $state(false);

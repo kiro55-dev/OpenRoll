@@ -519,6 +519,10 @@ pub fn crear_definicion_variable(definicion: DefinicionVariable, state: State<'_
 pub fn crear_definicion_variable_en(definicion: DefinicionVariable, state: &AppState) -> Result<DefinicionVariable, String> {
     let mut est = state.lock();
     let definicion = limpiar_variable(definicion, &est.grupos_variables);
+    // Un doble guardado (clic fuera y Enter a la vez...) llega dos veces: la segunda devuelve la que ya hay, sin error
+    if let Some(ya) = est.definiciones_variables.iter().find(|d| variables::es_la_misma(d, &definicion)) {
+        return Ok(ya.clone());
+    }
     variables::validar_definicion(&est.definiciones_variables, &est.grupos_variables, &definicion)?;
     let id = est.definiciones_variables.iter().map(|d| d.id).max().unwrap_or(0) + 1;
     let nueva = DefinicionVariable { id, ..definicion };
@@ -1836,6 +1840,16 @@ mod tests_partidas {
         let habilidades = crear_grupo_variables_en(" Habilidades ".into(), TipoGrupoVariables::Derivadas, &state).unwrap();
         assert_eq!((habilidades.id, habilidades.nombre.as_str()), (2, "Habilidades"));
         assert!(crear_grupo_variables_en("habilidades".into(), TipoGrupoVariables::Base, &state).is_err(), "nombre repetido");
+
+        // Crear dos veces la misma variable (un doble guardado) no da error ni la duplica
+        let rty = crear_definicion_variable_en(var(0, "Rty", "rty", 10, 2), &state).unwrap();
+        let otra_vez = crear_definicion_variable_en(var(0, "Rty", "rty", 10, 2), &state).unwrap();
+        assert_eq!(otra_vez.id, rty.id);
+        assert_eq!(state.lock().definiciones_variables.len(), 1);
+        // Una distinta con su nombre sí choca, y el error dice contra cuál
+        let e = crear_definicion_variable_en(var(0, "Otra", "rty", 10, 2), &state).unwrap_err();
+        assert!(e.contains("«Rty»"), "{e}");
+        borrar_definicion_variable_en(rty.id, &state).unwrap();
 
         let des = crear_definicion_variable_en(var(0, "Destreza", "des", 10, 2), &state).unwrap();
         let com = crear_definicion_variable_en(var(0, "Competencia", "com", 0, 1), &state).unwrap();

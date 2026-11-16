@@ -135,8 +135,10 @@ pub fn validar_definicion(otras: &[DefinicionVariable], grupos: &[GrupoVariables
         if PALABRAS_RESERVADAS.contains(&clave(texto).as_str()) {
             return Err(format!("«{texto}» está reservado en el chat de dados"));
         }
-        if otras.iter().any(|o| clave(&o.nombre) == clave(texto) || clave(&o.abreviatura) == clave(texto)) {
-            return Err(format!("Ya hay una variable que se llama o se abrevia «{texto}»"));
+        if let Some(o) = otras.iter().find(|o| clave(&o.nombre) == clave(texto) || clave(&o.abreviatura) == clave(texto)) {
+            // Se dice contra cuál choca: así un conflicto real se reconoce (y uno que no lo parezca, se nota)
+            let grupo = grupos.iter().find(|g| g.id == o.grupo).map_or("sin grupo", |g| g.nombre.as_str());
+            return Err(format!("«{texto}» ya lo usa la variable «{}» (grupo «{grupo}»)", o.nombre));
         }
     }
     if otras.len() >= MAX_VARIABLES {
@@ -174,6 +176,18 @@ pub fn validar_definicion(otras: &[DefinicionVariable], grupos: &[GrupoVariables
         }
     }
     Ok(())
+}
+
+/// ¿Es la misma variable (mismo grupo, nombre y abreviatura sin mayúsculas, bases, opcionales, neutro y escala)? Crear dos
+/// veces lo mismo (un doble guardado) no debe dar error ni duplicar nada: se devuelve la que ya hay.
+pub fn es_la_misma(a: &DefinicionVariable, b: &DefinicionVariable) -> bool {
+    a.grupo == b.grupo
+        && clave(&a.nombre) == clave(&b.nombre)
+        && clave(&a.abreviatura) == clave(&b.abreviatura)
+        && a.bases == b.bases
+        && a.opcionales == b.opcionales
+        && a.neutro == b.neutro
+        && a.escala == b.escala
 }
 
 /// Comprueba el nombre de un grupo contra los DEMÁS (al crear: todos; al renombrar: todos menos él).
@@ -377,6 +391,17 @@ pub mod pruebas {
         let muchas: Vec<_> =
             (0..MAX_VARIABLES as u16).map(|i| var(i, &"a".repeat(i as usize % 29 + 1), "", 10, 2)).collect();
         assert!(validar_definicion(&muchas, &g, &var(999, "Otra", "z", 10, 2)).unwrap_err().contains("más de"));
+    }
+
+    #[test]
+    fn un_conflicto_dice_contra_que_variable_choca_y_la_misma_variable_se_reconoce() {
+        let g = grupos();
+        let otras = vec![var(1, "Prueba", "p", 10, 2)];
+        let e = validar_definicion(&otras, &g, &var(2, "Rty", "p", 10, 2)).unwrap_err();
+        assert!(e.contains("«p»") && e.contains("«Prueba»") && e.contains("«Variables»"), "{e}");
+        assert!(es_la_misma(&var(1, "Prueba", "p", 10, 2), &var(9, " prueba ", "P", 10, 2)), "sin mayúsculas ni espacios, el id no cuenta");
+        assert!(!es_la_misma(&var(1, "Prueba", "p", 10, 2), &var(1, "Prueba", "p", 10, 3)));
+        assert!(!es_la_misma(&var(1, "Prueba", "p", 10, 2), &DefinicionVariable { grupo: 2, ..var(1, "Prueba", "p", 10, 2) }));
     }
 
     #[test]

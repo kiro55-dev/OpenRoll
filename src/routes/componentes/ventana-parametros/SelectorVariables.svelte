@@ -37,8 +37,18 @@
       .join(" + ")
   );
 
+  /**
+   * Cierra la lista. Si un check de dentro tiene el foco, primero se devuelve al botón: si no, al desaparecer el check
+   * el foco caería a la página, la fila creería que has salido de ella y guardaría el borrador a medias (y la fila
+   * nueva sustituiría a la que estabas usando justo cuando ibas a pulsar otro campo).
+   */
+  function cerrar() {
+    if (raiz?.querySelector(".lista")?.contains(document.activeElement)) boton?.focus();
+    abierto = false;
+  }
+
   function alternar() {
-    if (abierto) return void (abierto = false);
+    if (abierto) return cerrar();
     const r = boton?.getBoundingClientRect();
     if (r) pos = { x: r.left, y: r.bottom + 2, ancho: Math.max(160, r.width) };
     abierto = true;
@@ -53,7 +63,7 @@
   $effect(() => {
     if (!abierto) return;
     const fuera = (e: PointerEvent) => {
-      if (!raiz?.contains(e.target as Node)) abierto = false;
+      if (!raiz?.contains(e.target as Node)) cerrar();
     };
     window.addEventListener("pointerdown", fuera, true);
     return () => window.removeEventListener("pointerdown", fuera, true);
@@ -73,7 +83,7 @@
     onkeydown={(e) => {
       if (e.key === "Escape" && abierto) {
         e.stopPropagation();
-        abierto = false;
+        cerrar();
       }
     }}
   >
@@ -94,8 +104,7 @@
             onkeydown={(e) => {
               if (e.key === "Escape") {
                 e.stopPropagation();
-                abierto = false;
-                boton?.focus();
+                cerrar();
               }
             }}
           />

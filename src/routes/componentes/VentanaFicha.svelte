@@ -204,11 +204,28 @@
           {esJugador ? "El host aún no ha definido variables." : "Aún no hay variables. Defínelas en ⚙ → «Editar parámetros de esta partida» → «Variables»."}
         </p>
       {:else}
+        <!-- Arriba, los grupos como en su definición: «Todos» (por defecto) enseña una sección por grupo y cada grupo, solo el suyo -->
+        {#if editor.gruposVariables.length > 1}
+          <div class="grupos-ficha" role="tablist" aria-label="Grupos de variables">
+            <button type="button" role="tab" class="grupo-ficha" class:activo={editor.grupoVistaEfectivo === null} aria-selected={editor.grupoVistaEfectivo === null} onclick={() => (editor.grupoVista = null)}>Todos</button>
+            {#each editor.gruposVariables as grupo (grupo.id)}
+              <button type="button" role="tab" class="grupo-ficha" class:activo={editor.grupoVistaEfectivo === grupo.id} aria-selected={editor.grupoVistaEfectivo === grupo.id} onclick={() => (editor.grupoVista = grupo.id)}>
+                {grupo.nombre}{#if grupo.tipo === "Derivadas"}<span class="marca" aria-hidden="true">ƒ</span>{/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+
         <!-- Una sección por grupo: las bases con su valor y las derivadas ya calculadas, con los checks de sus opcionales -->
         {#each editor.gruposVariables as grupo (grupo.id)}
           {@const suyas = editor.variablesDe(grupo)}
-          {#if suyas.length > 0}
-            <h4 class="titulo-grupo">{grupo.nombre}</h4>
+          {#if editor.grupoVistaEfectivo !== null && editor.grupoVistaEfectivo === grupo.id && suyas.length === 0}
+            <p class="vacio">Este grupo aún no tiene variables.</p>
+          {/if}
+          {#if suyas.length > 0 && (editor.grupoVistaEfectivo === null || editor.grupoVistaEfectivo === grupo.id)}
+            {#if editor.grupoVistaEfectivo === null && editor.gruposVariables.length > 1}
+              <h4 class="titulo-grupo">{grupo.nombre}</h4>
+            {/if}
             <table class="tabla-variables">
               {#if grupo.tipo === "Base"}
                 <thead>
@@ -244,7 +261,8 @@
                     <tr>
                       <td class="nombre">{d.nombre}</td>
                       <td class="abreviatura">{d.abreviatura || "—"}</td>
-                      <td class="opcionales">
+                      <td>
+                       <div class="opcionales">
                         {#each d.opcionales as idOpcional (idOpcional)}
                           {@const opcional = editor.variables.find((v) => v.id === idOpcional)}
                           {#if opcional}
@@ -262,6 +280,7 @@
                         {:else}
                           <span class="sin">—</span>
                         {/each}
+                       </div>
                       </td>
                       <td class="resultado" class:positivo={resultado > 0} class:negativo={resultado < 0} title={editor.desgloseVariable(d)}>
                         {textoModificador(resultado)}
@@ -327,15 +346,28 @@
 
   .titulo-grupo { margin: 6px 0 0; font-size: 11px; font-weight: 700; color: #d4d4d8; text-transform: uppercase; letter-spacing: 0.03em; }
   .titulo-grupo:first-child { margin-top: 0; }
-  .tabla-variables .opcionales { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+  .tabla-variables td { vertical-align: middle; }
+  .opcionales { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; min-height: 18px; }
+  .grupos-ficha { display: flex; flex-wrap: wrap; gap: 3px; }
+  .grupo-ficha {
+    background: #111113; border: 1px solid #27272a; color: #a1a1aa; border-radius: 4px; padding: 2px 8px;
+    font-size: 11px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  }
+  .grupo-ficha:hover { color: #f4f4f5; border-color: #3f3f46; }
+  .grupo-ficha.activo { color: white; border-color: #3b82f6; background: rgba(59, 130, 246, 0.12); }
+  .grupo-ficha .marca { color: #60a5fa; font-style: italic; font-size: 10px; }
   .tabla-variables .sin { color: #52525b; }
-  .opcional { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: #d4d4d8; font-size: 11px; white-space: nowrap; }
+  .opcional { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: #d4d4d8; font-size: 11px; line-height: 1; white-space: nowrap; }
   /* Check redondo */
   .redondo {
-    appearance: none; -webkit-appearance: none; margin: 0; width: 13px; height: 13px; border-radius: 50%;
-    border: 1.5px solid #71717a; background: #09090b; cursor: pointer; display: inline-grid; place-content: center;
+    appearance: none; -webkit-appearance: none; margin: 0; flex: none; position: relative; box-sizing: border-box;
+    width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #71717a; background: #09090b; cursor: pointer;
   }
-  .redondo::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #3b82f6; transform: scale(0); transition: transform 0.1s; }
+  /* El punto de dentro, en el centro exacto del círculo (inset + margin auto), sea cual sea el grosor del borde */
+  .redondo::before {
+    content: ""; position: absolute; inset: 0; margin: auto; width: 6px; height: 6px; border-radius: 50%;
+    background: #3b82f6; transform: scale(0); transition: transform 0.1s;
+  }
   .redondo:checked { border-color: #3b82f6; }
   .redondo:checked::before { transform: scale(1); }
   .tabla-variables { width: 100%; border-collapse: collapse; font-size: 11px; }

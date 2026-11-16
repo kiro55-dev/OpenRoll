@@ -90,6 +90,7 @@
   }
 
   function cambiarA(g: GrupoVariables) {
+    onError(""); // un aviso de otro grupo no se queda
     confirmandoBorrar = false;
     eligiendoTipo = false;
     idActivo = g.id;
