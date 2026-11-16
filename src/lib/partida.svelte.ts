@@ -280,11 +280,19 @@ class Partida {
   #ultimaConFoco: number | null = null;
 
   /** La instancia de la que salen las variables de una tirada (`2d6 + f`): la que tiene el foco si es una sola; si no,
-   *  la última que lo tuvo, mientras siga existiendo. `null` si no hay ninguna. */
+   *  la última que lo tuvo, mientras siga existiendo. Solo cuentan las fichas que controlas (el host, todas; un jugador, las
+   *  suyas): mirar la de otro (para ver su rango, por ejemplo) no cambia de qué ficha salen tus variables. `null` si no hay. */
   get fichaParaVariables(): number | null {
-    if (this.instanciaSeleccionada) return this.instanciaSeleccionada.id_instancia;
-    const ultima = this.#ultimaConFoco;
-    return ultima !== null && this.instancias.some((i) => i.id_instancia === ultima) ? ultima : null;
+    // Un jugador con UNA sola ficha asignada: siempre la suya (las variables son de la ficha, así que vale cualquiera de sus
+    // instancias), sin depender del foco. Si aún no la ha puesto en juego, se sigue con la regla de siempre.
+    if (esJugador && this.banco.length === 1) {
+      const suya = this.instanciasOrdenadas.find((i) => i.base.id === this.banco[0].id);
+      if (suya) return suya.id_instancia;
+    }
+    const enfocada = this.instanciaSeleccionada;
+    if (enfocada && this.controla(enfocada)) return enfocada.id_instancia;
+    const ultima = this.instancias.find((i) => i.id_instancia === this.#ultimaConFoco);
+    return ultima && this.controla(ultima) ? ultima.id_instancia : null;
   }
 
   valoresPendientes = $state<Record<string, number>>({});
@@ -684,7 +692,11 @@ class Partida {
   // Cambia el foco propio, guarda lo pendiente de las fichas que lo pierden y avisa a los demás.
   #cambiarFoco(nuevos: number[]) {
     this.idsSeleccionados = nuevos;
-    if (nuevos.length === 1) this.#ultimaConFoco = nuevos[0];
+    // Solo se recuerda una ficha que controlas: tocar la de otro no cambia de qué ficha salen tus variables
+    if (nuevos.length === 1) {
+      const instancia = this.instancias.find((i) => i.id_instancia === nuevos[0]);
+      if (instancia && this.controla(instancia)) this.#ultimaConFoco = nuevos[0];
+    }
     void this.guardarValoresPendientes();
     // El foco es solo de este momento: se avisa (por red, cuando la haya) pero no se guarda en disco
     const igual = nuevos.length === this.#focoAvisado.length && nuevos.every((id, i) => id === this.#focoAvisado[i]);

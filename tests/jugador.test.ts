@@ -297,6 +297,52 @@ describe("un jugador solo cambia las fichas que son suyas", () => {
     expect(partida.controla(instancia(2, 11))).toBe(false);
   });
 
+  it("mirar una ficha ajena no cambia de qué ficha salen sus variables: solo cuentan las suyas", async () => {
+    const { partida } = await comoJugador();
+    partida.banco = [{ id: 10 }, { id: 12 }] as any; // con dos fichas manda el foco (con una sola, siempre esa)
+    partida.instancias = [instancia(1, 10), instancia(2, 11)];
+    expect(partida.fichaParaVariables).toBeNull();
+
+    // Pulsa una ajena (para ver su rango): ni está enfocada para variables ni se recuerda
+    partida.seleccionarInstancia(partida.instancias[1]);
+    expect(partida.instanciaSeleccionada?.id_instancia).toBe(2);
+    expect(partida.fichaParaVariables).toBeNull();
+
+    // Pulsa la suya: esa. Mirar luego la ajena la deja como la última suya
+    partida.seleccionarInstancia(partida.instancias[0]);
+    expect(partida.fichaParaVariables).toBe(1);
+    partida.seleccionarInstancia(partida.instancias[1]);
+    expect(partida.fichaParaVariables).toBe(1);
+    partida.seleccionarInstancia(null);
+    expect(partida.fichaParaVariables).toBe(1);
+  });
+
+  it("con una sola ficha asignada se usa siempre esa, sin importar el foco; con varias, la regla del foco", async () => {
+    const { partida } = await comoJugador();
+    partida.banco = [{ id: 10 }] as any;
+    partida.instancias = [instancia(1, 10), instancia(2, 11), instancia(3, 10)];
+    // Sin foco, o mirando una ajena: la suya (la primera de «Fichas activas»; las variables son de la ficha)
+    expect(partida.fichaParaVariables).toBe(1);
+    partida.seleccionarInstancia(partida.instancias[1]);
+    expect(partida.fichaParaVariables).toBe(1);
+    // Aunque tenga el foco otra instancia suya de la misma ficha: da igual cuál
+    partida.seleccionarInstancia(partida.instancias[2]);
+    expect(partida.fichaParaVariables).toBe(1);
+
+    // Sin ninguna puesta en juego aún, no hay de dónde sacarlas
+    partida.instancias = [instancia(2, 11)];
+    partida.seleccionarInstancia(null);
+    expect(partida.fichaParaVariables).toBeNull();
+
+    // Con dos fichas asignadas ya manda el foco (la última que tocó)
+    partida.banco = [{ id: 10 }, { id: 12 }] as any;
+    partida.instancias = [instancia(1, 10), instancia(4, 12)];
+    expect(partida.fichaParaVariables).toBeNull();
+    partida.seleccionarInstancia(partida.instancias[1]);
+    partida.seleccionarInstancia(null);
+    expect(partida.fichaParaVariables).toBe(4);
+  });
+
   it("no cambia el valor (la vida) de una ficha ajena, y sí el de la suya", async () => {
     const { partida } = await comoJugador();
     partida.banco = [{ id: 10 }] as any;
