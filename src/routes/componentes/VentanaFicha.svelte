@@ -37,8 +37,21 @@
 
   function alTeclear(e: KeyboardEvent) {
     if (e.key === "Enter") {
-      if ((e.target as HTMLElement)?.tagName === "TEXTAREA") return;
+      const objetivo = e.target as HTMLElement | null;
+      if (objetivo?.tagName === "TEXTAREA") return;
       e.preventDefault();
+      // En el valor de una variable, Enter no guarda: pasa a la fila siguiente y, en la última, suelta el foco
+      if (objetivo instanceof HTMLInputElement && objetivo.closest(".tabla-variables")) {
+        const campos = [...(ventana?.querySelectorAll<HTMLInputElement>(".tabla-variables input") ?? [])];
+        const siguiente = campos[campos.indexOf(objetivo) + 1];
+        if (siguiente) {
+          siguiente.focus();
+          siguiente.select();
+        } else {
+          objetivo.blur();
+        }
+        return;
+      }
       editor.guardar();
     } else if (e.key === "Escape") {
       editor.cancelar();
