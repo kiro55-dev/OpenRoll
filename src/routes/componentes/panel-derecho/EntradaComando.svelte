@@ -1,5 +1,6 @@
 <!-- src/routes/componentes/panel-derecho/EntradaComando.svelte -->
 <script lang="ts">
+  import { ayuda } from "$lib/ajustesVista.svelte";
   import { tiradas } from "$lib/tiradas.svelte";
 
   let input: HTMLInputElement | null = null;
@@ -33,6 +34,7 @@
     bind:this={input}
     bind:value={tiradas.comando}
     placeholder="Escribir comando (ej: 2d6 + 3)..."
+    title={ayuda("Comparar: 1d100 <= 45 (por debajo), 1d20 >= 12 (superar) o 1d100 vs acro (igual que <=). El host puede nombrar el resultado en Parámetros > Resultados")}
     onkeydown={alTeclear}
     class="input-chat"
   />

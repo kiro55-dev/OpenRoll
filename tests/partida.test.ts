@@ -34,6 +34,8 @@ function crearBackend() {
     variables: [] as { id: number; nombre: string; abreviatura: string; neutro: number; escala: number }[],
     /** Conjuntos de parámetros (un modelo mínimo de lo que hace Rust): el 1 es el activo y el 3 aún no está en la partida. */
     conjuntos: { activo: 1, guardados: [{ id: 1, nombre: "Genérico", descripcion: "", origen: "generico", parametros: 1, variables: 0, grupos: 1 }, { id: 2, nombre: "Otro", descripcion: "", origen: null, parametros: 1, variables: 3, grupos: 2 }], de_serie: [{ clave: "dnd", nombre: "D&D", descripcion: "", ya_anadido: false }] },
+    /** La escala de resultados del conjunto activo (Rust la valida; aquí se guarda tal cual). */
+    escala: null as any,
     papelera: [] as { zonas: any[]; banco: any[] }[],
     partidas: ["A", "B"] as string[],
     actual: "A",
@@ -66,6 +68,13 @@ function crearBackend() {
         case "obtener_definiciones_variables": return clon(b.variables);
         case "obtener_grupos_variables": return [{ id: 1, nombre: "Variables", tipo: "Base" }];
         case "obtener_conjuntos_parametros": return clon(b.conjuntos);
+        case "obtener_escala_resultado": return clon(b.escala);
+        case "guardar_escala_resultado": {
+          if (args.escala && !args.escala.nombre_exito) throw "Acierto: el nombre debe tener entre 1 y 30 caracteres";
+          b.escala = clon(args.escala);
+          return;
+        }
+        case "obtener_ejemplos_escala": return [{ clave: "cthulhu", nombre: "Llamada de Cthulhu", descripcion: "", escala: { nombre_exito: "Éxito", nombre_fallo: "Fallo", tramos: [], naturales: [] } }];
         case "usar_conjunto": {
           if (args.id === b.conjuntos.activo) throw "Ya estás usando ese conjunto";
           b.conjuntos.activo = args.id;
@@ -857,6 +866,30 @@ describe("fichas: selección y vida", () => {
     expect(partida.hayFichaNuevaAbierta).toBe(true);
     partida.editorEsBorrador = false;
     expect(partida.hayFichaNuevaAbierta).toBe(false);
+  });
+
+  it("la escala de resultados se lee con las definiciones, se guarda entera y se relee aunque falle", async () => {
+    const partida = await nuevoStore();
+    expect(partida.escala).toBeNull();
+    const escala = { nombre_exito: "Éxito", nombre_fallo: "Fallo", tramos: [{ nombre: "Difícil", numerador: 1, denominador: 2 }], naturales: [] };
+    await partida.guardarEscala(escala);
+    expect(llamadas("guardar_escala_resultado")[0].args).toEqual({ escala });
+    expect(partida.escala).toEqual(escala);
+    // Un error de Rust llega a quien llama, y la pantalla se queda con lo que de verdad hay guardado
+    await expect(partida.guardarEscala({ ...escala, nombre_exito: "" })).rejects.toBeTruthy();
+    expect(partida.escala).toEqual(escala);
+    // Quitarla
+    await partida.guardarEscala(null);
+    expect(partida.escala).toBeNull();
+    // Los ejemplos se leen una vez
+    await partida.cargarEjemplosEscala();
+    await partida.cargarEjemplosEscala();
+    expect(partida.ejemplosEscala.map((e) => e.clave)).toEqual(["cthulhu"]);
+    expect(llamadas("obtener_ejemplos_escala")).toHaveLength(1);
+    // Al cambiar de conjunto se relee (cada conjunto tiene la suya)
+    backend.escala = escala;
+    await partida.usarConjunto(2);
+    expect(partida.escala).toEqual(escala);
   });
 
   it("instanciar oculto manda `oculto` a Rust, y ocultar o mostrar una instancia se ve al momento y se confirma al releer", async () => {

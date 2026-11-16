@@ -98,8 +98,8 @@ pub fn procesar_delta(state: &AppState, delta: DeltaPartida) {
 // Recibe el desglose y el total por separado: releer el total de un texto con `parse().unwrap_or(0)`
 // guardaba un 0 silencioso cuando el número no cabía.
 // `jugador` es quien tiró (`ID_HOST` o un jugador de la sala): su nombre se guarda en la tirada para el chat.
-// `veredicto`: el resultado frente al objetivo en una tirada `vs` («Éxito difícil»...); vacío en las demás.
-pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, total: i32, publica: bool, veredicto: &str) {
+// `valoracion`: el resultado de una comparación (`1d100 <= acro`) con el nombre que le da la escala del conjunto; `None` en una tirada normal.
+pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, total: i32, publica: bool, valoracion: Option<&crate::tablero_general::escalas::Valoracion>) {
     let mut est = state.lock();
     let autor = est.jugadores.iter().find(|j| j.id == jugador).map(|j| j.nombre.clone()).unwrap_or_default();
     let tirada = Tiradas {
@@ -109,7 +109,9 @@ pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, to
         jugador,
         autor,
         publica,
-        veredicto: veredicto.to_string(),
+        veredicto: valoracion.map(|v| v.nombre.clone()).unwrap_or_default(),
+        acierta: valoracion.map(|v| v.acierta),
+        especial: valoracion.is_some_and(|v| v.especial),
     };
 
     registrar(&mut est, &state.almacen, DeltaPartida::TiradaRealizada(tirada));

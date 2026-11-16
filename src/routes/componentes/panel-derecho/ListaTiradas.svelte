@@ -21,8 +21,8 @@
         <strong class="total">= {t.total}</strong>
       {/if}
       {#if t.total !== null && t.veredicto}
-        <!-- Palabras fijas de Rust (Éxito, Fallo, Crítico...): se pinta con Svelte, sin HTML -->
-        <strong class="veredicto {claseVeredicto(t.veredicto)}">{t.veredicto}</strong>
+        <!-- El nombre lo define el host en la escala del conjunto: se pinta como texto de Svelte, nunca como HTML -->
+        <strong class="veredicto {claseVeredicto(t.acierta, t.especial)}">{t.veredicto}</strong>
       {/if}
       {#if t.total !== null}<span class="hora">{t.autor || "rollmaster"}{t.publica === false ? " · p" : ""}</span>{/if}
       <!-- @html a propósito: Rust devuelve el desglose con <b> para resaltar el dado ganador. Lo genera

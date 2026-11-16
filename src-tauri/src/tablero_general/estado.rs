@@ -79,6 +79,8 @@ pub enum DeltaPartida {
     ConjuntoBorrado(u16),
     /// Nuevo orden de las variables (ids). Las fichas lo siguen.
     VariablesReordenadas(Vec<u16>),
+    /// La escala de resultados del conjunto activo (o ninguna). Ya validada.
+    EscalaResultadoCambiada(Option<EscalaResultado>),
     /// Instancia nueva (o reemplaza la de ese id). Las reglas para construirla están en `instancias.rs`.
     InstanciaCreada(Instancia),
     /// Instancia cambiada entera: movida, quitada del tablero o una ficha única reutilizada.
@@ -136,6 +138,10 @@ pub struct EstadoPartida {
     /// Los grupos de esas variables (bases o derivadas), en su orden. Las partidas anteriores nacen con el de serie.
     #[serde(default = "grupos_por_defecto")]
     pub grupos_variables: Vec<GrupoVariables>,
+    /// Cómo se nombra el resultado de una comparación del chat (ver escalas.rs). Es la «viva» del conjunto activo, como las
+    /// definiciones de arriba. `None` = solo «Éxito» o «Fallo».
+    #[serde(default)]
+    pub escala_resultado: Option<EscalaResultado>,
     /// Los conjuntos de parámetros que guarda la partida (ver conjuntos.rs). Las definiciones de arriba son las del ACTIVO.
     /// Las partidas anteriores a los conjuntos lo reciben al cargar (`conjuntos::asegurar`).
     #[serde(default)]
@@ -206,6 +212,7 @@ impl Default for EstadoPartida {
             definiciones_parametros: parametros_por_defecto(),
             definiciones_variables: Vec::new(),
             grupos_variables: grupos_por_defecto(),
+            escala_resultado: None,
             conjuntos_parametros: crate::tablero_general::conjuntos::conjuntos_iniciales(),
             conjunto_activo: 1,
             zonas: Vec::new(),
@@ -482,6 +489,7 @@ impl EstadoPartida {
                     self.conjuntos_parametros.retain(|c| c.id != *id);
                 }
             }
+            DeltaPartida::EscalaResultadoCambiada(escala) => self.escala_resultado = escala.clone(),
             DeltaPartida::VariablesReordenadas(ids) => {
                 self.definiciones_variables
                     .sort_by_key(|d| ids.iter().position(|i| *i == d.id).unwrap_or(usize::MAX));

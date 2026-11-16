@@ -11,15 +11,16 @@
   import { FormularioParametro, formasDisponibles, VISIBILIDADES, resumenDefinicion } from "$lib/formularioParametro.svelte";
   import ArrastreFlotante from "./comunes/ArrastreFlotante.svelte";
   import TablaVariables from "./ventana-parametros/TablaVariables.svelte";
+  import TablaEscala from "./ventana-parametros/TablaEscala.svelte";
   import ConjuntosParametros from "./ventana-parametros/ConjuntosParametros.svelte";
   import SelectorVariables from "./ventana-parametros/SelectorVariables.svelte";
 
   let { onCerrar }: { onCerrar: () => void } = $props();
 
   /** Subpestaña: los parámetros de siempre (vida, rangos... lo que se dibuja) o las variables (Fuerza «f»...). */
-  let pestana = $state<"parametros" | "variables">("parametros");
+  let pestana = $state<"parametros" | "variables" | "resultados">("parametros");
 
-  async function cambiarPestana(p: "parametros" | "variables") {
+  async function cambiarPestana(p: "parametros" | "variables" | "resultados") {
     if (p === pestana) return;
     if (!(await guardarSiCambio())) return; // un parámetro editado que no vale se queda a la vista con su error
     error = "";
@@ -141,7 +142,7 @@
 <div
   class="ventana-flotante"
   style="left: {pos.x}px; top: {pos.y}px;"
-  style:width={pestana === "variables" ? "560px" : null}
+  style:width={pestana === "variables" || pestana === "resultados" ? "560px" : null}
   role="dialog"
   aria-label="Parámetros de la partida"
   tabindex="-1"
@@ -161,10 +162,13 @@
     <div class="subpestanas" role="tablist" aria-label="Qué se configura">
       <button type="button" role="tab" aria-selected={pestana === "parametros"} class:activa={pestana === "parametros"} onclick={() => cambiarPestana("parametros")}>Parámetros visuales</button>
       <button type="button" role="tab" aria-selected={pestana === "variables"} class:activa={pestana === "variables"} onclick={() => cambiarPestana("variables")}>Variables</button>
+      <button type="button" role="tab" aria-selected={pestana === "resultados"} class:activa={pestana === "resultados"} onclick={() => cambiarPestana("resultados")}>Resultados</button>
     </div>
 
     {#if pestana === "variables"}
       <TablaVariables onError={(m) => (error = m)} />
+    {:else if pestana === "resultados"}
+      <TablaEscala onError={(m) => (error = m)} />
     {:else}
     <p class="ayuda">Los tienen todas las fichas. Pulsa uno para configurarlo y arrástralo para cambiar el orden en que salen en ellas.</p>
 

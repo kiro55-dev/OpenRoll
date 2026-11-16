@@ -335,6 +335,61 @@ pub struct ConjuntoParametros {
     pub grupos_variables: Vec<GrupoVariables>,
     #[serde(default)]
     pub variables: Vec<DefinicionVariable>,
+    /// Cómo se nombra el resultado de una comparación del chat (`1d100 <= 45`): sus niveles (extremo, difícil...) y sus críticos y
+    /// pifias. Sin ella, solo «Éxito» o «Fallo». Ver escalas.rs.
+    #[serde(default)]
+    pub escala_resultado: Option<EscalaResultado>,
+}
+
+/// Cómo se nombra el resultado de una comparación del chat. Es del conjunto de parámetros (cada rol tiene la suya): el chat solo
+/// compara, y esto decide si un acierto es «Éxito difícil» o un 1 natural es un «Crítico».
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct EscalaResultado {
+    /// Cómo se llama acertar sin más y fallar sin más.
+    pub nombre_exito: String,
+    pub nombre_fallo: String,
+    /// Solo con `<=`: niveles de acierto según qué parte del objetivo alcanza el total, del más estricto al más laxo.
+    #[serde(default)]
+    pub tramos: Vec<TramoEscala>,
+    /// Críticos y pifias: reglas sobre la cara que sale en un dado suelto. La primera que casa gana.
+    #[serde(default)]
+    pub naturales: Vec<ReglaNatural>,
+}
+
+/// «Éxito difícil» si `total <= objetivo · numerador / denominador`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct TramoEscala {
+    pub nombre: String,
+    pub numerador: i16,
+    pub denominador: i16,
+}
+
+/// Una regla sobre la cara natural de UN dado normal (sin ventaja ni multiplicador): si sale una cara de `desde` a `hasta`
+/// (y, si se indica, en un dado de `dado` caras y con un objetivo menor que `umbral_menor_que`), el resultado se llama `nombre`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ReglaNatural {
+    pub nombre: String,
+    /// Solo en un dado de estas caras (el 96-100 de Cthulhu es de un d100). `None` = en cualquiera.
+    #[serde(default)]
+    pub dado: Option<u16>,
+    pub desde: u16,
+    pub hasta: u16,
+    pub efecto: EfectoNatural,
+    /// Solo si el objetivo es menor que esto (la pifia de Cthulhu del 96 al 100 solo vale con un objetivo menor de 50).
+    #[serde(default)]
+    pub umbral_menor_que: Option<i32>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EfectoNatural {
+    /// Solo se nombra si la comparación acierta (el crítico de Cthulhu).
+    SoloSiAcierta,
+    /// Solo se nombra si la comparación falla (la pifia de Cthulhu).
+    SoloSiFalla,
+    /// Acierta aunque la comparación fallara (el 20 de D&D).
+    ForzarAcierto,
+    /// Falla aunque la comparación acertara (el 1 de D&D).
+    ForzarFallo,
 }
 
 /// Un conjunto que la partida tiene guardado. De los de serie guarda su propia copia (se puede editar sin tocar el original).
@@ -687,10 +742,16 @@ pub struct Tiradas {
     /// Si los jugadores la ven. Solo el host puede tirar en privado; las de los jugadores son siempre públicas.
     #[serde(default = "tirada_publica")]
     pub publica: bool,
-    /// Solo en las tiradas «bajo objetivo» (`1d100 vs acro`): el resultado frente al objetivo («Éxito difícil», «Fallo»,
-    /// «Crítico»...). Son palabras fijas, nunca texto escrito. Vacío en una tirada normal.
+    /// Solo en una comparación (`1d100 <= acro`): el resultado frente al objetivo, con el nombre que le da la escala del conjunto
+    /// («Éxito difícil», «Fallo», «Crítico»...); nunca texto escrito en el chat. Vacío en una tirada normal.
     #[serde(default)]
     pub veredicto: String,
+    /// Solo en una comparación: si acertó (para pintarla sin depender del texto, que define el host).
+    #[serde(default)]
+    pub acierta: Option<bool>,
+    /// Solo en una comparación: el resultado salió de una regla del dado natural (crítico, pifia...), no del nivel normal.
+    #[serde(default)]
+    pub especial: bool,
 }
 
 fn tirada_publica() -> bool {

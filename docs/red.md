@@ -290,8 +290,9 @@ su pantalla relee. Las peticiones de un jugador se ejecutan **en orden**, una a 
   (de una derivada), `ValorVariable.eleccion` es el rango que ha elegido cada ficha (solo llega a host y propietarios, como los demás
   valores), `DefinicionParametro.calculo` hace que el valor de un parámetro lo calcule el host con las variables de la ficha (el jugador
   recibe ya el resultado, y al guardar su ficha el host lo recalcula: lo que mande en ese parámetro se ignora) y `Tiradas.veredicto` es el
-  resultado de una tirada `vs` («Éxito difícil», «Fallo»...), palabras fijas que se ven en el chat de todos. Una tirada `vs` usa el mismo
-  `tirar_dado` (mismo permiso y mismos topes de longitud); el objetivo no admite dados.
+  resultado de una comparación del chat (`1d100 <= acro`, `1d20 >= 12`, `vs`), con el nombre que le da la escala de resultados del conjunto activo
+  (la define el host; `acierta` y `especial` dicen cómo pintarlo). Una comparación usa el mismo `tirar_dado` (mismo permiso y mismos
+  topes de longitud) y el host la valora: el jugador no recibe la escala, solo el veredicto dentro de `Tiradas`.
 - **Conjuntos de parámetros.** Importar, exportar y cambiar de conjunto son solo del host (no están en la lista blanca). Al activar
   otro, los jugadores reciben el diff de siempre (`definiciones`, `grupos_variables`, sus fichas reiniciadas); no hay mensajes
   nuevos ni cambio de protocolo.

@@ -146,6 +146,43 @@ export interface ResumenDeSerie {
   ya_anadido: boolean;
 }
 
+/** Cómo se nombra el resultado de una comparación del chat (`EscalaResultado` en Rust; del conjunto activo). */
+export interface EscalaResultado {
+  nombre_exito: string;
+  nombre_fallo: string;
+  /** Solo con `<=`: niveles de acierto (`total <= objetivo · numerador / denominador`), del más estricto al más laxo. */
+  tramos: TramoEscala[];
+  /** Críticos y pifias: reglas sobre la cara de un dado suelto. La primera que casa gana. */
+  naturales: ReglaNatural[];
+}
+
+export interface TramoEscala {
+  nombre: string;
+  numerador: number;
+  denominador: number;
+}
+
+export type EfectoNatural = "SoloSiAcierta" | "SoloSiFalla" | "ForzarAcierto" | "ForzarFallo";
+
+export interface ReglaNatural {
+  nombre: string;
+  /** Solo en un dado de estas caras; `null` = en cualquiera. */
+  dado: number | null;
+  desde: number;
+  hasta: number;
+  efecto: EfectoNatural;
+  /** Solo si el objetivo es menor que esto; `null` = siempre. */
+  umbral_menor_que: number | null;
+}
+
+/** Una escala de ejemplo (Cthulhu, D&D...) con la que rellenar el editor: se copia, la partida no depende de ella. */
+export interface EjemploEscala {
+  clave: string;
+  nombre: string;
+  descripcion: string;
+  escala: EscalaResultado;
+}
+
 export interface ListaConjuntos {
   activo: number;
   guardados: ResumenConjunto[];
@@ -326,6 +363,10 @@ class Partida {
   gruposVariables = $state<GrupoVariables[]>([]);
   /** Los conjuntos de parámetros de la partida y los de serie (solo el host: el jugador no los ve ni los cambia). */
   conjuntos = $state<ListaConjuntos>({ activo: 0, guardados: [], de_serie: [] });
+  /** La escala de resultados del conjunto activo (`null` = solo «Éxito» o «Fallo»). Solo la lee el host: el jugador recibe ya el veredicto. */
+  escala = $state<EscalaResultado | null>(null);
+  /** Escalas de ejemplo (Cthulhu, D&D...) con las que rellenar el editor. */
+  ejemplosEscala = $state<EjemploEscala[]>([]);
 
   /** «Fichas activas» de arriba abajo. */
   instanciasOrdenadas = $derived([...this.instancias].sort((a, b) => a.orden - b.orden || a.id_instancia - b.id_instancia));
@@ -595,7 +636,24 @@ class Partida {
     this.definiciones = definiciones;
     this.definicionesVariables = variables ?? [];
     this.gruposVariables = grupos ?? [];
-    if (!esJugador) this.conjuntos = await invoke<ListaConjuntos>("obtener_conjuntos_parametros");
+    if (!esJugador) {
+      this.conjuntos = await invoke<ListaConjuntos>("obtener_conjuntos_parametros");
+      this.escala = (await invoke<EscalaResultado | null>("obtener_escala_resultado")) ?? null;
+    }
+  }
+
+  /** Guarda (o quita, con `null`) la escala de resultados del conjunto activo. Rust la valida entera y da el motivo si falla. */
+  async guardarEscala(escala: EscalaResultado | null) {
+    try {
+      await invoke("guardar_escala_resultado", { escala });
+    } finally {
+      this.escala = (await invoke<EscalaResultado | null>("obtener_escala_resultado")) ?? null;
+    }
+  }
+
+  /** Lee las escalas de ejemplo (una vez). */
+  async cargarEjemplosEscala() {
+    if (this.ejemplosEscala.length === 0) this.ejemplosEscala = (await invoke<EjemploEscala[]>("obtener_ejemplos_escala")) ?? [];
   }
 
   /** Crear, borrar o reordenar un parámetro cambia también las fichas: se vuelve a leer todo.

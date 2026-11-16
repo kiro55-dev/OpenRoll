@@ -52,6 +52,7 @@ fn generico() -> ConjuntoParametros {
         parametros: parametros_por_defecto(),
         grupos_variables: grupos_por_defecto(),
         variables: Vec::new(),
+        escala_resultado: None,
     }
 }
 
@@ -79,6 +80,7 @@ impl EstadoPartida {
             parametros: self.definiciones_parametros.clone(),
             grupos_variables: self.grupos_variables.clone(),
             variables: self.definiciones_variables.clone(),
+            escala_resultado: self.escala_resultado.clone(),
         }
     }
 
@@ -108,6 +110,7 @@ impl EstadoPartida {
         self.definiciones_parametros = nuevo.contenido.parametros;
         self.grupos_variables = nuevo.contenido.grupos_variables;
         self.definiciones_variables = nuevo.contenido.variables;
+        self.escala_resultado = nuevo.contenido.escala_resultado;
         self.conjunto_activo = id;
         self.reiniciar_valores_de_fichas();
         self.restaurar_valores(&nuevo.valores);
@@ -274,6 +277,7 @@ pub fn asegurar(est: &mut EstadoPartida) {
         parametros: est.definiciones_parametros.clone(),
         grupos_variables: est.grupos_variables.clone(),
         variables: est.definiciones_variables.clone(),
+        escala_resultado: est.escala_resultado.clone(),
     };
     let g = generico();
     let es_generico = vivo.parametros == g.parametros && vivo.variables.is_empty() && vivo.grupos_variables == g.grupos_variables;
@@ -409,7 +413,17 @@ pub fn validar(mut c: ConjuntoParametros) -> Result<ConjuntoParametros, String> 
         variables::validar_parametro_calculado(p, &variables_validadas).map_err(|e| format!("{}: {e}", p.clave))?;
     }
 
-    Ok(ConjuntoParametros { nombre: c.nombre, descripcion: c.descripcion, parametros, grupos_variables: grupos, variables: variables_validadas })
+    // La escala de resultados, con las mismas reglas que al editarla a mano
+    let escala_resultado = c.escala_resultado.map(crate::tablero_general::escalas::validar).transpose()?;
+
+    Ok(ConjuntoParametros {
+        nombre: c.nombre,
+        descripcion: c.descripcion,
+        parametros,
+        grupos_variables: grupos,
+        variables: variables_validadas,
+        escala_resultado,
+    })
 }
 
 // ------------------------------------------------------------------
@@ -558,7 +572,7 @@ pub fn renombrar_conjunto_en(id: u16, nombre: String, state: &AppState) -> Resul
         return Ok(());
     }
     // Se valida como el resto (largo, caracteres) y que no lo tenga otro
-    validar(ConjuntoParametros { nombre: nombre.clone(), descripcion: String::new(), parametros: vec![], grupos_variables: vec![], variables: vec![] })?;
+    validar(ConjuntoParametros { nombre: nombre.clone(), descripcion: String::new(), parametros: vec![], grupos_variables: vec![], variables: vec![], escala_resultado: None })?;
     let repetido = est.conjuntos_parametros.iter().filter(|g| g.id != id).filter_map(|g| est.contenido_de(g.id)).any(|c| c.nombre.to_lowercase() == nombre.to_lowercase());
     if repetido {
         return Err(format!("Ya hay un conjunto que se llama «{nombre}»"));
@@ -658,6 +672,7 @@ mod tests {
             parametros: parametros_por_defecto(),
             grupos_variables: grupos(),
             variables: vec![var(1, "Destreza", "des", 10, 2), var(3, "Competencia", "com", 0, 1), derivada(4, "Acrobacias", "acro", &[1], &[3])],
+            escala_resultado: None,
         }
     }
 
@@ -897,6 +912,78 @@ mod tests {
         partidas::crear(&raiz, "A").unwrap();
         let almacen = Almacen::abrir(partidas::ruta_partida(&raiz, "A")).unwrap();
         AppState::nuevo(EstadoPartida::default(), almacen, raiz)
+    }
+
+    #[test]
+    fn la_escala_de_resultados_se_aplica_en_el_chat_y_cada_conjunto_guarda_la_suya() {
+        use crate::tablero_general::dados::tirar_dado_de;
+        use crate::tablero_general::escalas::{ejemplos, guardar_escala_resultado_en};
+        let state = estado_en_a("escala_resultados");
+        let cthulhu = ejemplos().into_iter().find(|e| e.clave == "cthulhu").unwrap().escala;
+
+        // Sin escala: «Éxito» o «Fallo»; con `vs`, `<=` o `>=`, y la tirada guarda si acertó
+        let salida = tirar_dado_de(&state, ID_HOST, "1d100 vs 100", true, None).unwrap();
+        assert!(salida.ends_with("· Éxito"), "{salida}");
+        let ultima = state.lock().historial_tiradas[0].clone();
+        assert_eq!((ultima.veredicto.as_str(), ultima.acierta, ultima.especial), ("Éxito", Some(true), false));
+        assert!(ultima.comando.contains(" <= 100"), "{}", ultima.comando);
+        assert!(tirar_dado_de(&state, ID_HOST, "1d20 >= 21", true, None).unwrap().ends_with("· Fallo"));
+        assert!(tirar_dado_de(&state, ID_HOST, "1d6", true, None).unwrap().matches('·').count() == 0, "una tirada normal no se valora");
+        assert_eq!(state.lock().historial_tiradas[0].acierta, None);
+
+        // Con la escala de Cthulhu un 1 natural que acierta es «Crítico»; lo demás, un nivel o «Éxito»
+        guardar_escala_resultado_en(Some(cthulhu.clone()), &state).unwrap();
+        for _ in 0..30 {
+            tirar_dado_de(&state, ID_HOST, "1d100 <= 100", true, None).unwrap();
+            let t = state.lock().historial_tiradas[0].clone();
+            assert!(["Crítico", "Éxito extremo", "Éxito difícil", "Éxito"].contains(&t.veredicto.as_str()), "{t:?}");
+            assert_eq!(t.especial, t.veredicto == "Crítico");
+        }
+        // Los dos lados pueden tirar; con el número a la izquierda, el sujeto es el dado
+        assert!(tirar_dado_de(&state, ID_HOST, "1d20 + 50 >= 1d20", true, None).is_ok());
+        assert!(tirar_dado_de(&state, ID_HOST, "100 >= 1d100", true, None).unwrap().contains("· "));
+        assert!(tirar_dado_de(&state, ID_HOST, "1d20 vs 5 vs 6", true, None).is_err());
+        // Guardar lo mismo no registra nada; una escala rota se rechaza
+        let seq = state.lock().ultimo_seq;
+        guardar_escala_resultado_en(Some(cthulhu.clone()), &state).unwrap();
+        assert_eq!(state.lock().ultimo_seq, seq);
+        let mut rota = cthulhu.clone();
+        rota.tramos[0].numerador = 0;
+        assert!(guardar_escala_resultado_en(Some(rota), &state).is_err());
+        assert_eq!(state.lock().escala_resultado, Some(cthulhu.clone()));
+
+        // Cada conjunto guarda la suya: al pasar a otro sin escala se pierde de vista y al volver se recupera
+        crate::tablero_general::partida::procesar_delta(&state, DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd(), valores: Default::default() }));
+        crate::tablero_general::partida::procesar_delta(&state, DeltaPartida::ConjuntoActivado(2));
+        assert_eq!(state.lock().escala_resultado, None);
+        assert!(tirar_dado_de(&state, ID_HOST, "1d100 <= 100", true, None).unwrap().ends_with("· Éxito"));
+        crate::tablero_general::partida::procesar_delta(&state, DeltaPartida::ConjuntoActivado(1));
+        assert_eq!(state.lock().escala_resultado, Some(cthulhu.clone()));
+        // Quitar la escala
+        guardar_escala_resultado_en(None, &state).unwrap();
+        assert_eq!(state.lock().escala_resultado, None);
+    }
+
+    #[test]
+    fn la_escala_se_exporta_importa_valida_y_las_partidas_viejas_no_la_traen() {
+        use crate::tablero_general::escalas::ejemplos;
+        let mut c = conjunto_dnd();
+        c.escala_resultado = ejemplos().into_iter().find(|e| e.clave == "dnd").map(|e| e.escala);
+        let limpio = validar(c.clone()).unwrap();
+        assert_eq!(de_archivo(&a_archivo(&limpio).unwrap()).unwrap(), limpio);
+        // Una escala rota rechaza todo el conjunto
+        let mut mala = c.clone();
+        mala.escala_resultado.as_mut().unwrap().nombre_exito = String::new();
+        assert!(validar(mala).is_err());
+        // Un archivo o una partida de antes de la escala se leen igual (sin ella)
+        let sin: ConjuntoParametros = serde_json::from_str(r#"{"nombre":"Viejo"}"#).unwrap();
+        assert_eq!(sin.escala_resultado, None);
+        let e: EstadoPartida = serde_json::from_str(&serde_json::to_string(&EstadoPartida::default()).unwrap().replace(",\"escala_resultado\":null", "")).unwrap();
+        assert_eq!(e.escala_resultado, None);
+        // La escala viva forma parte del contenido del conjunto activo
+        let mut e = EstadoPartida::default();
+        e.escala_resultado = c.escala_resultado.clone();
+        assert_eq!(e.contenido_de(1).unwrap().escala_resultado, c.escala_resultado);
     }
 
     #[test]

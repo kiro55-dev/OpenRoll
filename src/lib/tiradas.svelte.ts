@@ -17,17 +17,19 @@ export interface Tirada {
   autor?: string;
   /** `false`: solo la ve el host (una tirada privada). */
   publica?: boolean;
-  /** Solo en una tirada `vs` (`1d100 vs acro`): el resultado frente al objetivo. Son palabras fijas de Rust. */
+  /** Solo en una comparación (`1d100 <= acro`): el resultado, con el nombre que le da la escala del conjunto. */
   veredicto?: string;
+  /** Si la comparación acertó. */
+  acierta?: boolean | null;
+  /** El resultado salió de una regla del dado natural (crítico, pifia...). */
+  especial?: boolean;
 }
 
-/** La clase de color de un veredicto de una tirada `vs`. */
-export function claseVeredicto(v: string | undefined): string {
-  if (!v) return "";
-  if (v === "Crítico") return "critico";
-  if (v === "Pifia") return "pifia";
-  if (v === "Fallo") return "fallo";
-  return "exito";
+/** La clase de color de un veredicto: acierto o fallo, y dorado o rojo si es una regla del dado natural (crítico o pifia). */
+export function claseVeredicto(acierta: boolean | null | undefined, especial: boolean | undefined): string {
+  if (acierta === null || acierta === undefined) return "";
+  if (especial) return acierta ? "critico" : "pifia";
+  return acierta ? "exito" : "fallo";
 }
 
 const MAX_TIRADAS = 20;
@@ -137,8 +139,8 @@ class Tiradas {
   /** Carga el historial guardado en Rust. */
   async cargar() {
     // El chat es de todos: cada tirada lleva el nombre de quien la hizo (`autor`, vacío si fue el host)
-    const guardadas = await invoke<{ hora: string; comando: string; total: number; autor?: string; publica?: boolean; veredicto?: string }[]>("obtener_historial_tiradas");
-    this.historial = guardadas.map((t) => ({ hora: t.hora, comando: t.comando, total: t.total, autor: t.autor ?? "", publica: t.publica ?? true, veredicto: t.veredicto ?? "" }));
+    const guardadas = await invoke<{ hora: string; comando: string; total: number; autor?: string; publica?: boolean; veredicto?: string; acierta?: boolean | null; especial?: boolean }[]>("obtener_historial_tiradas");
+    this.historial = guardadas.map((t) => ({ hora: t.hora, comando: t.comando, total: t.total, autor: t.autor ?? "", publica: t.publica ?? true, veredicto: t.veredicto ?? "", acierta: t.acierta ?? null, especial: t.especial ?? false }));
     this.#salirDelHistorial(); // los comandos anteriores (↑ ↓) también son de la partida abierta
   }
 

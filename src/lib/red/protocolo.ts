@@ -22,8 +22,12 @@ export interface TiradaChat {
   hora: string;
   jugador: number;
   autor: string;
-  /** Solo en una tirada `vs`: «Éxito difícil», «Fallo»... (palabras fijas de Rust). */
+  /** Solo en una comparación (`1d100 <= acro`): «Éxito difícil», «Fallo»... con el nombre que le da la escala del conjunto. */
   veredicto?: string;
+  /** Si la comparación acertó (para pintarla). */
+  acierta?: boolean | null;
+  /** El resultado salió de una regla del dado natural (crítico, pifia...). */
+  especial?: boolean;
 }
 
 /** `red::vista::VistaJugador`: lo que ve este jugador de la partida (lo mismo que lee la app, filtrado). */

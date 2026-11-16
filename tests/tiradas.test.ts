@@ -361,3 +361,27 @@ describe("historial de comandos con ↑ y ↓", () => {
     expect(tiradas.comando).toBe("");
   });
 });
+
+describe("el veredicto de una comparación (`1d100 <= 45`)", () => {
+  it("se pinta según haya acertado y si salió de una regla del dado natural", async () => {
+    const { claseVeredicto } = await nuevoStore();
+    expect(claseVeredicto(true, false)).toBe("exito");
+    expect(claseVeredicto(false, false)).toBe("fallo");
+    expect(claseVeredicto(true, true)).toBe("critico");
+    expect(claseVeredicto(false, true)).toBe("pifia");
+    // Una tirada normal (sin comparación) no se pinta
+    expect(claseVeredicto(null, false)).toBe("");
+    expect(claseVeredicto(undefined, undefined)).toBe("");
+  });
+
+  it("el historial trae el nombre y si acertó; el de una tirada normal queda vacío", async () => {
+    const { tiradas } = await nuevoStore();
+    chat = [
+      { hora: "10:00", comando: "1d100 (30) <= acro (60)", total: 30, autor: "", veredicto: "Éxito difícil", acierta: true, especial: false },
+      { hora: "10:01", comando: "1d6 (3)", total: 3, autor: "" }
+    ] as any;
+    await tiradas.cargar();
+    expect(tiradas.historial[0]).toMatchObject({ veredicto: "Éxito difícil", acierta: true, especial: false });
+    expect(tiradas.historial[1]).toMatchObject({ veredicto: "", acierta: null, especial: false });
+  });
+});
