@@ -34,7 +34,7 @@
     bind:this={input}
     bind:value={tiradas.comando}
     placeholder="Escribir comando (ej: 2d6 + 3)..."
-    title={ayuda("Comparar: 1d100 <= 45 (por debajo), 1d20 >= 12 (superar) o 1d100 vs acro (igual que <=). El host puede nombrar el resultado en Parámetros > Resultados")}
+    title={ayuda("Comparar una tirada con un objetivo: 1d20 >= 12 (iguala o supera), 1d20 > 12 (supera), 1d100 <= 45 (iguala o baja), 1d100 < 45 (baja) o 1d100 vs acro (igual que <=). El host puede nombrar el resultado en Parámetros > Resultados")}
     onkeydown={alTeclear}
     class="input-chat"
   />

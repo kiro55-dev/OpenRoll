@@ -162,7 +162,7 @@
       <BarraDados
         onSumarAlChat={(fragmento: string) => tiradas.sumarDado(fragmento)}
         onRestarDelChat={(fragmento: string) => tiradas.restarDado(fragmento)}
-        onLanzarTirada={(bonificador: number | null) => tiradas.tirarConBonificador(bonificador)}
+        onLanzarTirada={(bonificador: number | string | null, objetivo: number | string | null) => tiradas.tirarConBonificador(bonificador, objetivo)}
       />
     </div>
     {#if partida.avisos}

@@ -928,6 +928,10 @@ mod tests {
         assert_eq!((ultima.veredicto.as_str(), ultima.acierta, ultima.especial), ("Éxito", Some(true), false));
         assert!(ultima.comando.contains(" <= 100"), "{}", ultima.comando);
         assert!(tirar_dado_de(&state, ID_HOST, "1d20 >= 21", true, None).unwrap().ends_with("· Fallo"));
+        assert!(tirar_dado_de(&state, ID_HOST, "1d20 > 20", true, None).unwrap().ends_with("· Fallo"), "un estricto no acierta igualando");
+        assert!(tirar_dado_de(&state, ID_HOST, "1d20 < 21", true, None).unwrap().ends_with("· Éxito"));
+        assert!(state.lock().historial_tiradas[0].comando.contains(" < 21"));
+        assert!(tirar_dado_de(&state, ID_HOST, "1d20 >", true, None).unwrap_err().contains("objetivo"));
         assert!(tirar_dado_de(&state, ID_HOST, "1d6", true, None).unwrap().matches('·').count() == 0, "una tirada normal no se valora");
         assert_eq!(state.lock().historial_tiradas[0].acierta, None);
 

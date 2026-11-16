@@ -348,7 +348,7 @@ pub struct EscalaResultado {
     /// Cómo se llama acertar sin más y fallar sin más.
     pub nombre_exito: String,
     pub nombre_fallo: String,
-    /// Solo con `<=`: niveles de acierto según qué parte del objetivo alcanza el total, del más estricto al más laxo.
+    /// Solo por debajo (`<`, `<=`): niveles de acierto según qué parte del objetivo alcanza el total, del más estricto al más laxo.
     #[serde(default)]
     pub tramos: Vec<TramoEscala>,
     /// Críticos y pifias: reglas sobre la cara que sale en un dado suelto. La primera que casa gana.

@@ -47,12 +47,167 @@ export function comandoConBonificador(comando: string, bonificador: number | str
   return signo === "+" || signo === "-" ? `${comando} ${signo} ${extra.slice(1).trim()}` : `${comando} + ${extra}`;
 }
 
+/** Las comparaciones del chat (`1d100 <= 45`, `1d20 > 12`, `vs` = `<=`). Espejo de `dados::dividir_comparacion` en Rust. */
+export type Comparacion = "<" | "<=" | ">" | ">=";
+
+/** Un comando partido por su comparación: la tirada (izquierda), el operador como se escribió, ya normalizado, y el objetivo. */
+export interface ComandoComparado {
+  izq: string;
+  /** Tal cual está escrito (`vs` incluido). */
+  texto: string;
+  /** `vs` cuenta como `<=`. */
+  op: Comparacion;
+  der: string;
+}
+
+const RE_COMPARACION = /<=|>=|<|>|(?<![A-Za-z])vs(?![A-Za-z])/gi;
+
+/**
+ * Parte el comando por su comparación. `null` si no hay ninguna o si hay más de una (Rust da el error al tirar: aquí no se
+ * toca nada de lo escrito).
+ */
+export function dividirComparacion(comando: string): ComandoComparado | null {
+  const hallazgos = [...comando.matchAll(RE_COMPARACION)];
+  if (hallazgos.length !== 1) return null;
+  const h = hallazgos[0];
+  const texto = h[0];
+  const op = (texto.toLowerCase() === "vs" ? "<=" : texto) as Comparacion;
+  return { izq: comando.slice(0, h.index), texto, op, der: comando.slice((h.index ?? 0) + texto.length) };
+}
+
+/** ¿Tiene más de una comparación? (entonces no se toca nada: está mal escrito y Rust lo dirá al tirar) */
+const variasComparaciones = (comando: string) => [...comando.matchAll(RE_COMPARACION)].length > 1;
+
+/** Aplica `f` solo a la tirada (el lado izquierdo) si el comando tiene una comparación; si no, a todo. */
+function sobreLaTirada(comando: string, f: (tirada: string) => string): string {
+  if (variasComparaciones(comando)) return comando;
+  const c = dividirComparacion(comando);
+  if (!c) return f(comando);
+  const izq = f(c.izq).trim();
+  if (!izq) return ""; // se quitó el último dado: sin tirada no queda comparación
+  const der = c.der.trim();
+  return der ? `${izq} ${c.texto} ${der}` : `${izq} ${c.texto} `;
+}
+
+/**
+ * Pone (o cambia, o quita) la comparación del comando: solo puede haber una. Sin comparación la añade al final (con el chat
+ * vacío no hace nada: antes hace falta un dado); con otra distinta la SUSTITUYE conservando los dos lados; y pulsar la que ya
+ * está la quita, junto con lo que hubiera a su derecha (un objetivo sin comparación no vale nada).
+ */
+export function ponerComparacion(comando: string, op: Comparacion): string {
+  if (!comando.trim() || variasComparaciones(comando)) return comando;
+  const c = dividirComparacion(comando);
+  if (!c) return `${comando.trim()} ${op} `;
+  if (c.op === op && c.texto === op) return c.izq.trim();
+  const der = c.der.trim();
+  return der ? `${c.izq.trim()} ${op} ${der}` : `${c.izq.trim()} ${op} `;
+}
+
+/**
+ * El comando que sale al pulsar TIRAR en la barra de dados. Sin comparación: lo escrito más el bonificador, de siempre (el
+ * objetivo no se usa). Con ella, el bonificador va en la tirada (el lado IZQUIERDO) y el objetivo de la barra ocupa el derecho,
+ * pero solo si ese está vacío: lo escrito a mano manda. `1d20 >=` + bonificador 3 + objetivo 12 → `1d20 + 3 >= 12`.
+ */
+export function comandoParaTirar(comando: string, bonificador: number | string | null, objetivo: number | string | null): string {
+  const c = variasComparaciones(comando) ? null : dividirComparacion(comando);
+  if (!c) return comandoConBonificador(comando, bonificador);
+  const der = c.der.trim() || String(objetivo ?? "").trim();
+  return `${comandoConBonificador(c.izq.trim(), bonificador)} ${c.texto} ${der}`.trim();
+}
+
+/** Los términos de dados de un texto (`5d20`, `1d6adv`...), con su posición. Los límites evitan tocar nombres de variables. */
+const RE_DADO = /(?<![A-Za-z0-9])(\d*)d(\d+)(adv|desv|dis)?(?![A-Za-z0-9])/gi;
+
+/** El término de dados al que afecta Vent/Desv: el último de ese dado (`caras`) o, si no hay, el último de todos. */
+function terminoDeDado(tirada: string, caras: string | null): RegExpMatchArray | null {
+  const todos = [...tirada.matchAll(RE_DADO)];
+  return (caras ? todos.filter((m) => m[2] === caras).at(-1) : undefined) ?? todos.at(-1) ?? null;
+}
+
+export type ModificadorDado = "adv" | "desv";
+
+/** El modificador que tiene ahora el dado afectado (`dis` es otra forma de `desv`), o `null`. */
+export function modificadorDelDado(comando: string, caras: string | null): ModificadorDado | null {
+  const c = variasComparaciones(comando) ? null : dividirComparacion(comando);
+  const m = terminoDeDado(c ? c.izq : comando, caras);
+  const s = m?.[3]?.toLowerCase();
+  return s === "adv" ? "adv" : s ? "desv" : null;
+}
+
+/**
+ * Ventaja o desventaja sobre el ÚLTIMO dado puesto en el chat (`5d20` → `5d20adv`): sin modificador lo pone; el mismo otra vez
+ * lo quita; el contrario lo sustituye. Sin dados, o con la comparación mal escrita, no hace nada. Con una comparación solo mira
+ * la tirada (a su izquierda).
+ */
+export function aplicarModificadorAlDado(comando: string, modificador: ModificadorDado, caras: string | null = null): string {
+  return sobreLaTirada(comando, (tirada) => {
+    const m = terminoDeDado(tirada, caras);
+    if (!m || m.index === undefined) return tirada;
+    const actual = m[3]?.toLowerCase();
+    const nuevo = (actual === "adv" ? "adv" : actual ? "desv" : null) === modificador ? "" : modificador;
+    // Si ya hay otro grupo igual de ese dado (con el mismo modificador), el término se junta con él: 1d20adv + 1d20adv → 2d20adv
+    return agruparDados(tirada.slice(0, m.index) + `${m[1]}d${m[2]}${nuevo}` + tirada.slice(m.index + m[0].length));
+  });
+}
+
+/**
+ * Junta los términos de dados iguales (mismo signo, mismo dado y mismo modificador) sumando sus cantidades: `1d20adv + 1d20adv` →
+ * `2d20adv`. Solo lo hace si hay algo que juntar (si no, devuelve el texto tal cual); no toca términos con multiplicador
+ * (`2*3d20`) ni los que no son dados.
+ */
+export function agruparDados(tirada: string): string {
+  const trozos = tirada.split(/([+-])/);
+  const terminos: { signo: string; texto: string; cantidad?: number; clave?: string }[] = [];
+  let signo = "+";
+  for (let k = 0; k < trozos.length; k++) {
+    if (k % 2 === 1) {
+      signo = trozos[k];
+      continue;
+    }
+    const texto = trozos[k].trim();
+    if (!texto && k === 0) continue; // un comando que empieza con «-»
+    const m = texto.match(/^(\d*)d(\d+)(adv|desv|dis)?$/i);
+    if (!m) {
+      terminos.push({ signo, texto });
+      continue;
+    }
+    const sufijo = m[3]?.toLowerCase() === "adv" ? "adv" : m[3] ? "desv" : "";
+    terminos.push({ signo, texto, cantidad: m[1] ? parseInt(m[1]) : 1, clave: `${signo}d${m[2]}${sufijo}` });
+  }
+  const juntos: typeof terminos = [];
+  let hubo = false;
+  for (const t of terminos) {
+    const igual = t.clave ? juntos.find((x) => x.clave === t.clave) : undefined;
+    if (igual) {
+      igual.cantidad = (igual.cantidad ?? 1) + (t.cantidad ?? 1);
+      hubo = true;
+    } else {
+      juntos.push({ ...t });
+    }
+  }
+  if (!hubo) return tirada;
+  return juntos
+    .map((t, k) => {
+      const cuerpo = t.clave ? `${t.cantidad}${t.texto.replace(/^\d*/, "")}` : t.texto;
+      return k === 0 ? (t.signo === "-" ? `- ${cuerpo}` : cuerpo) : `${t.signo === "-" ? "-" : "+"} ${cuerpo}`;
+    })
+    .join(" ")
+    .trim();
+}
+
 /**
  * Añade (`esSuma`) o quita un dado al comando del chat, agrupando los iguales:
  * "1d20" + "1d6" -> "1d20 + 1d6"; otra vez "1d6" -> "1d20 + 2d6"; restando se va reduciendo
- * hasta desaparecer. Función pura (no toca el estado) para poder probarla.
+ * hasta desaparecer. Solo cuenta el término del mismo dado Y con el mismo modificador: pulsar d20 con un `1d20adv` en el chat añade
+ * un `1d20` aparte (sin ventaja); luego Vent sobre ese último lo junta con el que ya existe. Con una comparación, solo toca la
+ * tirada (a su izquierda).
+ * Función pura (no toca el estado) para poder probarla.
  */
 export function aplicarDadoAlComando(comando: string, fragmento: string, esSuma: boolean): string {
+  return sobreLaTirada(comando, (tirada) => aplicarDadoALaTirada(tirada, fragmento, esSuma));
+}
+
+function aplicarDadoALaTirada(comando: string, fragmento: string, esSuma: boolean): string {
   const matchFrag = fragmento.match(/^(\d*)d(\d+)([!a-z]*)$/i);
   if (!matchFrag) return comando;
 
@@ -125,6 +280,9 @@ class Tiradas {
   comando = $state("");
   /** Solo el host: si las tiradas que hace las ven los jugadores (casilla de la barra de dados). */
   publica = $state(true);
+  /** Las caras del último dado pulsado en la barra (`"20"`): es al que se aplican Vent y Desv. Se limpia al tirar. */
+  #ultimoDado: string | null = null;
+
   /** La instancia con el foco (una sola), de la que salen las variables de una tirada (`2d6 + f`). La pone
    *  `partida.svelte.ts` (que ya importa este store: así no se importan el uno al otro). */
   fichaConFoco: () => number | null = () => null;
@@ -149,13 +307,37 @@ class Tiradas {
   // ------------------------------------------------------------------
 
   sumarDado(fragmento: string) {
+    this.#ultimoDado = fragmento.match(/d(\d+)/i)?.[1] ?? this.#ultimoDado;
     this.comando = aplicarDadoAlComando(this.comando, fragmento, true);
     this.#enfocar?.();
   }
 
   restarDado(fragmento: string) {
+    this.#ultimoDado = fragmento.match(/d(\d+)/i)?.[1] ?? this.#ultimoDado;
     this.comando = aplicarDadoAlComando(this.comando, fragmento, false);
     this.#enfocar?.();
+  }
+
+  /** Botones Vent / Desv: ponen, cambian o quitan el modificador del último dado puesto en el chat. */
+  alternarModificador(modificador: ModificadorDado) {
+    this.comando = aplicarModificadorAlDado(this.comando, modificador, this.#ultimoDado);
+    this.#enfocar?.();
+  }
+
+  /** El modificador que tiene ahora el dado al que afectan Vent y Desv (para marcar el botón). */
+  get modificadorActivo(): ModificadorDado | null {
+    return modificadorDelDado(this.comando, this.#ultimoDado);
+  }
+
+  /** Botones `<=` y `>=`: escriben la comparación en el chat (solo hay una: la nueva sustituye a la anterior; la misma la quita). */
+  alternarComparacion(op: Comparacion) {
+    this.comando = ponerComparacion(this.comando, op);
+    this.#enfocar?.();
+  }
+
+  /** La comparación que hay escrita en el chat (para marcar su botón), o `null`. */
+  get comparacionActiva(): Comparacion | null {
+    return dividirComparacion(this.comando)?.op ?? null;
   }
 
   /** La caja de texto se registra aquí para que otros puedan pedirle el foco. Devuelve cómo darse de baja. */
@@ -175,16 +357,18 @@ class Tiradas {
     const cmd = this.comando.trim();
     if (!cmd) return;
     this.comando = "";
+    this.#ultimoDado = null;
     this.#salirDelHistorial();
     await this.tirar(cmd);
   }
 
-  /** Botón TIRAR de la barra de dados: lo escrito más el bonificador, que puede ser un número o texto del chat
-   *  (`f`, `-fuerza`, `2 + f`). */
-  async tirarConBonificador(bonificador: number | string | null) {
+  /** Botón TIRAR de la barra de dados: lo escrito más el bonificador (un número o texto del chat: `f`, `-fuerza`, `2 + f`) y,
+   *  si hay una comparación, el objetivo de la barra (ver `comandoParaTirar`). */
+  async tirarConBonificador(bonificador: number | string | null, objetivo: number | string | null = null) {
     if (!this.comando.trim()) return;
-    const final = comandoConBonificador(this.comando, bonificador);
+    const final = comandoParaTirar(this.comando, bonificador, objetivo);
     this.comando = "";
+    this.#ultimoDado = null;
     this.#salirDelHistorial();
     await this.tirar(final);
   }

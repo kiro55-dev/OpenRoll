@@ -26,20 +26,40 @@ pub const MAX_UMBRAL: i32 = 9999;
 const EXITO: &str = "Éxito";
 const FALLO: &str = "Fallo";
 
-/// En qué sentido se compara: `<=` (tirar por debajo, como Cthulhu) o `>=` (superar un umbral, como una CD de D&D).
+/// En qué sentido se compara: por debajo (`<`, `<=`: tirar bajo la habilidad, como Cthulhu) o por encima (`>`, `>=`: superar un
+/// umbral, como una CD de D&D). Con `=` se acierta igualando; sin él, hay que pasarse.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operador {
+    Menor,
     MenorIgual,
+    Mayor,
     MayorIgual,
 }
 
 impl Operador {
-    /// El mismo operador con los lados cambiados de sitio (`12 >= 1d20` es `1d20 <= 12`).
+    /// El mismo operador con los lados cambiados de sitio (`12 >= 1d20` es `1d20 <= 12`; `12 > 1d20` es `1d20 < 12`).
     pub fn invertido(self) -> Self {
         match self {
+            Operador::Menor => Operador::Mayor,
             Operador::MenorIgual => Operador::MayorIgual,
+            Operador::Mayor => Operador::Menor,
             Operador::MayorIgual => Operador::MenorIgual,
         }
+    }
+
+    /// Cómo se escribe (para el desglose de la tirada).
+    pub fn simbolo(self) -> &'static str {
+        match self {
+            Operador::Menor => "<",
+            Operador::MenorIgual => "<=",
+            Operador::Mayor => ">",
+            Operador::MayorIgual => ">=",
+        }
+    }
+
+    /// ¿Se acierta quedándose por debajo del objetivo? (los niveles de una escala solo valen así)
+    pub fn por_debajo(self) -> bool {
+        matches!(self, Operador::Menor | Operador::MenorIgual)
     }
 }
 
@@ -54,10 +74,12 @@ pub struct Valoracion {
 }
 
 /// Valora `total` frente a `objetivo` con el operador `op`. `natural` es `(cara, caras)` cuando el total sale de UN solo dado normal.
-/// Con `<=` un objetivo de 0 o menos siempre falla.
+/// Por debajo (`<`, `<=`), un objetivo de 0 o menos siempre falla.
 pub fn valorar(escala: Option<&EscalaResultado>, op: Operador, total: i32, objetivo: i32, natural: Option<(i32, i32)>) -> Valoracion {
     let mut acierta = match op {
+        Operador::Menor => objetivo > 0 && total < objetivo,
         Operador::MenorIgual => objetivo > 0 && total <= objetivo,
+        Operador::Mayor => total > objetivo,
         Operador::MayorIgual => total >= objetivo,
     };
     let Some(escala) = escala else {
@@ -87,7 +109,7 @@ pub fn valorar(escala: Option<&EscalaResultado>, op: Operador, total: i32, objet
         return Valoracion { nombre: escala.nombre_fallo.clone(), acierta, especial: false };
     }
     // Los niveles de acierto solo cuentan al tirar por debajo (qué parte del objetivo se alcanza)
-    if op == Operador::MenorIgual {
+    if op.por_debajo() {
         let nivel = escala.tramos.iter().find(|t| {
             i64::from(total) * i64::from(t.denominador.max(1)) <= i64::from(objetivo) * i64::from(t.numerador)
         });
@@ -235,7 +257,7 @@ pub fn guardar_escala_resultado_en(escala: Option<EscalaResultado>, state: &AppS
 #[cfg(test)]
 mod tests {
     use super::*;
-    use Operador::{MayorIgual, MenorIgual};
+    use Operador::{Mayor, MayorIgual, Menor, MenorIgual};
 
     fn cthulhu() -> EscalaResultado {
         ejemplos().into_iter().find(|e| e.clave == "cthulhu").unwrap().escala
@@ -348,6 +370,24 @@ mod tests {
     fn el_operador_se_invierte_al_cambiar_los_lados() {
         assert_eq!(MenorIgual.invertido(), MayorIgual);
         assert_eq!(MayorIgual.invertido(), MenorIgual);
+        assert_eq!(Menor.invertido(), Mayor);
+        assert_eq!(Mayor.invertido(), Menor);
+        assert_eq!([Menor, MenorIgual, Mayor, MayorIgual].map(Operador::simbolo), ["<", "<=", ">", ">="]);
+        assert_eq!([Menor, MenorIgual, Mayor, MayorIgual].map(Operador::por_debajo), [true, true, false, false]);
+    }
+
+    #[test]
+    fn los_estrictos_no_aciertan_en_el_borde() {
+        let v = |op, total, objetivo| valorar(None, op, total, objetivo, None).acierta;
+        assert!(v(MenorIgual, 45, 45) && !v(Menor, 45, 45) && v(Menor, 44, 45));
+        assert!(v(MayorIgual, 12, 12) && !v(Mayor, 12, 12) && v(Mayor, 13, 12));
+        assert!(!v(Menor, 1, 0), "por debajo de un objetivo de 0 no se acierta");
+        // Los niveles de una escala valen también con `<`
+        let c = cthulhu();
+        assert_eq!(valorar(Some(&c), Menor, 11, 60, None).nombre, "Éxito extremo");
+        assert_eq!(valorar(Some(&c), Menor, 60, 60, None).nombre, "Fallo");
+        // Y no con `>`
+        assert_eq!(valorar(Some(&c), Mayor, 13, 12, None).nombre, "Éxito");
     }
 
     #[test]

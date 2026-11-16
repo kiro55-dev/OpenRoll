@@ -305,8 +305,9 @@ fn ejecutar_con_natural(tiradas: &[Tirada]) -> Result<(String, i32, Option<(i32,
     Ok((resultado, total, if un_dado_normal { natural } else { None }))
 }
 
-/// Parte un comando en sus dos lados por una comparación suelta: `<=`, `>=` o `vs` (azúcar de `<=`): `1d100 vs acro`,
-/// `1d20 + 2 >= 12`. Sin comparación, todo es tirada. Un `vs` pegado a letras (parte de un nombre) no cuenta, y solo puede haber una.
+/// Parte un comando en sus dos lados por una comparación suelta: `<=`, `>=`, `<`, `>` o `vs` (azúcar de `<=`): `1d100 vs acro`,
+/// `1d20 + 2 >= 12`. Sin comparación, todo es tirada. Un `vs` pegado a letras (parte de un nombre) no cuenta, solo puede haber una
+/// comparación y le tienen que quedar los dos lados escritos.
 fn dividir_comparacion(comando: &str) -> Result<(&str, Option<(Operador, &str)>), String> {
     let mut encontrada: Option<(usize, usize, Operador)> = None; // (dónde empieza, cuánto mide, cuál)
     let mut poner = |inicio: usize, largo: usize, op: Operador| -> Result<(), String> {
@@ -328,6 +329,10 @@ fn dividir_comparacion(comando: &str) -> Result<(&str, Option<(Operador, &str)>)
         } else if resto.starts_with(">=") {
             poner(i, 2, Operador::MayorIgual)?;
             saltar = i + 2;
+        } else if c == '<' {
+            poner(i, 1, Operador::Menor)?;
+        } else if c == '>' {
+            poner(i, 1, Operador::Mayor)?;
         } else if (c == 'v' || c == 'V') && resto.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("vs")) {
             let antes = comando[..i].chars().next_back().is_some_and(char::is_alphabetic);
             let despues = comando[i + 2..].chars().next().is_some_and(char::is_alphabetic);
@@ -337,10 +342,15 @@ fn dividir_comparacion(comando: &str) -> Result<(&str, Option<(Operador, &str)>)
             }
         }
     }
-    Ok(match encontrada {
-        Some((i, largo, op)) => (&comando[..i], Some((op, &comando[i + largo..]))),
-        None => (comando, None),
-    })
+    let Some((i, largo, op)) = encontrada else { return Ok((comando, None)) };
+    let (izquierda, derecha) = (&comando[..i], &comando[i + largo..]);
+    if izquierda.trim().is_empty() {
+        return Err("Falta la tirada a la izquierda de la comparación".into());
+    }
+    if derecha.trim().is_empty() {
+        return Err("Falta el objetivo de la comparación (un número o una variable)".into());
+    }
+    Ok((izquierda, Some((op, derecha))))
 }
 
 /// Un lado de una comparación, ya tirado.
@@ -407,8 +417,7 @@ pub fn tirar_dado_de(
             let lado_derecho = tirar_lado(&parsear_comando(derecha, &mut resolver)?)?;
             let (total, objetivo, op_sujeto, natural) = sujeto_y_objetivo(&lado_izquierdo, op, &lado_derecho);
             let valoracion = escalas::valorar(state.lock().escala_resultado.as_ref(), op_sujeto, total, objetivo, natural);
-            let simbolo = if op == Operador::MenorIgual { "<=" } else { ">=" };
-            (format!("{} {simbolo} {}", lado_izquierdo.desglose, lado_derecho.desglose), total, Some(valoracion))
+            (format!("{} {} {}", lado_izquierdo.desglose, op.simbolo(), lado_derecho.desglose), total, Some(valoracion))
         }
     };
 
@@ -487,7 +496,11 @@ mod tests {
 
     #[test]
     fn las_comparaciones_separan_los_lados_sin_confundirse_con_nombres() {
-        use Operador::{MayorIgual, MenorIgual};
+        use Operador::{Mayor, MayorIgual, Menor, MenorIgual};
+        assert_eq!(dividir_comparacion("1d20 > 12").unwrap(), ("1d20 ", Some((Mayor, " 12"))));
+        assert_eq!(dividir_comparacion("1d100<45").unwrap(), ("1d100", Some((Menor, "45"))));
+        assert_eq!(dividir_comparacion("1d20+2>=1d20").unwrap(), ("1d20+2", Some((MayorIgual, "1d20"))), "el = no cuenta como otra comparación");
+        assert_eq!(dividir_comparacion("1d20 <= 5").unwrap().1.unwrap().0, MenorIgual);
         assert_eq!(dividir_comparacion("1d100 vs 45").unwrap(), ("1d100 ", Some((MenorIgual, " 45"))));
         assert_eq!(dividir_comparacion("1d100VS acro").unwrap(), ("1d100", Some((MenorIgual, " acro"))));
         assert_eq!(dividir_comparacion("1d100vs45").unwrap(), ("1d100", Some((MenorIgual, "45"))));
@@ -497,8 +510,13 @@ mod tests {
         assert_eq!(dividir_comparacion("1d20 + avs").unwrap(), ("1d20 + avs", None), "pegado a letras es un nombre");
         assert_eq!(dividir_comparacion("1d20 + vsa").unwrap(), ("1d20 + vsa", None));
         assert_eq!(dividir_comparacion("1d6").unwrap(), ("1d6", None));
-        for dos in ["1d100 vs 40 vs 30", "1d20 >= 10 <= 15", "1d20 >= 10 vs 3", "1d20 <= <= 3"] {
+        for dos in ["1d100 vs 40 vs 30", "1d20 >= 10 <= 15", "1d20 >= 10 vs 3", "1d20 <= <= 3", "1d20 < 5 > 2", "1d20 <> 5"] {
             assert!(dividir_comparacion(dos).is_err(), "{dos}");
+        }
+        // Le tienen que quedar los dos lados
+        for (sin_lado, falta) in [("1d20 >=", "objetivo"), ("1d20 vs  ", "objetivo"), (">= 12", "izquierda"), ("< 3", "izquierda")] {
+            let e = dividir_comparacion(sin_lado).unwrap_err();
+            assert!(e.contains(falta), "{sin_lado}: {e}");
         }
     }
 
