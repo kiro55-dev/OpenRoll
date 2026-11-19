@@ -675,15 +675,141 @@ pub fn importar_conjunto(ruta: String, state: State<'_, AppState>) -> Result<u16
 }
 
 pub fn importar_conjunto_en(ruta: &str, state: &AppState) -> Result<u16, String> {
-    let origen = Path::new(ruta);
+    let contenido = leer_archivo(Path::new(ruta))?;
+    let mut est = state.lock();
+    Ok(anadir(&mut est, state, None, contenido)?.id)
+}
+
+/// Lee y valida un archivo de conjunto del disco (tamaño máximo comprobado ANTES de leerlo).
+fn leer_archivo(origen: &Path) -> Result<ConjuntoParametros, String> {
     let tam = std::fs::metadata(origen).map_err(|e| format!("No se pudo abrir el archivo: {e}"))?.len();
     if tam > MAX_BYTES_ARCHIVO {
         return Err(format!("El archivo es demasiado grande para ser un conjunto de parámetros (máx. {} KiB)", MAX_BYTES_ARCHIVO / 1024));
     }
     let texto = std::fs::read_to_string(origen).map_err(|_| "El archivo no es un conjunto de parámetros de OpenRoll".to_string())?;
-    let contenido = de_archivo(&texto)?;
+    de_archivo(&texto)
+}
+
+// ------------------------------------------------------------------
+// Biblioteca: los conjuntos propios del host, compartidos entre TODAS sus partidas
+// ------------------------------------------------------------------
+// Son archivos del mismo formato que exportar/importar, en `<datos de la app>/biblioteca_conjuntos/`, fuera de las partidas
+// (como `red.json`, es de este equipo). Usar uno de la biblioteca lo COPIA a la partida, igual que los de serie: la partida
+// sigue siendo independiente y su log no depende de estos archivos.
+
+const DIR_BIBLIOTECA: &str = "biblioteca_conjuntos";
+/// Máximo de conjuntos en la biblioteca (que nadie la llene sin querer).
+const MAX_BIBLIOTECA: usize = 200;
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct ResumenBiblioteca {
+    /// Nombre del archivo dentro de la carpeta (es lo que identifica la entrada).
+    pub archivo: String,
+    pub nombre: String,
+    pub descripcion: String,
+    pub parametros: usize,
+    pub variables: usize,
+}
+
+fn dir_biblioteca(raiz: &Path) -> std::path::PathBuf {
+    raiz.join(DIR_BIBLIOTECA)
+}
+
+/// La ruta de una entrada de la biblioteca a partir de su nombre de archivo, sin salirse de la carpeta.
+fn ruta_biblioteca(raiz: &Path, archivo: &str) -> Result<std::path::PathBuf, String> {
+    if !archivo.to_lowercase().ends_with(".json") {
+        return Err("Ese conjunto de la biblioteca no es válido".into());
+    }
+    crate::tablero_general::archivos::ruta_segura(raiz, &format!("{DIR_BIBLIOTECA}/{archivo}"), &[DIR_BIBLIOTECA])
+        .map_err(|_| "Ese conjunto de la biblioteca no es válido".to_string())
+}
+
+/// Un nombre de archivo a partir del nombre del conjunto: sin caracteres que Windows no admite.
+fn nombre_de_archivo(nombre: &str) -> String {
+    let limpio: String = nombre.chars().map(|c| if c.is_control() || "\\/:*?\"<>|".contains(c) { '_' } else { c }).collect();
+    let limpio: String = limpio.trim().trim_end_matches('.').chars().take(60).collect();
+    if limpio.trim().is_empty() { "conjunto".into() } else { limpio.trim().to_string() }
+}
+
+/// Los conjuntos de la biblioteca (los archivos que no valen se saltan), por nombre.
+pub fn listar_biblioteca_en(raiz: &Path) -> Vec<ResumenBiblioteca> {
+    let Ok(entradas) = std::fs::read_dir(dir_biblioteca(raiz)) else { return vec![] };
+    let mut v: Vec<ResumenBiblioteca> = entradas
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("json")))
+        .take(MAX_BIBLIOTECA)
+        .filter_map(|e| {
+            let archivo = e.file_name().into_string().ok()?;
+            let c = leer_archivo(&e.path()).ok()?;
+            Some(ResumenBiblioteca { archivo, nombre: c.nombre, descripcion: c.descripcion, parametros: c.parametros.len(), variables: c.variables.len() })
+        })
+        .collect();
+    v.sort_by_key(|r| r.nombre.to_lowercase());
+    v
+}
+
+/// Guarda el conjunto `id` de la partida en la biblioteca. Si ya hay uno con ese nombre lo ACTUALIZA (así se define una vez
+/// y se mejora donde sea). Devuelve el nombre del archivo.
+pub fn guardar_en_biblioteca_en(id: u16, state: &AppState) -> Result<String, String> {
+    let contenido = state.lock().contenido_de(id).ok_or("Ese conjunto ya no existe")?;
+    let texto = a_archivo(&contenido)?;
+    let dir = dir_biblioteca(&state.raiz);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("No se pudo crear la biblioteca: {e}"))?;
+    let base = nombre_de_archivo(&contenido.nombre);
+    let mut archivo = format!("{base}.json");
+    let mut n = 2;
+    // Mismo nombre de archivo: si es el mismo conjunto (mismo nombre) se sobrescribe; si es otro, se busca un hueco
+    while let Ok(existente) = leer_archivo(&dir.join(&archivo)) {
+        if existente.nombre.to_lowercase() == contenido.nombre.to_lowercase() {
+            break;
+        }
+        archivo = format!("{base} ({n}).json");
+        n += 1;
+    }
+    let destino = ruta_biblioteca(&state.raiz, &archivo)?;
+    if !destino.exists() && listar_biblioteca_en(&state.raiz).len() >= MAX_BIBLIOTECA {
+        return Err(format!("La biblioteca no puede tener más de {MAX_BIBLIOTECA} conjuntos: borra alguno"));
+    }
+    let tmp = destino.with_extension("json.tmp");
+    std::fs::write(&tmp, texto).map_err(|e| format!("No se pudo escribir en la biblioteca: {e}"))?;
+    std::fs::rename(&tmp, &destino).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("No se pudo escribir en la biblioteca: {e}")
+    })?;
+    Ok(archivo)
+}
+
+/// Copia un conjunto de la biblioteca a la partida (sin usarlo). Devuelve el id del conjunto nuevo.
+pub fn anadir_de_biblioteca_en(archivo: &str, state: &AppState) -> Result<u16, String> {
+    let contenido = leer_archivo(&ruta_biblioteca(&state.raiz, archivo)?)?;
     let mut est = state.lock();
     Ok(anadir(&mut est, state, None, contenido)?.id)
+}
+
+/// Quita un conjunto de la biblioteca. No toca ninguna partida (las copias que ya tengan siguen ahí).
+pub fn borrar_de_biblioteca_en(archivo: &str, state: &AppState) -> Result<(), String> {
+    let ruta = ruta_biblioteca(&state.raiz, archivo)?;
+    std::fs::remove_file(ruta).map_err(|e| format!("No se pudo borrar de la biblioteca: {e}"))
+}
+
+#[tauri::command]
+pub fn listar_biblioteca_conjuntos(state: State<'_, AppState>) -> Vec<ResumenBiblioteca> {
+    listar_biblioteca_en(&state.raiz)
+}
+
+#[tauri::command]
+pub fn guardar_en_biblioteca(id: u16, state: State<'_, AppState>) -> Result<String, String> {
+    guardar_en_biblioteca_en(id, &state)
+}
+
+#[tauri::command]
+pub fn anadir_de_biblioteca(archivo: String, state: State<'_, AppState>) -> Result<u16, String> {
+    anadir_de_biblioteca_en(&archivo, &state)
+}
+
+#[tauri::command]
+pub fn borrar_de_biblioteca(archivo: String, state: State<'_, AppState>) -> Result<(), String> {
+    borrar_de_biblioteca_en(&archivo, &state)
 }
 
 #[cfg(test)]
@@ -1335,6 +1461,38 @@ mod tests {
         renombrar_conjunto_en(2, "  Sin   armadura ".into(), &state).unwrap();
         assert_eq!(state.lock().contenido_de(2).unwrap().nombre, "Sin armadura");
         assert!(renombrar_conjunto_en(2, "".into(), &state).is_err());
+    }
+
+    #[test]
+    fn la_biblioteca_comparte_conjuntos_entre_partidas() {
+        let state = estado_en_a("conjuntos_biblioteca");
+        assert!(listar_biblioteca_en(&state.raiz).is_empty());
+        let archivo = guardar_en_biblioteca_en(1, &state).unwrap();
+        assert_eq!(archivo, "Genérico.json");
+        assert!(guardar_en_biblioteca_en(99, &state).is_err());
+        // Guardar otra vez el mismo nombre lo actualiza, no lo duplica
+        crate::tablero_general::partida::procesar_delta(&state, DeltaPartida::ParametroBorrado(ID_ARMADURA));
+        assert_eq!(guardar_en_biblioteca_en(1, &state).unwrap(), archivo);
+        let lista = listar_biblioteca_en(&state.raiz);
+        assert_eq!((lista.len(), lista[0].parametros), (1, 3));
+        // Se añade a la partida (copia, sin usarla) y el nombre repetido se renombra
+        let id = anadir_de_biblioteca_en(&archivo, &state).unwrap();
+        assert_eq!((id, state.lock().conjunto_activo), (2, 1));
+        assert_eq!(state.lock().contenido_de(2).unwrap().nombre, "Genérico (2)");
+        // Nada de salirse de la carpeta ni de archivos que no existen
+        for malo in ["../red.json", "..\\x.json", "x.txt", "C:\\x.json", "no_existe.json"] {
+            assert!(anadir_de_biblioteca_en(malo, &state).is_err(), "{malo}");
+            assert!(borrar_de_biblioteca_en(malo, &state).is_err(), "{malo}");
+        }
+        // Los archivos rotos no estorban en la lista
+        std::fs::write(dir_biblioteca(&state.raiz).join("roto.json"), "hola").unwrap();
+        assert_eq!(listar_biblioteca_en(&state.raiz).len(), 1);
+        // Borrar de la biblioteca no toca la partida
+        borrar_de_biblioteca_en(&archivo, &state).unwrap();
+        assert!(listar_biblioteca_en(&state.raiz).is_empty());
+        assert_eq!(state.lock().conjuntos_parametros.len(), 2);
+        assert_eq!(nombre_de_archivo("a/b:c?"), "a_b_c_");
+        assert_eq!(nombre_de_archivo("  ..  "), "conjunto");
     }
 
     #[test]

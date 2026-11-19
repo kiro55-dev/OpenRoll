@@ -7,7 +7,7 @@
 <script lang="ts">
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { ayuda } from "$lib/ajustesVista.svelte";
-  import { partida, type ResumenConjunto } from "$lib/partida.svelte";
+  import { partida, type ResumenBiblioteca, type ResumenConjunto } from "$lib/partida.svelte";
 
   let { onError, alCambiar }: { onError: (mensaje: string) => void; alCambiar: () => void } = $props();
 
@@ -88,6 +88,57 @@
     } finally {
       ocupado = false;
     }
+  }
+
+  // ---- Biblioteca: conjuntos propios compartidos entre todas las partidas de este equipo ----
+  let biblioteca = $state<ResumenBiblioteca[]>([]);
+  let borrandoArchivo = $state<string | null>(null);
+
+  async function cargarBiblioteca() {
+    try {
+      biblioteca = await partida.listarBiblioteca();
+    } catch {
+      biblioteca = [];
+    }
+  }
+
+  $effect(() => {
+    if (gestionando) void cargarBiblioteca();
+  });
+
+  async function accionBiblioteca(hacer: () => Promise<string>) {
+    if (ocupado) return;
+    ocupado = true;
+    aviso = "";
+    try {
+      aviso = await hacer();
+      onError("");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      ocupado = false;
+      await cargarBiblioteca();
+    }
+  }
+
+  const aBiblioteca = (c: ResumenConjunto) =>
+    accionBiblioteca(async () => {
+      await partida.guardarEnBiblioteca(c.id);
+      return `«${c.nombre}» guardado en tu biblioteca: lo tendrás en todas tus partidas.`;
+    });
+
+  const deBiblioteca = (b: ResumenBiblioteca) =>
+    accionBiblioteca(async () => {
+      await partida.anadirDeBiblioteca(b.archivo);
+      return `«${b.nombre}» añadido a esta partida. Todavía no lo usas: elígelo arriba cuando quieras.`;
+    });
+
+  async function borrarDeBiblioteca(archivo: string) {
+    borrandoArchivo = null;
+    await accionBiblioteca(async () => {
+      await partida.borrarDeBiblioteca(archivo);
+      return "Quitado de la biblioteca. Las partidas que ya lo tengan lo conservan.";
+    });
   }
 
   async function anadirDeSerie(clave: string) {
@@ -224,6 +275,7 @@
             {#if !enUso}
               <button type="button" onclick={() => pedirCambio(String(c.id))}>Usar</button>
             {/if}
+            <button type="button" disabled={ocupado} onclick={() => aBiblioteca(c)} title={ayuda("Lo guarda en tu biblioteca para usarlo en cualquier partida. Si ya hay uno con ese nombre, lo actualiza")}>A mi biblioteca</button>
             <button type="button" disabled={ocupado} onclick={() => exportar(c)}>Exportar</button>
             {#if !enUso}
               {#if borrandoId === c.id}
@@ -236,6 +288,29 @@
           </div>
         </div>
       {/each}
+
+      {#if biblioteca.length > 0}
+        <span class="subtitulo">Mi biblioteca (en todas mis partidas)</span>
+        {#each biblioteca as b (b.archivo)}
+          <div class="conjunto">
+            <div class="textos">
+              <span class="nombre">{b.nombre}</span>
+              <span class="resumen">
+                {b.parametros} parámetro{b.parametros === 1 ? "" : "s"} · {b.variables} variable{b.variables === 1 ? "" : "s"}{b.descripcion ? " · " + b.descripcion : ""}
+              </span>
+            </div>
+            <div class="acciones">
+              <button type="button" disabled={ocupado} onclick={() => deBiblioteca(b)} title={ayuda("Lo copia a esta partida sin usarlo")}>Añadir</button>
+              {#if borrandoArchivo === b.archivo}
+                <button type="button" class="peligro" onclick={() => borrarDeBiblioteca(b.archivo)}>¿Quitar?</button>
+                <button type="button" onclick={() => (borrandoArchivo = null)}>No</button>
+              {:else}
+                <button type="button" class="peligro" onclick={() => (borrandoArchivo = b.archivo)} title={ayuda("Solo lo quita de la biblioteca; las partidas que ya lo tengan lo conservan")}>Quitar</button>
+              {/if}
+            </div>
+          </div>
+        {/each}
+      {/if}
 
       {#if deSerieNuevos.length > 0}
         <span class="subtitulo">Disponibles en OpenRoll</span>

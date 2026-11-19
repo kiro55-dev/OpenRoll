@@ -91,9 +91,9 @@ fn id_de(abreviatura: &str) -> u16 {
 
 /// Las habilidades de D&D 5e: nombre, abreviatura y característica.
 const HABILIDADES_DND: [(&str, &str, &str); 18] = [
-    ("Acrobacias", "acro", "des"),
+    ("Acrobacia", "acro", "des"),
     ("Atletismo", "atl", "fue"),
-    ("Arcanos", "arc", "int"),
+    ("Arcano", "arc", "int"),
     ("Engaño", "eng", "car"),
     ("Historia", "his", "int"),
     ("Interpretación", "interp", "car"),
@@ -154,8 +154,8 @@ pub fn dnd5e() -> ConjuntoParametros {
 
 /// Las habilidades de Pathfinder 2e: nombre, abreviatura y característica.
 const HABILIDADES_PATHFINDER: [(&str, &str, &str); 18] = [
-    ("Acrobacias", "acro", "des"),
-    ("Arcanos", "arc", "int"),
+    ("Acrobacia", "acro", "des"),
+    ("Arcano", "arc", "int"),
     ("Artesanía", "art", "int"),
     ("Atletismo", "atl", "fue"),
     ("Diplomacia", "dip", "car"),
