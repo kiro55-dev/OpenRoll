@@ -147,6 +147,15 @@ export interface ResumenConjunto {
   grupos: number;
 }
 
+/** Un conjunto de la biblioteca del host (`ResumenBiblioteca` en Rust). `archivo` lo identifica. */
+export interface ResumenBiblioteca {
+  archivo: string;
+  nombre: string;
+  descripcion: string;
+  parametros: number;
+  variables: number;
+}
+
 /** Un conjunto que trae el programa (definido en código). `ya_anadido`: la partida ya tiene una copia. */
 export interface ResumenDeSerie {
   clave: string;
@@ -777,6 +786,27 @@ class Partida {
   /** Escribe el conjunto en `ruta` (la del diálogo «Guardar como»). */
   exportarConjunto(id: number, ruta: string) {
     return invoke("exportar_conjunto", { id, ruta });
+  }
+
+  /** Los conjuntos de la biblioteca del host (compartida entre todas sus partidas). */
+  listarBiblioteca() {
+    return invoke<ResumenBiblioteca[]>("listar_biblioteca_conjuntos");
+  }
+
+  /** Guarda (o actualiza, si ya hay uno con ese nombre) el conjunto `id` en la biblioteca. */
+  guardarEnBiblioteca(id: number) {
+    return invoke<string>("guardar_en_biblioteca", { id });
+  }
+
+  /** Copia un conjunto de la biblioteca a esta partida (sin usarlo) y devuelve su id. */
+  async anadirDeBiblioteca(archivo: string): Promise<number> {
+    let id = 0;
+    await this.#cambiarDefiniciones("anadir_de_biblioteca", { archivo }, (r) => (id = r as number));
+    return id;
+  }
+
+  borrarDeBiblioteca(archivo: string) {
+    return invoke("borrar_de_biblioteca", { archivo });
   }
 
   renombrarConjunto(id: number, nombre: string) {

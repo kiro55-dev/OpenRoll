@@ -143,7 +143,7 @@
   class="ventana-flotante"
   style="left: {pos.x}px; top: {pos.y}px;"
   style:width={pestana === "variables" || pestana === "resultados" ? "560px" : null}
-  style:max-height="calc(100vh - {pos.y}px - 12px)"
+  style:max-height="min(66.667vh, calc(100vh - {pos.y}px - 12px))"
   role="dialog"
   aria-label="Parámetros de la partida"
   tabindex="-1"
