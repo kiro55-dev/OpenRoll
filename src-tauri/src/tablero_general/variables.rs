@@ -11,8 +11,8 @@
 // números en el chat, y nada de lo que escribe el host puede meter HTML en el desglose de una tirada.
 // Mismo espejo en el front: src/lib/variables.ts.
 use crate::tablero_general::modelos::{
-    CalculoParametro, DefinicionParametro, DefinicionVariable, Entidad, GrupoVariables, TipoGrupoVariables, ValorParametro,
-    ValorVariable,
+    CalculoParametro, DefinicionParametro, DefinicionVariable, Entidad, GrupoVariables, Parametro, TipoGrupoVariables,
+    ValorParametro, ValorVariable,
 };
 
 pub const MAX_VARIABLES: usize = 80;
@@ -41,9 +41,23 @@ pub fn modificador(def: &DefinicionVariable, valor: i16) -> i32 {
     (i32::from(valor) - i32::from(def.neutro)).div_euclid(i32::from(def.escala.max(1)))
 }
 
-/// ¿Es una derivada? (las que tienen bases; una derivada siempre tiene al menos una, y una base ninguna).
+/// ¿Es una derivada? (las que tienen bases o parámetros fijos; una derivada siempre tiene al menos una fuente de esas, y una
+/// base ninguna).
 pub fn es_derivada(def: &DefinicionVariable) -> bool {
-    !def.bases.is_empty()
+    !def.bases.is_empty() || !def.parametros.is_empty()
+}
+
+/// Lo que aporta un parámetro a una derivada: su valor tal cual si es un número (0 si falta o es texto).
+pub fn valor_de_parametro(params: &[Parametro], id: u16) -> i32 {
+    match params.iter().find(|p| p.id_definicion == id).map(|p| &p.valor) {
+        Some(ValorParametro::Numero(n)) => i32::from(*n),
+        _ => 0,
+    }
+}
+
+/// ¿Puede un parámetro ser fuente de una derivada? Solo un número escrito a mano (uno calculado depende de las variables).
+pub fn parametro_como_fuente(p: &DefinicionParametro) -> bool {
+    p.calculo.is_none() && matches!(p.valor_por_defecto, ValorParametro::Numero(_))
 }
 
 /// `floor(suma · multiplicador / divisor) + constante`, redondeando hacia abajo también en negativo. Un divisor menor que 1
@@ -55,7 +69,7 @@ pub fn formula(suma: i32, multiplicador: i16, divisor: i16, constante: i16) -> i
 /// Lo que vale una variable en una ficha (sus `valores`): una base, su `modificador`; una derivada, la suma de los de sus
 /// bases y de sus opcionales que la ficha tiene marcadas, pasada por su fórmula (multiplicador, divisor y constante) más el
 /// bono de la opción que la ficha ha elegido. Un valor que falte cuenta como el neutro (0).
-pub fn resultado(defs: &[DefinicionVariable], valores: &[ValorVariable], def: &DefinicionVariable) -> i32 {
+pub fn resultado(defs: &[DefinicionVariable], params: &[Parametro], valores: &[ValorVariable], def: &DefinicionVariable) -> i32 {
     let valor_de = |id: u16| valores.iter().find(|v| v.id_definicion == id);
     let de_base = |id: u16| {
         defs.iter()
@@ -66,8 +80,11 @@ pub fn resultado(defs: &[DefinicionVariable], valores: &[ValorVariable], def: &D
         return de_base(def.id);
     }
     let marcadas: &[u16] = valor_de(def.id).map_or(&[], |v| v.opcionales.as_slice());
+    let marcados: &[u16] = valor_de(def.id).map_or(&[], |v| v.parametros_marcados.as_slice());
     let suma = def.bases.iter().map(|&b| de_base(b)).sum::<i32>()
-        + def.opcionales.iter().filter(|o| marcadas.contains(o)).map(|&o| de_base(o)).sum::<i32>();
+        + def.opcionales.iter().filter(|o| marcadas.contains(o)).map(|&o| de_base(o)).sum::<i32>()
+        + def.parametros.iter().map(|&p| valor_de_parametro(params, p)).sum::<i32>()
+        + def.parametros_opcionales.iter().filter(|p| marcados.contains(p)).map(|&p| valor_de_parametro(params, p)).sum::<i32>();
     let bono = bono_elegido(def, valor_de(def.id));
     formula(suma, def.multiplicador, def.divisor, def.constante) + bono
 }
@@ -79,18 +96,18 @@ pub fn bono_elegido(def: &DefinicionVariable, valor: Option<&ValorVariable>) -> 
 }
 
 /// Lo que cuenta de una variable al calcular un parámetro: en una base, el valor escrito; en una derivada, su resultado.
-pub fn valor_para_calculo(defs: &[DefinicionVariable], valores: &[ValorVariable], id: u16) -> i32 {
+pub fn valor_para_calculo(defs: &[DefinicionVariable], params: &[Parametro], valores: &[ValorVariable], id: u16) -> i32 {
     match defs.iter().find(|d| d.id == id) {
         None => 0,
-        Some(d) if es_derivada(d) => resultado(defs, valores, d),
+        Some(d) if es_derivada(d) => resultado(defs, params, valores, d),
         Some(d) => i32::from(valores.iter().find(|v| v.id_definicion == id).map_or(d.neutro, |v| v.valor)),
     }
 }
 
 /// El valor de un parámetro calculado en una ficha con esas variables: `floor(suma · multiplicador / divisor) + constante`,
 /// dentro de 0 y `LIMITE_PARAMETRO_CALCULADO` (un parámetro no es negativo).
-pub fn calcular_parametro(calculo: &CalculoParametro, defs: &[DefinicionVariable], valores: &[ValorVariable]) -> i16 {
-    let suma: i32 = calculo.variables.iter().map(|&v| valor_para_calculo(defs, valores, v)).sum();
+pub fn calcular_parametro(calculo: &CalculoParametro, defs: &[DefinicionVariable], params: &[Parametro], valores: &[ValorVariable]) -> i16 {
+    let suma: i32 = calculo.variables.iter().map(|&v| valor_para_calculo(defs, params, valores, v)).sum();
     let v = formula(suma, calculo.multiplicador, calculo.divisor, calculo.constante);
     v.clamp(0, LIMITE_PARAMETRO_CALCULADO) as i16
 }
@@ -100,7 +117,8 @@ pub fn calcular_parametro(calculo: &CalculoParametro, defs: &[DefinicionVariable
 pub fn recalcular_parametros(defs: &[DefinicionParametro], vars: &[DefinicionVariable], e: &mut Entidad) {
     for d in defs {
         let Some(c) = &d.calculo else { continue };
-        let nuevo = calcular_parametro(c, vars, &e.variables);
+        // Un parámetro calculado nunca es fuente de una derivada: los que se leen aquí no cambian al ir recalculando
+        let nuevo = calcular_parametro(c, vars, &e.parametros, &e.variables);
         if let Some(p) = e.parametros.iter_mut().find(|p| p.id_definicion == d.id) {
             p.valor = ValorParametro::Numero(nuevo);
         }
@@ -161,7 +179,7 @@ pub fn normalizar_variables(defs: &[DefinicionVariable], valores: &mut Vec<Valor
     for d in defs {
         let mut v = match anteriores.iter().position(|v| v.id_definicion == d.id) {
             Some(i) => anteriores.swap_remove(i),
-            None => ValorVariable { id_definicion: d.id, valor: d.neutro, opcionales: vec![], eleccion: 0 },
+            None => ValorVariable { id_definicion: d.id, valor: d.neutro, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] },
         };
         // La opción elegida existe, o se vuelve a la primera (y sin opciones no hay elección)
         if usize::from(v.eleccion) >= d.opciones.len() {
@@ -174,6 +192,13 @@ pub fn normalizar_variables(defs: &[DefinicionVariable], valores: &mut Vec<Valor
             }
         }
         v.opcionales = marcadas;
+        let mut marcados = Vec::new();
+        for p in v.parametros_marcados.iter().filter(|p| d.parametros_opcionales.contains(p)) {
+            if !marcados.contains(p) {
+                marcados.push(*p);
+            }
+        }
+        v.parametros_marcados = marcados;
         valores.push(v);
     }
 }
@@ -215,7 +240,9 @@ pub fn tipo_de_grupo(grupos: &[GrupoVariables], id: u16) -> Option<TipoGrupoVari
 }
 
 /// Comprueba una definición contra las DEMÁS que existen (al crear: todas; al modificar: todas menos ella) y los grupos.
-pub fn validar_definicion(otras: &[DefinicionVariable], grupos: &[GrupoVariables], d: &DefinicionVariable) -> Result<(), String> {
+pub fn validar_definicion(
+    otras: &[DefinicionVariable], grupos: &[GrupoVariables], params: &[DefinicionParametro], d: &DefinicionVariable,
+) -> Result<(), String> {
     let nombre = d.nombre.trim();
     let abreviatura = d.abreviatura.trim();
     if nombre.is_empty() {
@@ -250,7 +277,7 @@ pub fn validar_definicion(otras: &[DefinicionVariable], grupos: &[GrupoVariables
     }
     match tipo_de_grupo(grupos, d.grupo).ok_or("Ese grupo de variables ya no existe")? {
         TipoGrupoVariables::Base => {
-            if !d.bases.is_empty() || !d.opcionales.is_empty() {
+            if !d.bases.is_empty() || !d.opcionales.is_empty() || !d.parametros.is_empty() || !d.parametros_opcionales.is_empty() {
                 return Err("Una variable base no depende de otras".into());
             }
             if (d.multiplicador, d.divisor, d.constante) != (1, 1, 0) || d.rangos.is_some() || !d.opciones.is_empty() {
@@ -264,11 +291,28 @@ pub fn validar_definicion(otras: &[DefinicionVariable], grupos: &[GrupoVariables
             }
         }
         TipoGrupoVariables::Derivadas => {
-            if d.bases.is_empty() {
-                return Err("Una variable derivada depende de al menos una variable base".into());
+            if d.bases.is_empty() && d.parametros.is_empty() {
+                return Err("Una variable derivada depende de al menos una variable base o un parámetro".into());
             }
-            if d.bases.len() > MAX_BASES_DERIVADA || d.opcionales.len() > MAX_BASES_DERIVADA {
-                return Err(format!("Una derivada no puede tener más de {MAX_BASES_DERIVADA} bases ni opcionales"));
+            if d.bases.len() > MAX_BASES_DERIVADA
+                || d.opcionales.len() > MAX_BASES_DERIVADA
+                || d.parametros.len() > MAX_BASES_DERIVADA
+                || d.parametros_opcionales.len() > MAX_BASES_DERIVADA
+            {
+                return Err(format!("Una derivada no puede tener más de {MAX_BASES_DERIVADA} bases, parámetros ni opcionales de cada"));
+            }
+            let ps: Vec<u16> = d.parametros.iter().chain(&d.parametros_opcionales).copied().collect();
+            if (1..ps.len()).any(|i| ps[..i].contains(&ps[i])) {
+                return Err("Un parámetro no puede repetirse entre los fijos y los opcionales".into());
+            }
+            for id in &ps {
+                match params.iter().find(|p| p.id == *id) {
+                    None => return Err("La derivada usa un parámetro que no existe".into()),
+                    Some(p) if !parametro_como_fuente(p) => {
+                        return Err(format!("«{}» no sirve de fuente: solo valen los parámetros numéricos que se escriben a mano", p.clave));
+                    }
+                    Some(_) => {}
+                }
             }
             let todas: Vec<u16> = d.bases.iter().chain(&d.opcionales).copied().collect();
             if (1..todas.len()).any(|i| todas[..i].contains(&todas[i])) {
@@ -295,6 +339,8 @@ pub fn es_la_misma(a: &DefinicionVariable, b: &DefinicionVariable) -> bool {
         && clave(&a.abreviatura) == clave(&b.abreviatura)
         && a.bases == b.bases
         && a.opcionales == b.opcionales
+        && a.parametros == b.parametros
+        && a.parametros_opcionales == b.parametros_opcionales
         && a.neutro == b.neutro
         && a.escala == b.escala
         && (a.multiplicador, a.divisor, a.constante) == (b.multiplicador, b.divisor, b.constante)
@@ -330,7 +376,7 @@ pub fn efecto_de_borrar(defs: &[DefinicionVariable], ids: &[u16]) -> (Vec<u16>, 
     // Una derivada no es base de nada, así que basta una pasada
     let sin_bases: Vec<u16> = defs
         .iter()
-        .filter(|d| es_derivada(d) && !borradas.contains(&d.id) && d.bases.iter().all(|b| borradas.contains(b)))
+        .filter(|d| es_derivada(d) && !borradas.contains(&d.id) && d.parametros.is_empty() && d.bases.iter().all(|b| borradas.contains(b)))
         .map(|d| d.id)
         .collect();
     borradas.extend(sin_bases);
@@ -353,6 +399,18 @@ pub fn aplicar_borrado(defs: &mut Vec<DefinicionVariable>, ids: &[u16]) {
     }
 }
 
+/// Quita de las derivadas los parámetros que ya no pueden ser fuente (borrados, de texto o calculados) y borra las derivadas
+/// que se quedan sin ninguna fuente fija (ni bases ni parámetros). Nada depende de una derivada, así que basta una pasada.
+pub fn limpiar_parametros_fuente(defs: &mut Vec<DefinicionVariable>, params: &[DefinicionParametro]) {
+    let vale = |id: &u16| params.iter().any(|p| p.id == *id && parametro_como_fuente(p));
+    let eran: Vec<u16> = defs.iter().filter(|d| es_derivada(d)).map(|d| d.id).collect();
+    for d in defs.iter_mut() {
+        d.parametros.retain(vale);
+        d.parametros_opcionales.retain(vale);
+    }
+    defs.retain(|d| !eran.contains(&d.id) || es_derivada(d));
+}
+
 /// Las variables cuyo grupo no existe (las de antes de los grupos traen 0) pasan al primer grupo de bases; si no hay
 /// ninguno, se crea «Variables». Determinista: se hace al cargar y tras cada cambio de definiciones.
 pub fn asegurar_grupos(grupos: &mut Vec<GrupoVariables>, defs: &mut [DefinicionVariable]) {
@@ -371,6 +429,8 @@ pub fn asegurar_grupos(grupos: &mut Vec<GrupoVariables>, defs: &mut [DefinicionV
         d.grupo = base;
         d.bases.clear();
         d.opcionales.clear();
+        d.parametros.clear();
+        d.parametros_opcionales.clear();
         d.opciones.clear();
         d.rangos = None;
         (d.multiplicador, d.divisor, d.constante) = (1, 1, 0);
@@ -386,7 +446,7 @@ pub mod pruebas {
     pub fn var(id: u16, nombre: &str, abreviatura: &str, neutro: i16, escala: i16) -> DefinicionVariable {
         DefinicionVariable {
             id, nombre: nombre.into(), abreviatura: abreviatura.into(), neutro, escala, grupo: 1, bases: vec![], opcionales: vec![],
-            multiplicador: 1, divisor: 1, constante: 0, opciones: vec![], rangos: None,
+            multiplicador: 1, divisor: 1, constante: 0, opciones: vec![], rangos: None, parametros: vec![], parametros_opcionales: vec![],
         }
     }
 
@@ -394,12 +454,12 @@ pub mod pruebas {
     pub fn derivada(id: u16, nombre: &str, abreviatura: &str, bases: &[u16], opcionales: &[u16]) -> DefinicionVariable {
         DefinicionVariable {
             id, nombre: nombre.into(), abreviatura: abreviatura.into(), neutro: 0, escala: 1, grupo: 2,
-            bases: bases.to_vec(), opcionales: opcionales.to_vec(), multiplicador: 1, divisor: 1, constante: 0, opciones: vec![], rangos: None,
+            bases: bases.to_vec(), opcionales: opcionales.to_vec(), multiplicador: 1, divisor: 1, constante: 0, opciones: vec![], rangos: None, parametros: vec![], parametros_opcionales: vec![],
         }
     }
 
     pub fn valor(id: u16, valor: i16) -> ValorVariable {
-        ValorVariable { id_definicion: id, valor, opcionales: vec![], eleccion: 0 }
+        ValorVariable { id_definicion: id, valor, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] }
     }
 
     /// El grupo de serie (bases, id 1) y «Habilidades» (derivadas, id 2).
@@ -437,14 +497,14 @@ pub mod pruebas {
             derivada(5, "Atletismo", "atl", &[2, 1], &[3]),
         ];
         let mut valores = vec![valor(1, 16), valor(2, 8), valor(3, 2), valor(4, 0), valor(5, 0)];
-        assert_eq!(resultado(&defs, &valores, &defs[3]), 3, "sin el check, solo Destreza");
-        assert_eq!(resultado(&defs, &valores, &defs[4]), 3 - 1, "dos bases se suman");
+        assert_eq!(resultado(&defs, &[], &valores, &defs[3]), 3, "sin el check, solo Destreza");
+        assert_eq!(resultado(&defs, &[], &valores, &defs[4]), 3 - 1, "dos bases se suman");
         valores[3].opcionales = vec![3];
-        assert_eq!(resultado(&defs, &valores, &defs[3]), 5, "con competencia");
-        assert_eq!(resultado(&defs, &valores, &defs[4]), 2, "el check es de cada derivada");
+        assert_eq!(resultado(&defs, &[], &valores, &defs[3]), 5, "con competencia");
+        assert_eq!(resultado(&defs, &[], &valores, &defs[4]), 2, "el check es de cada derivada");
         // Una base sigue siendo su modificador; un valor que falta es el neutro
-        assert_eq!(resultado(&defs, &valores, &defs[0]), 3);
-        assert_eq!(resultado(&defs, &[], &defs[3]), 0);
+        assert_eq!(resultado(&defs, &[], &valores, &defs[0]), 3);
+        assert_eq!(resultado(&defs, &[], &[], &defs[3]), 0);
     }
 
     #[test]
@@ -454,11 +514,11 @@ pub mod pruebas {
             valor(2, 9),
             valor(99, 1),
             valor(2, 1),
-            ValorVariable { id_definicion: 3, valor: 0, opcionales: vec![2, 2, 1, 77], eleccion: 0 },
+            ValorVariable { id_definicion: 3, valor: 0, opcionales: vec![2, 2, 1, 77], eleccion: 0, parametros_marcados: vec![] },
         ];
         vs[0].opcionales = vec![1]; // una base no lleva opcionales
         normalizar_variables(&defs, &mut vs);
-        assert_eq!(vs, vec![valor(1, 10), valor(2, 9), ValorVariable { id_definicion: 3, valor: 0, opcionales: vec![2], eleccion: 0 }]);
+        assert_eq!(vs, vec![valor(1, 10), valor(2, 9), ValorVariable { id_definicion: 3, valor: 0, opcionales: vec![2], eleccion: 0, parametros_marcados: vec![] }]);
     }
 
     #[test]
@@ -477,8 +537,8 @@ pub mod pruebas {
     fn validacion_de_las_definiciones() {
         let g = grupos();
         let otras = vec![var(1, "Fuerza", "f", 10, 2)];
-        assert!(validar_definicion(&otras, &g, &var(2, "Inteligencia", "in", 10, 2)).is_ok());
-        assert!(validar_definicion(&otras, &g, &var(2, "Fuerza mágica", "fm", 10, 2)).is_ok(), "acentos y espacios en el nombre");
+        assert!(validar_definicion(&otras, &g, &[], &var(2, "Inteligencia", "in", 10, 2)).is_ok());
+        assert!(validar_definicion(&otras, &g, &[], &var(2, "Fuerza mágica", "fm", 10, 2)).is_ok(), "acentos y espacios en el nombre");
         for mala in [
             var(2, "", "x", 10, 2),
             var(2, "Fuerza", "fz", 10, 2),
@@ -496,23 +556,23 @@ pub mod pruebas {
             var(2, "Inteligencia", "in", 10000, 2),
             DefinicionVariable { grupo: 9, ..var(2, "Inteligencia", "in", 10, 2) },
         ] {
-            assert!(validar_definicion(&otras, &g, &mala).is_err(), "{mala:?}");
+            assert!(validar_definicion(&otras, &g, &[], &mala).is_err(), "{mala:?}");
         }
         // La abreviatura es opcional, y varias variables pueden no tenerla
         let sin = vec![var(1, "Fuerza", "", 10, 2)];
-        assert!(validar_definicion(&sin, &g, &var(2, "Destreza", "", 10, 2)).is_ok());
+        assert!(validar_definicion(&sin, &g, &[], &var(2, "Destreza", "", 10, 2)).is_ok());
         assert!(buscar(&[var(1, "Fuerza", "", 10, 2)], "").is_none());
         assert_eq!(buscar(&[var(1, "Fuerza", "", 10, 2)], "fuerza").unwrap().id, 1);
         let muchas: Vec<_> =
             (0..MAX_VARIABLES as u16).map(|i| var(i, &"a".repeat(i as usize % 29 + 1), "", 10, 2)).collect();
-        assert!(validar_definicion(&muchas, &g, &var(999, "Otra", "z", 10, 2)).unwrap_err().contains("más de"));
+        assert!(validar_definicion(&muchas, &g, &[], &var(999, "Otra", "z", 10, 2)).unwrap_err().contains("más de"));
     }
 
     #[test]
     fn un_conflicto_dice_contra_que_variable_choca_y_la_misma_variable_se_reconoce() {
         let g = grupos();
         let otras = vec![var(1, "Prueba", "p", 10, 2)];
-        let e = validar_definicion(&otras, &g, &var(2, "Rty", "p", 10, 2)).unwrap_err();
+        let e = validar_definicion(&otras, &g, &[], &var(2, "Rty", "p", 10, 2)).unwrap_err();
         assert!(e.contains("«p»") && e.contains("«Prueba»") && e.contains("«Variables»"), "{e}");
         assert!(es_la_misma(&var(1, "Prueba", "p", 10, 2), &var(9, " prueba ", "P", 10, 2)), "sin mayúsculas ni espacios, el id no cuenta");
         assert!(!es_la_misma(&var(1, "Prueba", "p", 10, 2), &var(1, "Prueba", "p", 10, 3)));
@@ -523,8 +583,8 @@ pub mod pruebas {
     fn validacion_de_las_derivadas() {
         let g = grupos();
         let otras = vec![var(1, "Destreza", "des", 10, 2), var(3, "Competencia", "com", 0, 1), derivada(4, "Sigilo", "sig", &[1], &[])];
-        assert!(validar_definicion(&otras, &g, &derivada(5, "Acrobacias", "acro", &[1], &[3])).is_ok());
-        assert!(validar_definicion(&otras, &g, &derivada(5, "Acrobacias", "acro", &[1, 3], &[])).is_ok(), "dos bases");
+        assert!(validar_definicion(&otras, &g, &[], &derivada(5, "Acrobacias", "acro", &[1], &[3])).is_ok());
+        assert!(validar_definicion(&otras, &g, &[], &derivada(5, "Acrobacias", "acro", &[1, 3], &[])).is_ok(), "dos bases");
         for (mala, motivo) in [
             (derivada(5, "Acrobacias", "acro", &[], &[3]), "sin bases"),
             (derivada(5, "Acrobacias", "acro", &[4], &[]), "una derivada no es base"),
@@ -535,10 +595,10 @@ pub mod pruebas {
             (derivada(5, "Sigilo", "s", &[1], &[]), "nombre repetido aunque sea de otro grupo"),
             (derivada(5, "Destreza veloz", "des", &[1], &[]), "abreviatura de una base"),
         ] {
-            assert!(validar_definicion(&otras, &g, &mala).is_err(), "{motivo}");
+            assert!(validar_definicion(&otras, &g, &[], &mala).is_err(), "{motivo}");
         }
         // Una base no puede tener bases
-        assert!(validar_definicion(&otras, &g, &DefinicionVariable { bases: vec![1], ..var(6, "Rara", "r", 10, 2) }).is_err());
+        assert!(validar_definicion(&otras, &g, &[], &DefinicionVariable { bases: vec![1], ..var(6, "Rara", "r", 10, 2) }).is_err());
     }
 
     #[test]
@@ -604,7 +664,7 @@ pub mod pruebas {
         // Cthulhu: la mitad de una habilidad
         let defs = vec![var(1, "Esquivar", "esq", 0, 1), DefinicionVariable { divisor: 2, ..derivada(2, "Esquivar difícil", "esqd", &[1], &[]) }];
         let valores = vec![valor(1, 65), valor(2, 0)];
-        assert_eq!(resultado(&defs, &valores, &defs[1]), 32);
+        assert_eq!(resultado(&defs, &[], &valores, &defs[1]), 32);
     }
 
     #[test]
@@ -618,9 +678,9 @@ pub mod pruebas {
         ];
         let defs = vec![var(1, "Destreza", "des", 10, 2), var(2, "Nivel", "niv", 0, 1), DefinicionVariable { opciones: rangos, ..derivada(3, "Acrobacias", "acro", &[1, 2], &[]) }];
         let mut valores = vec![valor(1, 14), valor(2, 3), valor(3, 0)];
-        assert_eq!(resultado(&defs, &valores, &defs[2]), 2 + 3, "sin entrenar: +0");
+        assert_eq!(resultado(&defs, &[], &valores, &defs[2]), 2 + 3, "sin entrenar: +0");
         valores[2].eleccion = 2;
-        assert_eq!(resultado(&defs, &valores, &defs[2]), 2 + 3 + 4);
+        assert_eq!(resultado(&defs, &[], &valores, &defs[2]), 2 + 3 + 4);
         // Una elección que ya no existe (se quitó una opción) vuelve a la primera al normalizar
         valores[2].eleccion = 7;
         normalizar_variables(&defs, &mut valores);
@@ -637,7 +697,7 @@ pub mod pruebas {
         use crate::tablero_general::modelos::{normalizar_parametros, parametros_por_defecto, Cuerpo, TipoEntidad};
         // Cthulhu: vida = (CON + TAM) / 10
         let vars = vec![var(1, "Constitución", "con", 0, 1), var(2, "Tamaño", "tam", 0, 1)];
-        let mut defs = parametros_por_defecto();
+        let mut defs = crate::tablero_general::modelos::parametros_por_defecto();
         defs[0].calculo = Some(CalculoParametro { variables: vec![1, 2], multiplicador: 1, divisor: 10, constante: 0 });
         let mut ps = Vec::new();
         normalizar_parametros(&defs, &mut ps);
@@ -679,9 +739,9 @@ pub mod pruebas {
         let g = grupos();
         let otras = vec![var(1, "Destreza", "des", 10, 2), var(3, "Competencia", "com", 0, 1)];
         let ok = DefinicionVariable { multiplicador: 2, divisor: 3, constante: -4, ..derivada(5, "Acrobacias", "acro", &[1], &[3]) };
-        assert!(validar_definicion(&otras, &g, &ok).is_ok());
+        assert!(validar_definicion(&otras, &g, &[], &ok).is_ok());
         let rango = |n: &str, b: i16| OpcionVariable { nombre: n.into(), bonus: b };
-        assert!(validar_definicion(&otras, &g, &DefinicionVariable { rangos: Some(1), ..derivada(5, "Acrobacias", "acro", &[1], &[]) }).is_ok());
+        assert!(validar_definicion(&otras, &g, &[], &DefinicionVariable { rangos: Some(1), ..derivada(5, "Acrobacias", "acro", &[1], &[]) }).is_ok());
         for mala in [
             DefinicionVariable { multiplicador: 0, ..derivada(5, "Acrobacias", "acro", &[1], &[]) },
             DefinicionVariable { divisor: 0, ..derivada(5, "Acrobacias", "acro", &[1], &[]) },
@@ -692,9 +752,9 @@ pub mod pruebas {
             DefinicionVariable { rangos: Some(1), ..var(6, "Rara", "r", 10, 2) },
             DefinicionVariable { opciones: vec![rango("X", 1)], ..var(6, "Rara", "r", 10, 2) },
         ] {
-            assert!(validar_definicion(&otras, &g, &mala).is_err(), "{mala:?}");
+            assert!(validar_definicion(&otras, &g, &[], &mala).is_err(), "{mala:?}");
         }
-        assert!(validar_definicion(&otras, &g, &var(6, "Versus", "vs", 10, 2)).is_err(), "«vs» está reservado");
+        assert!(validar_definicion(&otras, &g, &[], &var(6, "Versus", "vs", 10, 2)).is_err(), "«vs» está reservado");
         // Las que cambian la fórmula o las opciones no son «la misma»
         assert!(!es_la_misma(&derivada(5, "A", "a", &[1], &[]), &DefinicionVariable { constante: 1, ..derivada(5, "A", "a", &[1], &[]) }));
         assert!(!es_la_misma(&derivada(5, "A", "a", &[1], &[]), &DefinicionVariable { rangos: Some(1), ..derivada(5, "A", "a", &[1], &[]) }));
@@ -722,5 +782,83 @@ pub mod pruebas {
         let defs = vec![var(1, "Fuerza", "f", 10, 2)];
         assert!(validar_valores(&defs, &[valor(1, 9999)]).is_ok());
         assert!(validar_valores(&defs, &[valor(1, -10000)]).is_err());
+    }
+    // ---- Parámetros visuales como fuente de una derivada ----
+
+    fn parametro(id: u16, valor: i16) -> Parametro {
+        Parametro { id_definicion: id, valor: ValorParametro::Numero(valor), publico: false }
+    }
+
+    #[test]
+    fn una_derivada_suma_parametros_fijos_y_opcionales() {
+        use crate::tablero_general::modelos::{ID_ARMADURA, ID_VELOCIDAD};
+        let des = var(1, "Destreza", "des", 10, 2);
+        let defensa = DefinicionVariable {
+            parametros: vec![ID_ARMADURA], parametros_opcionales: vec![ID_VELOCIDAD], bases: vec![1], ..derivada(2, "Defensa", "def", &[], &[])
+        };
+        let defs = vec![des, defensa.clone()];
+        let params = vec![parametro(ID_ARMADURA, 12), parametro(ID_VELOCIDAD, 9)];
+        let mut vs = vec![valor(1, 14), valor(2, 0)];
+        assert_eq!(resultado(&defs, &params, &vs, &defs[1]), 2 + 12, "destreza +2 y armadura 12");
+        vs[1].parametros_marcados = vec![ID_VELOCIDAD];
+        assert_eq!(resultado(&defs, &params, &vs, &defs[1]), 2 + 12 + 9, "con el opcional marcado");
+        // La fórmula se aplica a toda la suma
+        let con_formula = DefinicionVariable { multiplicador: 1, divisor: 2, constante: 1, ..defensa };
+        let defs = vec![defs[0].clone(), con_formula];
+        assert_eq!(resultado(&defs, &params, &vs, &defs[1]), (2 + 12 + 9) / 2 + 1);
+        // Sin el parámetro en la ficha cuenta 0
+        assert_eq!(resultado(&defs, &[], &vs, &defs[1]), 2 / 2 + 1);
+    }
+
+    #[test]
+    fn una_derivada_solo_de_parametros_es_derivada_y_se_valida() {
+        use crate::tablero_general::modelos::{CalculoParametro, ID_ARMADURA, ID_VIDA};
+        let g = grupos();
+        let params = crate::tablero_general::modelos::parametros_por_defecto();
+        let solo_armadura = DefinicionVariable { parametros: vec![ID_ARMADURA], ..derivada(2, "Defensa", "def", &[], &[]) };
+        assert!(es_derivada(&solo_armadura));
+        assert!(validar_definicion(&[], &g, &params, &solo_armadura).is_ok());
+        // Sin ninguna fuente fija, no
+        let sin = DefinicionVariable { parametros_opcionales: vec![ID_ARMADURA], ..derivada(2, "Defensa", "def", &[], &[]) };
+        assert!(validar_definicion(&[], &g, &params, &sin).is_err());
+        // Parámetro inexistente o repetido
+        let raro = DefinicionVariable { parametros: vec![999], ..derivada(2, "Defensa", "def", &[], &[]) };
+        assert!(validar_definicion(&[], &g, &params, &raro).is_err());
+        let repe = DefinicionVariable { parametros: vec![ID_ARMADURA], parametros_opcionales: vec![ID_ARMADURA], ..derivada(2, "Defensa", "def", &[], &[]) };
+        assert!(validar_definicion(&[], &g, &params, &repe).is_err());
+        // Uno calculado con variables no sirve (ciclo)
+        let mut calculados = params.clone();
+        calculados.iter_mut().find(|p| p.id == ID_VIDA).unwrap().calculo =
+            Some(CalculoParametro { variables: vec![1], multiplicador: 1, divisor: 1, constante: 0 });
+        let con_vida = DefinicionVariable { parametros: vec![ID_VIDA], ..derivada(2, "Defensa", "def", &[], &[]) };
+        assert!(validar_definicion(&[], &g, &calculados, &con_vida).is_err());
+        // Una base no lleva parámetros
+        let base = DefinicionVariable { parametros: vec![ID_ARMADURA], ..var(3, "Fuerza", "f", 10, 2) };
+        assert!(validar_definicion(&[], &g, &params, &base).is_err());
+    }
+
+    #[test]
+    fn borrar_un_parametro_limpia_las_derivadas() {
+        use crate::tablero_general::modelos::{ID_ARMADURA, ID_VELOCIDAD};
+        let mut params = crate::tablero_general::modelos::parametros_por_defecto();
+        let con_dos = DefinicionVariable { parametros: vec![ID_ARMADURA], parametros_opcionales: vec![ID_VELOCIDAD], ..derivada(2, "Defensa", "def", &[1], &[]) };
+        let solo_param = DefinicionVariable { parametros: vec![ID_ARMADURA], ..derivada(3, "Coraza", "cor", &[], &[]) };
+        let mut defs = vec![var(1, "Destreza", "des", 10, 2), con_dos, solo_param];
+        params.retain(|p| p.id != ID_ARMADURA);
+        limpiar_parametros_fuente(&mut defs, &params);
+        assert_eq!(defs.len(), 2, "la que solo usaba Armadura desaparece");
+        assert!(defs[1].parametros.is_empty());
+        assert_eq!(defs[1].parametros_opcionales, vec![ID_VELOCIDAD], "lo que sigue valiendo se queda");
+        assert_eq!(defs[1].bases, vec![1]);
+    }
+
+    #[test]
+    fn las_marcas_de_parametros_siguen_a_los_opcionales() {
+        use crate::tablero_general::modelos::{ID_ARMADURA, ID_VELOCIDAD};
+        let d = DefinicionVariable { parametros: vec![ID_ARMADURA], parametros_opcionales: vec![ID_VELOCIDAD], ..derivada(2, "Defensa", "def", &[1], &[]) };
+        let defs = vec![var(1, "Destreza", "des", 10, 2), d];
+        let mut vs = vec![valor(1, 10), ValorVariable { parametros_marcados: vec![ID_VELOCIDAD, ID_VELOCIDAD, ID_ARMADURA, 77], ..valor(2, 0) }];
+        normalizar_variables(&defs, &mut vs);
+        assert_eq!(vs[1].parametros_marcados, vec![ID_VELOCIDAD], "sin repetidos ni lo que no es opcional");
     }
 }

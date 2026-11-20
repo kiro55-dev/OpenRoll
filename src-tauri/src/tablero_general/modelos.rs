@@ -302,6 +302,13 @@ pub struct DefinicionVariable {
     /// resultado. Vacío = no hay elección.
     #[serde(default)]
     pub opciones: Vec<OpcionVariable>,
+    /// Solo en una derivada: parámetros visuales (`DefinicionParametro.id`) cuyo valor se suma tal cual, sin neutro ni escala.
+    /// Solo vale un parámetro numérico escrito a mano (uno calculado ya depende de las variables: sería un ciclo).
+    #[serde(default)]
+    pub parametros: Vec<u16>,
+    /// Solo en una derivada: parámetros que cada ficha puede sumar o no (un check «+ armadura»).
+    #[serde(default)]
+    pub parametros_opcionales: Vec<u16>,
 }
 
 /// Una opción de una variable derivada con rangos (la competencia de Pathfinder: Entrenado +2, Experto +4...).
@@ -469,6 +476,9 @@ pub struct ValorVariable {
     /// Solo en una derivada con opciones: la que ha elegido esta ficha (su posición en `DefinicionVariable.opciones`).
     #[serde(default)]
     pub eleccion: u16,
+    /// Solo en una derivada: los parámetros opcionales (`DefinicionVariable.parametros_opcionales`) que esta ficha tiene marcados.
+    #[serde(default)]
+    pub parametros_marcados: Vec<u16>,
 }
 
 /// Cuánto suman o restan los botones − / + de un valor actual (vida...) en una ficha. Solo se guardan los que no son 1.

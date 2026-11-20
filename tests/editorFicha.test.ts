@@ -206,8 +206,8 @@ describe("variables", () => {
   it("una ficha sin valores recibe el neutro de cada variable, en su orden", async () => {
     const ed = await conVariables(entidad({ variables: [{ id_definicion: 2, valor: 9 }, { id_definicion: 99, valor: 1 }] }));
     expect(ed.entidad.variables).toEqual([
-      { id_definicion: 1, valor: 10, opcionales: [], eleccion: 0 },
-      { id_definicion: 2, valor: 9, opcionales: [], eleccion: 0 }
+      { id_definicion: 1, valor: 10, opcionales: [], eleccion: 0, parametros_marcados: [] },
+      { id_definicion: 2, valor: 9, opcionales: [], eleccion: 0, parametros_marcados: [] }
     ]);
   });
 

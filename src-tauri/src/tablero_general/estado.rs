@@ -560,6 +560,8 @@ impl EstadoPartida {
         variables::asegurar_grupos(&mut self.grupos_variables, &mut self.definiciones_variables);
         // Cada variable con una lista de rangos lleva una copia de sus opciones (y una lista que ya no existe se quita)
         crate::tablero_general::rangos::normalizar_rangos(&mut self.listas_rangos, &mut self.definiciones_variables);
+        // Una derivada pierde los parámetros que ya no valen de fuente (borrados, de texto, calculados) y desaparece si se queda sin ninguna
+        variables::limpiar_parametros_fuente(&mut self.definiciones_variables, &self.definiciones_parametros);
         let vars = self.definiciones_variables.clone();
         // Un parámetro calculado no puede usar variables que ya no existen
         variables::limpiar_calculos(&mut self.definiciones_parametros, &vars);

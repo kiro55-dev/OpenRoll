@@ -102,6 +102,12 @@
 
   async function borrar(d: DefinicionParametro) {
     error = "";
+    // Si una variable derivada lo suma, no se borra a ciegas: borrarlo la dejaría sin esa fuente (o la borraría si era la única)
+    const usan = partida.definicionesVariables.filter((v) => [...(v.parametros ?? []), ...(v.parametros_opcionales ?? [])].includes(d.id));
+    if (usan.length > 0) {
+      error = `«${d.clave}» lo usan las variables ${usan.map((v) => `«${v.nombre}»`).join(", ")}: quítalo de ellas (pestaña Variables) antes de borrarlo.`;
+      return;
+    }
     if (formulario.idEditando === d.id) cancelarFormulario(); // se borra: lo editado ya no importa
     try {
       await partida.borrarDefinicion(d.id);

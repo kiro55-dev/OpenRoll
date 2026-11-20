@@ -445,7 +445,7 @@ pub fn validar(mut c: ConjuntoParametros) -> Result<ConjuntoParametros, String> 
                 abreviatura: v.abreviatura.trim().to_string(),
                 ..v.clone()
             };
-            variables::validar_definicion(&aceptadas, &grupos, &v)?;
+            variables::validar_definicion(&aceptadas, &grupos, &parametros, &v)?;
             aceptadas.push(v);
         }
     }

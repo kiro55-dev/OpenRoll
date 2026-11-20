@@ -146,6 +146,11 @@ export class EditorFicha {
     return { numericos, textos: this.definiciones.filter((d) => !esNumerico(d)) };
   }
 
+  /** Los parámetros de la ficha tal como están escritos: lo que suma una derivada que usa parámetros. */
+  get #fuentes() {
+    return { definiciones: this.definiciones, valores: this.entidad.parametros };
+  }
+
   #parametro(id: number): Parametro | undefined {
     return this.entidad.parametros.find((p) => p.id_definicion === id);
   }
@@ -153,7 +158,7 @@ export class EditorFicha {
   numero(id: number): number {
     // Un parámetro calculado no se escribe: sale de las variables de la ficha, y se ve cambiar al tocarlas
     const calculo = this.definiciones.find((d) => d.id === id)?.calculo;
-    if (calculo) return calcularParametro(calculo, this.variables, this.entidad.variables);
+    if (calculo) return calcularParametro(calculo, this.variables, this.entidad.variables, this.#fuentes);
     const v = this.#parametro(id)?.valor;
     return v && "Numero" in v ? v.Numero : 0;
   }
@@ -205,7 +210,7 @@ export class EditorFicha {
   /** El resultado que vale en el chat con lo escrito (`null` si el campo de una base no es un número). Una derivada se
    *  recalcula sola al cambiar sus bases o sus checks. */
   resultadoVariable(d: DefinicionVariable): number | null {
-    if (esDerivada(d)) return resultadoDe(this.variables, this.entidad.variables, d);
+    if (esDerivada(d)) return resultadoDe(this.variables, this.entidad.variables, d, this.#fuentes);
     const valor: unknown = this.valorVariable(d.id); // un campo vacío deja null
     return typeof valor === "number" && Number.isFinite(valor) ? modificadorVariable(d, valor) : null;
   }
@@ -213,15 +218,14 @@ export class EditorFicha {
   /** De qué bases depende una derivada, como se enseña junto a su nombre: «des» o «des + fue» (la abreviatura de cada una o,
    *  sin ella, su nombre). Vacío en una base. */
   dependeDe(d: DefinicionVariable): string {
-    return d.bases
-      .map((id) => this.variables.find((v) => v.id === id))
-      .flatMap((b) => (b ? [etiquetaVariable(b)] : []))
-      .join(" + ");
+    const variables = d.bases.map((id) => this.variables.find((v) => v.id === id)).flatMap((b) => (b ? [etiquetaVariable(b)] : []));
+    const parametros = (d.parametros ?? []).flatMap((id) => this.definiciones.find((p) => p.id === id)?.clave ?? []);
+    return [...variables, ...parametros].join(" + ");
   }
 
   /** De dónde sale el resultado de una derivada, para el `title`: «des (+3) + com (+2)». */
   desgloseVariable(d: DefinicionVariable): string {
-    return desgloseResultado(this.variables, this.entidad.variables, d);
+    return desgloseResultado(this.variables, this.entidad.variables, d, this.#fuentes);
   }
 
   /** El rango que esta ficha ha elegido en una derivada con rangos (su posición en `opciones`). */
@@ -249,6 +253,24 @@ export class EditorFicha {
     if (!v) return;
     const actuales = v.opcionales ?? [];
     v.opcionales = actuales.includes(idOpcional) ? actuales.filter((o) => o !== idOpcional) : [...actuales, idOpcional];
+  }
+
+  /** ¿Tiene esta ficha marcado el parámetro opcional `idParametro` en la derivada `idDerivada`? */
+  parametroMarcado(idDerivada: number, idParametro: number): boolean {
+    return this.entidad.variables.find((x) => x.id_definicion === idDerivada)?.parametros_marcados?.includes(idParametro) ?? false;
+  }
+
+  /** Marca o desmarca un parámetro opcional («+ armadura») de una derivada en esta ficha. */
+  alternarParametro(idDerivada: number, idParametro: number) {
+    const v = this.entidad.variables.find((x) => x.id_definicion === idDerivada);
+    if (!v) return;
+    const actuales = v.parametros_marcados ?? [];
+    v.parametros_marcados = actuales.includes(idParametro) ? actuales.filter((p) => p !== idParametro) : [...actuales, idParametro];
+  }
+
+  /** Los parámetros opcionales de una derivada con su nombre, para pintar sus checks. */
+  parametrosOpcionales(d: DefinicionVariable): DefinicionParametro[] {
+    return (d.parametros_opcionales ?? []).flatMap((id) => this.definiciones.find((p) => p.id === id) ?? []);
   }
 
   /** Último error de la ventana (validación, archivos) o de Rust al guardar o borrar. */

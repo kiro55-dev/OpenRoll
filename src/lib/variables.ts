@@ -4,7 +4,7 @@
 // neutro y escala, y cada ficha pone su valor) o de derivadas (suman el resultado de sus bases y, si la ficha las marca,
 // el de sus opcionales). Lo que cuenta en el chat (`2d6 + f`) es el RESULTADO, que se calcula.
 // Espejo de src-tauri/src/tablero_general/variables.rs (Rust lo vuelve a comprobar y es quien tira).
-import type { CalculoParametro, DefinicionParametro, DefinicionVariable, Entidad, ValorVariable } from "./partida.svelte";
+import type { CalculoParametro, DefinicionParametro, DefinicionVariable, Entidad, Parametro, ValorVariable } from "./partida.svelte";
 
 /** Con lo que nace una variable nueva en el formulario del host. */
 export const VARIABLE_NUEVA = { neutro: 10, escala: 2 } as const;
@@ -47,8 +47,23 @@ export function textoModificador(n: number): string {
   return n > 0 ? `+${n}` : String(n);
 }
 
-/** ¿Es derivada? (tiene bases; una base no tiene ninguna). */
-export const esDerivada = (d: Pick<DefinicionVariable, "bases">) => (d.bases?.length ?? 0) > 0;
+/** ¿Es derivada? (tiene bases o parámetros fijos; una base no tiene ninguno). */
+export const esDerivada = (d: Pick<DefinicionVariable, "bases" | "parametros">) => (d.bases?.length ?? 0) > 0 || (d.parametros?.length ?? 0) > 0;
+
+/** Los parámetros de una ficha y sus definiciones (para el nombre): lo que necesita una derivada que suma parámetros. */
+export interface FuentesParametros {
+  definiciones: DefinicionParametro[];
+  valores: Parametro[];
+}
+
+/** ¿Puede un parámetro ser fuente de una derivada? Solo un número escrito a mano (como `parametro_como_fuente` en Rust). */
+export const parametroComoFuente = (p: DefinicionParametro) => !p.calculo && typeof p.valor_por_defecto === "object" && "Numero" in p.valor_por_defecto;
+
+/** Lo que aporta un parámetro de la ficha: su valor si es un número (0 si falta o es texto). */
+function valorDeParametro(fuentes: FuentesParametros, id: number): number {
+  const v = fuentes.valores.find((p) => p.id_definicion === id)?.valor;
+  return v && typeof v === "object" && "Numero" in v && typeof v.Numero === "number" && Number.isFinite(v.Numero) ? v.Numero : 0;
+}
 
 /** Cómo se nombra una variable en pantalla y en el desglose: su abreviatura o, sin ella, su nombre. */
 export const etiquetaVariable = (d: Pick<DefinicionVariable, "nombre" | "abreviatura">) => d.abreviatura || d.nombre;
@@ -58,7 +73,8 @@ export const etiquetaVariable = (d: Pick<DefinicionVariable, "nombre" | "abrevia
 export function partesResultado(
   defs: DefinicionVariable[],
   valores: ValorVariable[],
-  def: DefinicionVariable
+  def: DefinicionVariable,
+  fuentes: FuentesParametros = { definiciones: [], valores: [] }
 ): { etiqueta: string; valor: number }[] {
   const valorDe = (id: number) => valores.find((v) => v.id_definicion === id);
   const deBase = (id: number) => {
@@ -70,13 +86,26 @@ export function partesResultado(
   };
   if (!esDerivada(def)) return [deBase(def.id) ?? { etiqueta: etiquetaVariable(def), valor: 0 }];
   const marcadas = valorDe(def.id)?.opcionales ?? [];
-  return [...def.bases, ...def.opcionales.filter((o) => marcadas.includes(o))].flatMap((id) => deBase(id) ?? []);
+  const marcados = valorDe(def.id)?.parametros_marcados ?? [];
+  const deParametro = (id: number) => {
+    const p = fuentes.definiciones.find((d) => d.id === id);
+    return p ? [{ etiqueta: p.clave, valor: valorDeParametro(fuentes, id) }] : [];
+  };
+  return [
+    ...[...(def.bases ?? []), ...(def.opcionales ?? []).filter((o) => marcadas.includes(o))].flatMap((id) => deBase(id) ?? []),
+    ...[...(def.parametros ?? []), ...(def.parametros_opcionales ?? []).filter((p) => marcados.includes(p))].flatMap(deParametro)
+  ];
 }
 
 /** Igual que `variables::resultado` en Rust: una base, su modificador; una derivada, la suma de sus bases y de sus
  *  opcionales marcadas en la ficha pasada por su fórmula, más el bono del rango elegido. Un valor que falte cuenta como el neutro. */
-export function resultadoVariable(defs: DefinicionVariable[], valores: ValorVariable[], def: DefinicionVariable): number {
-  const suma = partesResultado(defs, valores, def).reduce((s, p) => s + p.valor, 0);
+export function resultadoVariable(
+  defs: DefinicionVariable[],
+  valores: ValorVariable[],
+  def: DefinicionVariable,
+  fuentes?: FuentesParametros
+): number {
+  const suma = partesResultado(defs, valores, def, fuentes).reduce((s, p) => s + p.valor, 0);
   if (!esDerivada(def)) return suma;
   const bono = bonoElegido(def, valores.find((v) => v.id_definicion === def.id));
   return formulaVariable(suma, def.multiplicador, def.divisor, def.constante) + bono;
@@ -84,8 +113,13 @@ export function resultadoVariable(defs: DefinicionVariable[], valores: ValorVari
 
 /** De dónde sale el resultado de una variable, para el `title`: «des (+3) + com (+2)»; con fórmula, «(des (+3) + com (+2)) ÷2 + 1»,
  *  y con rango elegido, «… + Entrenado (+2)». */
-export function desgloseResultado(defs: DefinicionVariable[], valores: ValorVariable[], def: DefinicionVariable): string {
-  const partes = partesResultado(defs, valores, def).map((p) => `${p.etiqueta} (${textoModificador(p.valor)})`);
+export function desgloseResultado(
+  defs: DefinicionVariable[],
+  valores: ValorVariable[],
+  def: DefinicionVariable,
+  fuentes?: FuentesParametros
+): string {
+  const partes = partesResultado(defs, valores, def, fuentes).map((p) => `${p.etiqueta} (${textoModificador(p.valor)})`);
   let texto = partes.join(" + ");
   if (!esDerivada(def)) return texto;
   const m = def.multiplicador ?? 1;
@@ -103,17 +137,22 @@ export function desgloseResultado(defs: DefinicionVariable[], valores: ValorVari
 }
 
 /** Lo que cuenta de una variable al calcular un parámetro: en una base, el valor escrito; en una derivada, su resultado. */
-function valorParaCalculo(defs: DefinicionVariable[], valores: ValorVariable[], id: number): number {
+function valorParaCalculo(defs: DefinicionVariable[], valores: ValorVariable[], id: number, fuentes?: FuentesParametros): number {
   const d = defs.find((x) => x.id === id);
   if (!d) return 0;
-  if (esDerivada(d)) return resultadoVariable(defs, valores, d);
+  if (esDerivada(d)) return resultadoVariable(defs, valores, d, fuentes);
   const v = valores.find((x) => x.id_definicion === id)?.valor;
   return typeof v === "number" && Number.isFinite(v) ? v : d.neutro;
 }
 
 /** Igual que `variables::calcular_parametro` en Rust: el valor de un parámetro calculado con esas variables, entre 0 y 9999. */
-export function calcularParametro(calculo: CalculoParametro, defs: DefinicionVariable[], valores: ValorVariable[]): number {
-  const suma = calculo.variables.reduce((s, id) => s + valorParaCalculo(defs, valores, id), 0);
+export function calcularParametro(
+  calculo: CalculoParametro,
+  defs: DefinicionVariable[],
+  valores: ValorVariable[],
+  fuentes?: FuentesParametros
+): number {
+  const suma = calculo.variables.reduce((s, id) => s + valorParaCalculo(defs, valores, id, fuentes), 0);
   const v = formulaVariable(suma, calculo.multiplicador, calculo.divisor, calculo.constante);
   return Math.min(LIMITE_PARAMETRO_CALCULADO, Math.max(0, v));
 }
@@ -133,7 +172,8 @@ export function recalcularParametros(defsParametros: DefinicionParametro[], defs
   for (const d of defsParametros) {
     if (!d.calculo) continue;
     const p = ficha.parametros.find((x) => x.id_definicion === d.id);
-    if (p) p.valor = { Numero: calcularParametro(d.calculo, defs, ficha.variables) };
+    // Un parámetro calculado nunca es fuente de una derivada: los valores que se leen aquí no cambian al ir recalculando
+    if (p) p.valor = { Numero: calcularParametro(d.calculo, defs, ficha.variables, { definiciones: defsParametros, valores: ficha.parametros }) };
   }
 }
 
@@ -145,7 +185,8 @@ export function normalizarVariables(defs: DefinicionVariable[], valores: ValorVa
     const opcionales = [...new Set((v?.opcionales ?? []).filter((o) => (d.opcionales ?? []).includes(o)))];
     // La opción elegida existe, o se vuelve a la primera (y sin opciones no hay elección)
     const eleccion = (v?.eleccion ?? 0) < (d.opciones?.length ?? 0) ? (v?.eleccion ?? 0) : 0;
-    return { id_definicion: d.id, valor: v ? v.valor : d.neutro, opcionales, eleccion };
+    const parametros_marcados = [...new Set((v?.parametros_marcados ?? []).filter((p) => (d.parametros_opcionales ?? []).includes(p)))];
+    return { id_definicion: d.id, valor: v ? v.valor : d.neutro, opcionales, eleccion, parametros_marcados };
   });
 }
 
@@ -153,7 +194,7 @@ export function normalizarVariables(defs: DefinicionVariable[], valores: ValorVa
  *  se borra (`borradas`: esas y las derivadas que se quedan sin bases). Para el aviso antes de confirmar. */
 export function efectoDeBorrar(defs: DefinicionVariable[], ids: number[]): { afectadas: number[]; borradas: number[] } {
   const borradas = [...ids];
-  const sinBases = defs.filter((d) => esDerivada(d) && !borradas.includes(d.id) && d.bases.every((b) => borradas.includes(b)));
+  const sinBases = defs.filter((d) => esDerivada(d) && !borradas.includes(d.id) && (d.parametros ?? []).length === 0 && d.bases.every((b) => borradas.includes(b)));
   borradas.push(...sinBases.map((d) => d.id));
   const afectadas = defs
     .filter((d) => !borradas.includes(d.id) && [...d.bases, ...d.opcionales].some((x) => borradas.includes(x)))

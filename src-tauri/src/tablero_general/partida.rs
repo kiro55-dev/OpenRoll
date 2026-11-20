@@ -458,6 +458,12 @@ pub fn modificar_definicion_parametro(
         est.definiciones_parametros.iter().filter(|d| d.id != definicion.id).cloned().collect();
     validar_definicion(&otras, &definicion)?;
     variables::validar_parametro_calculado(&definicion, &est.definiciones_variables)?;
+    // Una derivada que lo usa de fuente exige que siga siendo un número escrito a mano (si no, habría ciclos con las variables)
+    if !variables::parametro_como_fuente(&definicion) {
+        if let Some(d) = est.definiciones_variables.iter().find(|d| d.parametros.iter().chain(&d.parametros_opcionales).any(|p| *p == definicion.id)) {
+            return Err(format!("«{}» es fuente de la variable «{}»: quítalo de ella antes de calcularlo con variables", definicion.clave.trim(), d.nombre));
+        }
+    }
 
     let nueva = DefinicionParametro {
         clave: definicion.clave.trim().to_string(),
@@ -544,7 +550,7 @@ pub fn crear_definicion_variable_en(definicion: DefinicionVariable, state: &AppS
     if let Some(ya) = est.definiciones_variables.iter().find(|d| variables::es_la_misma(d, &definicion)) {
         return Ok(ya.clone());
     }
-    variables::validar_definicion(&est.definiciones_variables, &est.grupos_variables, &definicion)?;
+    variables::validar_definicion(&est.definiciones_variables, &est.grupos_variables, &est.definiciones_parametros, &definicion)?;
     comprobar_lista_de_rangos(&est, &definicion)?;
     let id = est.definiciones_variables.iter().map(|d| d.id).max().unwrap_or(0) + 1;
     let nueva = DefinicionVariable { id, ..definicion };
@@ -573,7 +579,7 @@ pub fn modificar_definicion_variable_en(definicion: DefinicionVariable, state: &
         return Ok(());
     }
     let otras: Vec<DefinicionVariable> = est.definiciones_variables.iter().filter(|d| d.id != definicion.id).cloned().collect();
-    variables::validar_definicion(&otras, &est.grupos_variables, &definicion)?;
+    variables::validar_definicion(&otras, &est.grupos_variables, &est.definiciones_parametros, &definicion)?;
     comprobar_lista_de_rangos(&est, &definicion)?;
     registrar(&mut est, &state.almacen, DeltaPartida::VariableModificada(definicion));
     Ok(())

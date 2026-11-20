@@ -186,7 +186,7 @@ mod tests {
                 tipo: TipoEntidad::Enemigo,
                 // La vida es privada; armadura y velocidad, públicas
                 parametros: vec![param(ID_VIDA, 20, false), param(ID_ARMADURA, 12, true), param(ID_VELOCIDAD, 6, true)],
-                variables: vec![ValorVariable { id_definicion: 1, valor: 14, opcionales: vec![], eleccion: 0 }],
+                variables: vec![ValorVariable { id_definicion: 1, valor: 14, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] }],
                 pasos_valor: vec![PasoValor { id_definicion: ID_VIDA, paso: 5 }],
                 cuerpo: Cuerpo::Pequenio,
                 zona_id: 1,
@@ -356,7 +356,7 @@ mod tests {
             CambioEntidad::Parametro(privado),
             CambioEntidad::Parametro(publico.clone()),
             CambioEntidad::Adjuntos(vec![]),
-            CambioEntidad::Variable(ValorVariable { id_definicion: 1, valor: 16, opcionales: vec![], eleccion: 0 }),
+            CambioEntidad::Variable(ValorVariable { id_definicion: 1, valor: 16, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] }),
         ];
 
         assert_eq!(cambios_para(3, &ficha, false, &cambios), Some(cambios.clone()), "el propietario, todo");
@@ -367,7 +367,7 @@ mod tests {
             Some(vec![CambioEntidad::Nombre("Orco jefe".into()), CambioEntidad::Parametro(publico)])
         );
         assert_eq!(cambios_para(4, &ficha, true, &[CambioEntidad::Adjuntos(vec![])]), None, "nada que enviarle");
-        let variable = [CambioEntidad::Variable(ValorVariable { id_definicion: 1, valor: 16, opcionales: vec![], eleccion: 0 })];
+        let variable = [CambioEntidad::Variable(ValorVariable { id_definicion: 1, valor: 16, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] })];
         assert_eq!(cambios_para(4, &ficha, true, &variable), None, "las variables ajenas tampoco");
         let paso = [CambioEntidad::PasoValor(PasoValor { id_definicion: 1, paso: 5 })];
         assert_eq!(cambios_para(4, &ficha, true, &paso), None, "ni el paso de − y +");

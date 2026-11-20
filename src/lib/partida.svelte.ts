@@ -116,6 +116,10 @@ export interface DefinicionVariable {
   rangos?: number | null;
   /** Una copia de las opciones de su lista (la deja Rust al día: no se escribe a mano). */
   opciones?: OpcionVariable[];
+  /** Solo derivadas: parámetros visuales (numéricos, escritos a mano) cuyo valor se suma tal cual. */
+  parametros?: number[];
+  /** Solo derivadas: parámetros que cada ficha puede sumar o no (un check «+ armadura»). */
+  parametros_opcionales?: number[];
 }
 
 /** Una lista de rangos con nombre («Competencia»: Sin entrenar +0, Entrenado +2...) que comparten las variables derivadas. */
@@ -225,6 +229,8 @@ export interface ValorVariable {
   opcionales?: number[];
   /** Solo en una derivada con rangos: el que ha elegido esta ficha (su posición en `DefinicionVariable.opciones`). */
   eleccion?: number;
+  /** Solo en una derivada: los parámetros opcionales que esta ficha tiene marcados. */
+  parametros_marcados?: number[];
 }
 
 /** Ids de los parámetros de serie (fijos en Rust: `ID_VIDA`...). */

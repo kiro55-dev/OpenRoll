@@ -17,7 +17,8 @@
     MAX_NOMBRE_VARIABLE,
     VARIABLE_NUEVA,
     avisoDeBorrar,
-    esDerivada
+    esDerivada,
+    parametroComoFuente
   } from "$lib/variables";
   import SelectorVariables from "./SelectorVariables.svelte";
 
@@ -54,6 +55,9 @@
   /** Las variables base de la partida: de ellas puede depender una derivada. */
   const bases = $derived(partida.definicionesVariables.filter((d) => !esDerivada(d) && partida.gruposVariables.find((g) => g.id === d.grupo)?.tipo === "Base"));
 
+  /** Los parámetros visuales que pueden ser fuente: numéricos y escritos a mano (uno calculado ya usa variables). */
+  const fuentes = $derived(partida.definiciones.filter(parametroComoFuente));
+
   let fila = $state<HTMLDivElement | null>(null);
   let campoNombre = $state<HTMLInputElement | null>(null);
 
@@ -69,6 +73,10 @@
   let dependeDe = $state<number[]>([...(definicion?.bases ?? [])]);
   // svelte-ignore state_referenced_locally
   let opcionales = $state<number[]>([...(definicion?.opcionales ?? [])]);
+  // svelte-ignore state_referenced_locally
+  let parametrosFijos = $state<number[]>([...(definicion?.parametros ?? [])]);
+  // svelte-ignore state_referenced_locally
+  let parametrosOpcionales = $state<number[]>([...(definicion?.parametros_opcionales ?? [])]);
   // svelte-ignore state_referenced_locally
   let multiplicador = $state<number | null>(definicion?.multiplicador ?? 1);
   // svelte-ignore state_referenced_locally
@@ -99,6 +107,8 @@
     escala = definicion.escala;
     dependeDe = [...definicion.bases];
     opcionales = [...definicion.opcionales];
+    parametrosFijos = [...(definicion.parametros ?? [])];
+    parametrosOpcionales = [...(definicion.parametros_opcionales ?? [])];
     multiplicador = definicion.multiplicador ?? 1;
     divisor = definicion.divisor ?? 1;
     constante = definicion.constante ?? 0;
@@ -109,7 +119,7 @@
   $effect(() => {
     if (!definicion) return;
     const d = definicion;
-    void [d.nombre, d.abreviatura, d.neutro, d.escala, d.bases, d.opcionales, d.multiplicador, d.divisor, d.constante, d.rangos];
+    void [d.nombre, d.abreviatura, d.neutro, d.escala, d.bases, d.opcionales, d.parametros, d.parametros_opcionales, d.multiplicador, d.divisor, d.constante, d.rangos];
     if (fila?.contains(document.activeElement)) return;
     deshacer();
   });
@@ -130,13 +140,15 @@
       grupo: definicion?.grupo ?? grupo,
       bases: derivada ? [...dependeDe] : [],
       opcionales: derivada ? [...opcionales] : [],
+      parametros: derivada ? [...parametrosFijos] : [],
+      parametros_opcionales: derivada ? [...parametrosOpcionales] : [],
       multiplicador: derivada ? Number(multiplicador ?? 0) : 1,
       divisor: derivada ? Number(divisor ?? 0) : 1,
       constante: derivada ? Number(constante ?? 0) : 0,
       rangos: derivada ? rangos : null
     };
     // Un borrador a medias se queda como está, sin error y sin guardarse: sin nombre, o una derivada sin ninguna base
-    if (!definicion && (!datos.nombre || (derivada && datos.bases.length === 0))) return;
+    if (!definicion && (!datos.nombre || (derivada && datos.bases.length === 0 && datos.parametros.length === 0))) return;
     if (!derivada && (neutro === null || escala === null || !Number.isInteger(datos.neutro) || !Number.isInteger(datos.escala))) {
       onError("El valor neutro y la escala deben ser números enteros");
       return;
@@ -149,6 +161,8 @@
       datos.escala === definicion.escala &&
       iguales(datos.bases, definicion.bases) &&
       iguales(datos.opcionales, definicion.opcionales) &&
+      iguales(datos.parametros, definicion.parametros ?? []) &&
+      iguales(datos.parametros_opcionales, definicion.parametros_opcionales ?? []) &&
       datos.multiplicador === (definicion.multiplicador ?? 1) &&
       datos.divisor === (definicion.divisor ?? 1) &&
       datos.constante === (definicion.constante ?? 0) &&
@@ -289,17 +303,23 @@
         opciones={bases}
         bind:elegidas={dependeDe}
         excluidas={opcionales}
+        parametros={fuentes}
+        bind:parametrosElegidos={parametrosFijos}
+        parametrosExcluidos={parametrosOpcionales}
         vacio="Elegir…"
-        etiquetaAria="De qué variables base depende"
-        titulo="Variables base cuyos resultados se suman (al menos una)"
+        etiquetaAria="De qué variables base y parámetros depende"
+        titulo="Variables base (su resultado) y parámetros visuales (su valor) que se suman. Al menos uno"
       />
       <SelectorVariables
         opciones={bases}
         bind:elegidas={opcionales}
         excluidas={dependeDe}
+        parametros={fuentes}
+        bind:parametrosElegidos={parametrosOpcionales}
+        parametrosExcluidos={parametrosFijos}
         vacio="Ninguna"
-        etiquetaAria="Variables opcionales"
-        titulo="Cada ficha decide si suma estas (un check «+ com» en la ficha)"
+        etiquetaAria="Variables y parámetros opcionales"
+        titulo="Cada ficha decide si suma estos (un check «+ com» en la ficha)"
       />
     {:else}
       <input

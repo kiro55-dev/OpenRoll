@@ -34,7 +34,9 @@ use crate::tablero_general::tablero::AvisoTablero;
 /// 13: grupos de variables (`grupos_variables` en la vista; derivadas con `bases`/`opcionales`; `ValorVariable.opcionales`).
 /// 14: fórmulas y rangos en las variables derivadas (`DefinicionVariable.multiplicador/divisor/constante/opciones`,
 ///     `ValorVariable.eleccion`), parámetros calculados (`DefinicionParametro.calculo`) y `Tiradas.veredicto` (tiradas `vs`).
-pub const VERSION_PROTOCOLO: u32 = 14;
+/// 15: parámetros visuales como fuente de una derivada (`DefinicionVariable.parametros/parametros_opcionales`,
+///     `ValorVariable.parametros_marcados`).
+pub const VERSION_PROTOCOLO: u32 = 15;
 
 /// Primer byte de un trozo binario: de una imagen que baja (host → jugador) o que sube (jugador → host).
 pub const TROZO_BAJADA: u8 = 1;

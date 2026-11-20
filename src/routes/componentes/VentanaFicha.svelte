@@ -261,7 +261,7 @@
                   {#each suyas as d (d.id)}
                     {@const resultado = editor.resultadoVariable(d) ?? 0}
                     <tr>
-                      <td class="nombre">{d.nombre} <span class="depende" title={ayuda("De qué variables base depende")}>({editor.dependeDe(d)})</span></td>
+                      <td class="nombre">{d.nombre} <span class="depende" title={ayuda("De qué variables base y parámetros depende")}>({editor.dependeDe(d)})</span></td>
                       <td class="abreviatura">{d.abreviatura || "—"}</td>
                       <td>
                        <div class="opcionales">
@@ -280,6 +280,18 @@
                             </label>
                           {/if}
                         {/each}
+                        <!-- Parámetros visuales opcionales: si está marcado, su valor se suma tal cual -->
+                        {#each editor.parametrosOpcionales(d) as p (p.id)}
+                          <label class="opcional" title={ayuda(`Sumar ${p.clave} (su valor) a ${d.nombre}`)}>
+                            <input
+                              type="checkbox"
+                              class="redondo"
+                              checked={editor.parametroMarcado(d.id, p.id)}
+                              onchange={() => editor.alternarParametro(d.id, p.id)}
+                            />
+                            <span>+ {p.clave}</span>
+                          </label>
+                        {/each}
                         <!-- Los rangos de la derivada (Sin entrenar +0, Entrenado +2...): cada ficha elige uno y su bono se suma -->
                         {#if (d.opciones?.length ?? 0) > 0}
                           <select
@@ -293,7 +305,7 @@
                               <option value={i}>{o.nombre} ({textoModificador(o.bonus)})</option>
                             {/each}
                           </select>
-                        {:else if d.opcionales.length === 0}
+                        {:else if d.opcionales.length === 0 && (d.parametros_opcionales?.length ?? 0) === 0}
                           <span class="sin">—</span>
                         {/if}
                        </div>

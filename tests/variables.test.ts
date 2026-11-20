@@ -11,6 +11,8 @@ import {
   textoCalculo,
   tieneFormula,
   efectoDeBorrar,
+  esDerivada,
+  parametroComoFuente,
   etiquetaVariable,
   modificadorVariable,
   normalizarVariables,
@@ -53,8 +55,8 @@ describe("resultado de una variable (igual que variables::modificador en Rust)",
 
   it("normalizar deja una por definición, en su orden, con el neutro en las que faltan", () => {
     expect(normalizarVariables([fuerza, cordura], [{ id_definicion: 2, valor: 9 }, { id_definicion: 9, valor: 1 }])).toEqual([
-      { id_definicion: 1, valor: 10, opcionales: [], eleccion: 0 },
-      { id_definicion: 2, valor: 9, opcionales: [], eleccion: 0 }
+      { id_definicion: 1, valor: 10, opcionales: [], eleccion: 0, parametros_marcados: [] },
+      { id_definicion: 2, valor: 9, opcionales: [], eleccion: 0, parametros_marcados: [] }
     ]);
   });
 });
@@ -174,6 +176,48 @@ describe("fórmula y rangos de una derivada (igual que variables::resultado en R
     const dp = (id: number, calculo: unknown) => ({ id, clave: "P", valor_por_defecto: { Numero: 0 }, tiene_maximo: false, representar_mapa: null, visibilidad: "Variable", unidad: null, atenuar_si_negativo: false, calculo }) as never;
     recalcularParametros([dp(1, calculo), dp(2, null)], defs, ficha);
     expect((ficha as { parametros: { valor: unknown }[] }).parametros.map((p) => p.valor)).toEqual([{ Numero: 11 }, { Numero: 4 }]);
+  });
+});
+
+describe("parámetros visuales como fuente de una derivada", () => {
+  const dp = (id: number, clave: string, extra: Record<string, unknown> = {}) =>
+    ({ id, clave, valor_por_defecto: { Numero: 0 }, tiene_maximo: false, representar_mapa: null, visibilidad: "Variable", unidad: null, atenuar_si_negativo: false, calculo: null, ...extra }) as never;
+  const definiciones = [dp(2, "Armadura"), dp(3, "Velocidad")];
+  const valoresParam = [{ id_definicion: 2, valor: { Numero: 12 }, publico: false }, { id_definicion: 3, valor: { Numero: 9 }, publico: false }] as never;
+  const fuentes = { definiciones, valores: valoresParam };
+  const des = base(1, "Destreza", "des", 10, 2);
+  const defensa = { ...derivada(5, "Defensa", "def", [1]), parametros: [2], parametros_opcionales: [3] };
+
+  it("suma el valor del parámetro tal cual, y el opcional solo si la ficha lo marca", () => {
+    const valores = [{ id_definicion: 1, valor: 14 }, { id_definicion: 5, valor: 0 }];
+    expect(resultadoVariable([des, defensa], valores, defensa, fuentes)).toBe(2 + 12);
+    const marcado = [valores[0], { id_definicion: 5, valor: 0, parametros_marcados: [3] }];
+    expect(resultadoVariable([des, defensa], marcado, defensa, fuentes)).toBe(2 + 12 + 9);
+    expect(desgloseResultado([des, defensa], marcado, defensa, fuentes)).toBe("des (+2) + Armadura (+12) + Velocidad (+9)");
+    // La fórmula se aplica a toda la suma
+    const mitad = { ...defensa, divisor: 2, constante: 1 };
+    expect(resultadoVariable([des, mitad], marcado, mitad, fuentes)).toBe(Math.floor(23 / 2) + 1);
+  });
+
+  it("una derivada solo de parámetros es derivada, y sin los datos de la ficha cuenta 0", () => {
+    const solo = { ...derivada(6, "Coraza", "cor", []), parametros: [2] };
+    expect(esDerivada(solo)).toBe(true);
+    expect(resultadoVariable([solo], [], solo, fuentes)).toBe(12);
+    expect(resultadoVariable([solo], [], solo)).toBe(0);
+  });
+
+  it("solo sirven de fuente los numéricos escritos a mano, y las marcas siguen a los opcionales", () => {
+    expect(parametroComoFuente(dp(2, "A"))).toBe(true);
+    expect(parametroComoFuente(dp(2, "A", { calculo: { variables: [1], multiplicador: 1, divisor: 1, constante: 0 } }))).toBe(false);
+    expect(parametroComoFuente(dp(2, "A", { valor_por_defecto: { Texto: "" } }))).toBe(false);
+    const n = normalizarVariables([des, defensa], [{ id_definicion: 5, valor: 0, parametros_marcados: [3, 3, 2, 77] }]);
+    expect(n[1].parametros_marcados).toEqual([3]);
+  });
+
+  it("borrar la última variable de una derivada que también usa parámetros no la borra", () => {
+    expect(efectoDeBorrar([des, defensa], [1]).borradas).toEqual([1]);
+    const sinParametros = derivada(7, "Otra", "ot", [1]);
+    expect(efectoDeBorrar([des, sinParametros], [1]).borradas).toEqual([1, 7]);
   });
 });
 

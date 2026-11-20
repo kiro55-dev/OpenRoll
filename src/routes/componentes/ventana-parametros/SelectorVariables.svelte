@@ -4,13 +4,16 @@
      dibuja fija sobre la ventana para que no la corte el scroll de la tabla. -->
 <script lang="ts">
   import { ayuda } from "$lib/ajustesVista.svelte";
-  import type { DefinicionVariable } from "$lib/partida.svelte";
+  import type { DefinicionParametro, DefinicionVariable } from "$lib/partida.svelte";
   import { etiquetaVariable } from "$lib/variables";
 
   let {
     opciones,
     elegidas = $bindable(),
     excluidas = [],
+    parametros = [],
+    parametrosElegidos = $bindable([]),
+    parametrosExcluidos = [],
     vacio = "Elegir…",
     titulo,
     etiquetaAria
@@ -20,6 +23,10 @@
     elegidas: number[];
     /** Las que ya están elegidas en el otro selector de la fila: se ven pero no se pueden marcar. */
     excluidas?: number[];
+    /** Los parámetros visuales que también se pueden elegir (su valor se suma tal cual), con los mismos permisos que las variables. */
+    parametros?: DefinicionParametro[];
+    parametrosElegidos?: number[];
+    parametrosExcluidos?: number[];
     vacio?: string;
     titulo?: string;
     etiquetaAria: string;
@@ -30,11 +37,13 @@
   let pos = $state({ x: 0, y: 0, ancho: 160 });
 
   const texto = $derived(
-    elegidas
-      .map((id) => opciones.find((o) => o.id === id))
-      .filter((o): o is DefinicionVariable => !!o)
-      .map(etiquetaVariable)
-      .join(" + ")
+    [
+      ...elegidas
+        .map((id) => opciones.find((o) => o.id === id))
+        .filter((o): o is DefinicionVariable => !!o)
+        .map(etiquetaVariable),
+      ...parametrosElegidos.map((id) => parametros.find((p) => p.id === id)?.clave).filter((c): c is string => !!c)
+    ].join(" + ")
   );
 
   /**
@@ -56,6 +65,10 @@
 
   function marcar(id: number) {
     elegidas = elegidas.includes(id) ? elegidas.filter((x) => x !== id) : [...elegidas, id];
+  }
+
+  function marcarParametro(id: number) {
+    parametrosElegidos = parametrosElegidos.includes(id) ? parametrosElegidos.filter((x) => x !== id) : [...parametrosElegidos, id];
   }
 
   // Pulsar fuera lo cierra; Escape también (sin llegar a la fila, que desharía lo escrito)
@@ -124,8 +137,29 @@
           {#if o.abreviatura}<span class="abrev">{o.abreviatura}</span>{/if}
         </label>
       {:else}
-        <span class="sin">No hay variables base: créalas en un grupo de bases.</span>
+        {#if parametros.length === 0}<span class="sin">No hay variables base: créalas en un grupo de bases.</span>{/if}
       {/each}
+      {#if parametros.length > 0}
+        <span class="seccion">Parámetros visuales (su valor)</span>
+        {#each parametros as p (p.id)}
+          {@const bloqueado = parametrosExcluidos.includes(p.id)}
+          <label class="opcion" class:bloqueada={bloqueado}>
+            <input
+              type="checkbox"
+              checked={parametrosElegidos.includes(p.id)}
+              disabled={bloqueado}
+              onchange={() => marcarParametro(p.id)}
+              onkeydown={(e) => {
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  cerrar();
+                }
+              }}
+            />
+            <span>{p.clave}</span>
+          </label>
+        {/each}
+      {/if}
     </div>
   {/if}
 </span>
@@ -150,5 +184,6 @@
   .opcion input { margin: 0; accent-color: #3b82f6; cursor: pointer; }
   .opcion.bloqueada { opacity: 0.4; cursor: default; }
   .abrev { color: #a1a1aa; margin-left: auto; }
+  .seccion { color: #71717a; font-size: 9px; font-weight: 700; text-transform: uppercase; padding: 5px 6px 2px; }
   .sin { color: #71717a; font-size: 10px; padding: 4px 6px; }
 </style>

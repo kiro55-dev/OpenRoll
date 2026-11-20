@@ -39,7 +39,7 @@ fn resolver_variable(
     // En el desglose, la abreviatura que definió el host o, sin ella, el nombre. Una derivada (Acrobacias) suma sus bases y
     // las opcionales que la ficha tiene marcadas
     let nombre = if def.abreviatura.is_empty() { &def.nombre } else { &def.abreviatura };
-    Ok((nombre.clone(), variables::resultado(&est.definiciones_variables, &inst.base.variables, def)))
+    Ok((nombre.clone(), variables::resultado(&est.definiciones_variables, &inst.base.parametros, &inst.base.variables, def)))
 }
 
 // Resalta en negrita si es 1 (pifia) o el valor máximo de caras (crítico)
@@ -480,7 +480,7 @@ mod tests {
         e.definiciones_variables = vec![var(1, "Fuerza", "f", 10, 2), var(2, "Cordura", "cor", 7, 3)];
         let ficha = |id: u16, propietarios: Vec<u16>, fuerza: i16| Entidad {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Jugador, parametros: vec![],
-            variables: vec![ValorVariable { id_definicion: 1, valor: fuerza, opcionales: vec![], eleccion: 0 }, ValorVariable { id_definicion: 2, valor: 9, opcionales: vec![], eleccion: 0 }],
+            variables: vec![ValorVariable { id_definicion: 1, valor: fuerza, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] }, ValorVariable { id_definicion: 2, valor: 9, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] }],
             pasos_valor: vec![],
             cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
             archivos_adjuntos: vec![], es_unico: false, propietarios,

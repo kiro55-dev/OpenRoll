@@ -28,6 +28,8 @@ fn base(id: u16, nombre: &str, abreviatura: &str, grupo: u16, neutro: i16, escal
         constante: 0,
         opciones: vec![],
         rangos: None,
+        parametros: vec![],
+        parametros_opcionales: vec![],
     }
 }
 
@@ -351,7 +353,7 @@ mod tests {
             .iter()
             .map(|d| {
                 let valor = puestos.iter().find(|(a, _)| *a == d.abreviatura).map_or(d.neutro, |(_, v)| *v);
-                ValorVariable { id_definicion: d.id, valor, opcionales: vec![], eleccion: 0 }
+                ValorVariable { id_definicion: d.id, valor, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] }
             })
             .collect()
     }
@@ -362,7 +364,7 @@ mod tests {
     }
 
     fn r(c: &ConjuntoParametros, v: &[ValorVariable], a: &str) -> i32 {
-        resultado(&c.variables, v, por_abreviatura(c, a))
+        resultado(&c.variables, &[], v, por_abreviatura(c, a))
     }
 
     #[test]
@@ -433,8 +435,8 @@ mod tests {
         let c = cthulhu7e();
         let v = valores(&c, &[("con", 60), ("tam", 55), ("pod", 65), ("esq", 45)]);
         let calculo = |clave: &str| c.parametros.iter().find(|p| p.clave == clave).unwrap().calculo.clone().unwrap();
-        assert_eq!(calcular_parametro(&calculo("Vida"), &c.variables, &v), 11, "(60 + 55) ÷ 10");
-        assert_eq!(calcular_parametro(&calculo("Puntos de magia"), &c.variables, &v), 13, "65 ÷ 5");
+        assert_eq!(calcular_parametro(&calculo("Vida"), &c.variables, &[], &v), 11, "(60 + 55) ÷ 10");
+        assert_eq!(calcular_parametro(&calculo("Puntos de magia"), &c.variables, &[], &v), 13, "65 ÷ 5");
         assert_eq!(r(&c, &v, "esq"), 45, "la habilidad es su valor entero, para `1d100 vs esq`");
         assert_eq!(r(&c, &v, "pod"), 65);
         assert_eq!(c.variables.len(), 8 + HABILIDADES_CTHULHU.len());
