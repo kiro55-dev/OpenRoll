@@ -80,6 +80,8 @@ pub enum Peticion {
     MoverInstancia { id_instancia: u16, destino: Option<Destino> },
     MoverInstancias { ids: Vec<u16>, id_mapa: u16, dx: i32, dy: i32 },
     RotarInstancia { id_instancia: u16 },
+    /// Pasa el turno de un grupo de la batalla de un mapa: solo quien controla la ficha que lo tiene.
+    PasarTurno { id_mapa: u16, id_grupo: u16 },
     EspejarInstancia { id_instancia: u16 },
     BorrarInstancia { id_instancia: u16 },
     ModificarValorActual { id_instancia: u16, id_definicion: u16, delta: i16 },
@@ -205,6 +207,10 @@ pub fn permitida_con(est: &EstadoPartida, jugador: IdJugador, p: &Peticion, subi
     }
     match p {
         Peticion::TirarDado { .. } | Peticion::ObtenerHistorialPersonal => Ok(()), // cualquiera tira; `tirar_dado_de` rechaza el `clean`
+        Peticion::PasarTurno { id_mapa, id_grupo } => {
+            mapa_compartido(est, *id_mapa)?;
+            crate::tablero_general::batalla::pasar_turno_de(est, jugador, *id_mapa, *id_grupo).map(|_| ())
+        }
         Peticion::MoverInstancia { id_instancia, destino } => {
             instancia_suya(est, jugador, *id_instancia)?;
             destino_ok(est, destino)
@@ -389,6 +395,8 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
     // Qué tiene que volver a leer la pantalla del host: el chat, o las fichas (banco e instancias)
     let partes = if matches!(p, Peticion::TirarDado { .. }) {
         serde_json::json!({ "tiradas": true })
+    } else if matches!(p, Peticion::PasarTurno { .. }) {
+        serde_json::json!({ "mapas": true })
     } else {
         serde_json::json!({ "entidades": true })
     };
@@ -399,6 +407,7 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
         Peticion::MoverInstancia { id_instancia, destino } => json(partida::mover_instancia_en(id_instancia, destino, state)?),
         Peticion::MoverInstancias { ids, id_mapa, dx, dy } => json(partida::mover_instancias_en(ids, id_mapa, dx, dy, state)?),
         Peticion::RotarInstancia { id_instancia } => json(partida::rotar_instancia_en(id_instancia, state)?),
+        Peticion::PasarTurno { id_mapa, id_grupo } => json(crate::tablero_general::batalla::pasar_turno_en(state, jugador, id_mapa, id_grupo)?),
         Peticion::EspejarInstancia { id_instancia } => json(partida::espejar_instancia_en(id_instancia, state)?),
         Peticion::BorrarInstancia { id_instancia } => json(partida::borrar_instancia_en(id_instancia, state)?),
         Peticion::ModificarValorActual { id_instancia, id_definicion, delta } => {
@@ -529,7 +538,7 @@ mod tests {
     fn mapa(id: u16, compartido: bool) -> Mapa {
         Mapa {
             id, id_zona: 1, nombre: id.to_string(), url_imagen_fondo: None, ancho: 1000, alto: 1000, rejilla: 50,
-            color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido,
+            color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido, batalla: None,
         }
     }
 
@@ -669,6 +678,27 @@ mod tests {
         assert!(ok(&e, 2, json!({ "cmd": "tirar_dado", "comando": "2d20adv + 3" })).is_ok());
         // `limpiar_chat` no está en la lista blanca; y `clean` como tirada lo rechaza `tirar_dado_de`
         assert!(decodificar(json!({ "cmd": "limpiar_chat", "comando": "clean" })).is_err());
+    }
+
+    #[test]
+    fn pasar_el_turno_es_de_quien_controla_la_ficha_que_lo_tiene() {
+        use crate::tablero_general::modelos::{Batalla, GrupoBatalla};
+        let mut e = estado();
+        // Instancias 1 (de Ana), 2 (del host) y 3 (de Luis) en el mapa 1, compartido; la 1 tiene el turno
+        e.mapas[0].batalla = Some(Batalla {
+            grupos: vec![GrupoBatalla { id: 1, nombre: "B".into(), miembros: vec![1, 2, 3], turno: Some(1), ronda: 1 }],
+            siguiente_id: 2,
+        });
+        let pasar = json!({ "cmd": "pasar_turno", "idMapa": 1, "idGrupo": 1 });
+        assert!(matches!(pet(pasar.clone()), Peticion::PasarTurno { id_mapa: 1, id_grupo: 1 }));
+        assert!(ok(&e, 1, pasar.clone()).is_ok(), "su dueña");
+        assert!(ok(&e, 2, pasar.clone()).is_err(), "otro jugador");
+        assert!(ok(&e, ID_HOST, pasar.clone()).is_ok());
+        // El turno es de la del host: ningún jugador lo pasa
+        e.mapas[0].batalla.as_mut().unwrap().grupos[0].turno = Some(2);
+        assert!(ok(&e, 1, pasar.clone()).is_err());
+        // Un mapa que no está compartido no es suyo
+        assert!(ok(&e, 1, json!({ "cmd": "pasar_turno", "idMapa": 2, "idGrupo": 1 })).is_err());
     }
 
     #[test]

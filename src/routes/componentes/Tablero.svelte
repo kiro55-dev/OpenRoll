@@ -440,7 +440,12 @@
   // permisos que al moverla a mano: la pantalla comprueba `partida.controla` y el host vuelve a comprobarlo.
   /** @param {KeyboardEvent} e */
   function alPulsarEnter(e) {
-    if (origenRecorrido === null || !enterEsDelTablero(e)) return;
+    if (!enterEsDelTablero(e)) return;
+    // Sin flecha: Enter pasa el turno de la batalla (si hay una y quien pulsa controla la ficha que lo tiene)
+    if (origenRecorrido === null) {
+      if (partida.pasarTurnoConEnter()) e.preventDefault();
+      return;
+    }
     const id = origenRecorrido;
     const destino = destinoDeLaFlecha({
       recorrido,
@@ -960,7 +965,7 @@
   data-conserva-foco
   role="application"
   aria-label="Tablero de juego"
-  title={ayuda("Rueda: zoom\nArrastrar: mover la vista o una ficha (las que tienen foco, juntas)\nArrastrar click derecho: Dibujar una flecha\nEnter cuando el origen de una flecha está sobre una instancia: mover la instancia\nCtrl+clic: añadir o quitar del foco\nCtrl+arrastrar en el fondo: seleccionar con un recuadro\nDoble clic: centrar\nClic central: aviso\nArrastrar con botón derecho: medir\nClic derecho: rotar\nCtrl+clic derecho: rotar y espejar")}
+  title={ayuda("Rueda: zoom\nArrastrar: mover la vista o una ficha (las que tienen foco, juntas)\nArrastrar click derecho: Dibujar una flecha\nEnter cuando el origen de una flecha está sobre una instancia: mover la instancia\nEnter (en una batalla): pasar el turno\nCtrl+clic: añadir o quitar del foco\nCtrl+arrastrar en el fondo: seleccionar con un recuadro\nDoble clic: centrar\nClic central: aviso\nArrastrar con botón derecho: medir\nClic derecho: rotar\nCtrl+clic derecho: rotar y espejar")}
   onwheel={alRueda}
   onpointerdown={alPresionar}
   onpointermove={alMover}

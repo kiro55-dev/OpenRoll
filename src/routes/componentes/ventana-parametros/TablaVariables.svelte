@@ -6,6 +6,7 @@
 <script lang="ts">
   import { ayuda } from "$lib/ajustesVista.svelte";
   import { partida, type GrupoVariables, type TipoGrupoVariables } from "$lib/partida.svelte";
+  import { edicionVariables as edicion } from "$lib/edicionVariables.svelte";
   import { MAX_NOMBRE_GRUPO, avisoDeBorrar } from "$lib/variables";
   import ListaGrupoVariables from "./ListaGrupoVariables.svelte";
   import ListasRangos from "./ListasRangos.svelte";
@@ -90,6 +91,19 @@
     }
   }
 
+  // ---- Guardar lo pendiente de todas las variables (el mismo botón que Ctrl+S) ----
+  let guardandoTodo = $state(false);
+
+  async function guardarTodo() {
+    if (guardandoTodo) return;
+    guardandoTodo = true;
+    try {
+      await edicion.guardarTodo();
+    } finally {
+      guardandoTodo = false;
+    }
+  }
+
   function cambiarA(g: GrupoVariables) {
     onError(""); // un aviso de otro grupo no se queda
     confirmandoBorrar = false;
@@ -151,6 +165,10 @@
   {/each}
 
   <div class="pie-grupo">
+    <!-- Con cambios sin guardar en cualquier fila: el botón verde, a la izquierda de «Borrar grupo» -->
+    {#if edicion.hayCambios}
+      <button type="button" class="btn-guardar-cambios" title={ayuda("Atajo: Ctrl + S")} onclick={guardarTodo} disabled={guardandoTodo}>Guardar cambios</button>
+    {/if}
     {#if confirmandoBorrar}
       <div class="confirmar" role="alert">
         <span>{avisoBorrarGrupo}</span>
@@ -191,7 +209,14 @@
   .tipos button:hover { border-color: #3b82f6; }
   .grupo-contenido { display: flex; flex-direction: column; gap: 8px; }
   .grupo-contenido[hidden] { display: none; }
-  .pie-grupo { display: flex; justify-content: flex-end; }
+  .pie-grupo { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .btn-guardar-cambios {
+    border: none; padding: 5px 12px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;
+    background: #16a34a; color: white;
+  }
+  .btn-guardar-cambios:hover { background: #15803d; }
+  .btn-guardar-cambios:disabled { opacity: 0.6; cursor: default; }
+  .btn-borrar-grupo { margin-left: auto; }
   .btn-borrar-grupo { background: none; border: none; color: #f87171; font-size: 10px; font-weight: 600; cursor: pointer; padding: 2px; }
   .btn-borrar-grupo:hover { text-decoration: underline; }
   .confirmar {

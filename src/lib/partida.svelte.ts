@@ -16,6 +16,7 @@ import { desplazarGrupo, encajar, ladosInstancia, rejillaDe } from "$lib/tablero
 import { ajustesVista } from "$lib/ajustesVista.svelte";
 import { esJugador } from "$lib/modo";
 import { tiradas } from "$lib/tiradas.svelte";
+import { grupoParaEnter, tieneElTurno } from "$lib/batalla";
 
 export interface Zona {
   id: number;
@@ -36,6 +37,25 @@ export interface Mapa {
   orden: number;
   /** Lo ven los jugadores de la sala (la casilla del mapa). Lo cambia solo `compartirMapa`. */
   compartido: boolean;
+  /** La batalla en curso en este mapa (el parámetro «en batalla»), o nada. La cambian solo `Empezar`, `Terminar` y pasar el turno. */
+  batalla?: Batalla | null;
+}
+
+/** Una batalla en un mapa: uno o varios grupos, cada uno con su turno y su contador de vueltas (ver `$lib/batalla`). */
+export interface Batalla {
+  grupos: GrupoBatalla[];
+  siguiente_id: number;
+}
+
+export interface GrupoBatalla {
+  id: number;
+  nombre: string;
+  /** Ids de las instancias que participan. */
+  miembros: number[];
+  /** La instancia que tiene el turno (`null` si el grupo no tiene a nadie). */
+  turno: number | null;
+  /** La vuelta en la que va (empieza en 1). */
+  ronda: number;
 }
 
 export type TipoEntidad = "Enemigo" | "NPC" | "Jugador" | "Objeto";
@@ -397,9 +417,9 @@ class Partida {
   /** «Fichas activas» de arriba abajo. */
   instanciasOrdenadas = $derived([...this.instancias].sort((a, b) => a.orden - b.orden || a.id_instancia - b.id_instancia));
   /** Las que enseña «Fichas activas»: todas, o con el filtro «Este mapa» (ver `ajustesVista`) solo las puestas
-   *  en el tablero del mapa abierto. A un jugador solo le llega lo que puede ver, así que el filtro es el mismo. */
-  instanciasVisibles = $derived(
-    ajustesVista.soloMapaActual
+   *  en el tablero del mapa abierto. En un mapa en batalla el filtro es obligatorio (el botón se bloquea). A un jugador solo le llega lo que puede ver, así que el filtro es el mismo. */
+  instanciasVisibles = $derived.by(() =>
+    ajustesVista.soloMapaActual || this.mapaActual?.batalla
       ? this.instanciasOrdenadas.filter((i) => estaEnMapa(i, this.mapaActual?.id))
       : this.instanciasOrdenadas
   );
@@ -461,6 +481,8 @@ class Partida {
   /** `null` = no hay ninguna zona (todavía no se ha creado, o se borró la última). */
   zonaId = $state<number | null>(null);
   mapaActual = $state<Mapa | null>(null);
+  /** La batalla del mapa abierto (`null` = no está en batalla). */
+  batallaActual = $derived(this.mapaActual?.batalla ?? null);
   rejilla = $state<Rejilla>({ ...REJILLA_DEFECTO });
 
   zonasOrdenadas = $derived([...this.zonas].sort(porOrden));
@@ -858,9 +880,66 @@ class Partida {
     ]);
     this.banco = banco;
     this.instancias = instancias;
+    // Una instancia que llega, sale o se oculta cambia la batalla (la sanea Rust): se vuelve a leer si hay alguna
+    if (!esJugador && this.mapas.some((m) => m.batalla)) await this.recargarBatallas();
     // Las seleccionadas que ya no existen (borradas, o se fue su zona) dejan de estarlo
     const ids = this.idsBancoSeleccionados.filter((id) => banco.some((e) => e.id === id));
     if (ids.length !== this.idsBancoSeleccionados.length) this.idsBancoSeleccionados = ids;
+  }
+
+  // ------------------------------------------------------------------
+  // Batalla: turnos por mapa (Rust decide; aquí solo se lee y se pide)
+  // ------------------------------------------------------------------
+
+  /** Vuelve a leer solo la batalla de los mapas de la zona (sin reabrir el mapa ni mover la vista). */
+  async recargarBatallas() {
+    if (this.zonaId === null) return;
+    const mapas = (await invoke<Mapa[]>("obtener_mapas_zona", { zonaId: this.zonaId })) ?? [];
+    for (const m of mapas) {
+      const local = this.mapas.find((x) => x.id === m.id);
+      if (local) local.batalla = m.batalla ?? null;
+    }
+    const actual = mapas.find((m) => m.id === this.mapaActual?.id);
+    if (this.mapaActual && actual) this.mapaActual.batalla = actual.batalla ?? null;
+  }
+
+  /** ¿Tiene esta instancia el turno? */
+  tieneElTurno(instancia: Instancia): boolean {
+    return tieneElTurno(this.batallaActual, instancia.id_instancia);
+  }
+
+  /** ¿Puede quien mira pasar el turno de este grupo? (el host, siempre; un jugador, si la ficha que lo tiene es suya) */
+  puedePasarTurno(grupo: GrupoBatalla): boolean {
+    const i = this.instancias.find((x) => x.id_instancia === grupo.turno);
+    return !!i && !i.oculto && this.controla(i);
+  }
+
+  /** Pasa el turno del grupo al siguiente (Rust vuelve a comprobar quién puede). */
+  async pasarTurno(idGrupo: number) {
+    const idMapa = this.mapaActual?.id;
+    if (idMapa === undefined) return;
+    try {
+      await invoke("pasar_turno", { idMapa, idGrupo });
+      await this.recargarBatallas();
+    } catch (err) {
+      this.avisar(String(err));
+    }
+  }
+
+  /** Enter en el tablero: pasa el turno del grupo que toca (ver `grupoParaEnter`). `true` si pasó alguno. */
+  pasarTurnoConEnter(): boolean {
+    const grupo = grupoParaEnter({
+      batalla: this.batallaActual,
+      esJugador,
+      controla: (id) => {
+        const i = this.instancias.find((x) => x.id_instancia === id);
+        return !!i && !i.oculto && this.controla(i);
+      },
+      enFoco: this.instanciaSeleccionada?.id_instancia ?? null
+    });
+    if (!grupo) return false;
+    void this.pasarTurno(grupo.id);
+    return true;
   }
 
   // ------------------------------------------------------------------
@@ -1621,3 +1700,8 @@ export const partida = new Partida();
 
 // Las variables de una tirada (`2d6 + f`) salen de la ficha con el foco o, sin él, de la última que lo tuvo
 tiradas.fichaConFoco = () => partida.fichaParaVariables;
+// `Empezar` y `Terminar` cambian mapas e instancias (el orden de «Fichas activas»): se vuelve a leer lo que cambió
+tiradas.alCambiarBatalla = async () => {
+  await partida.recargarEntidades();
+  await partida.recargarBatallas();
+};

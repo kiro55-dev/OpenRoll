@@ -487,7 +487,7 @@ mod tests {
             color_opacidad: vec![255, 255, 255, 76],
             grosor: 1,
             orden: 0,
-            compartido: false,
+            compartido: false, batalla: None,
         };
         assert!(validar_mapa(&m).is_ok());
         m.rejilla = 0;
@@ -511,7 +511,7 @@ mod tests {
             color_opacidad: vec![255, 255, 255, 76],
             grosor: 1,
             orden: 0,
-            compartido: false,
+            compartido: false, batalla: None,
         }
     }
 

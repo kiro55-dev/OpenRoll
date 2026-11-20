@@ -193,7 +193,7 @@ mod tests {
     fn mapa(id: u16, zona: u16, compartido: bool) -> Mapa {
         Mapa {
             id, id_zona: zona, nombre: format!("M{id}"), url_imagen_fondo: Some(format!("imagenes/m{id}.png")), ancho: 1000,
-            alto: 1000, rejilla: 50, color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido,
+            alto: 1000, rejilla: 50, color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido, batalla: None,
         }
     }
 

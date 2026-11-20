@@ -16,6 +16,7 @@ use tablero_general::conjuntos::{
 };
 use tablero_general::escalas::{guardar_escala_resultado, obtener_ejemplos_escala, obtener_escala_resultado};
 use tablero_general::rangos::{borrar_lista_rangos, crear_lista_rangos, modificar_lista_rangos, obtener_listas_rangos};
+use tablero_general::batalla::{empezar_batalla, pasar_turno, terminar_batalla};
 use tablero_general::dados::{limpiar_chat, tirar_dado};
 use tablero_general::estado;
 use tablero_general::partidas;
@@ -121,6 +122,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             tirar_dado,
             limpiar_chat,
+            empezar_batalla,
+            terminar_batalla,
+            pasar_turno,
             obtener_zonas,
             obtener_definiciones_parametros,
             crear_definicion_parametro,

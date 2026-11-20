@@ -675,7 +675,7 @@ mod tests {
             est.zonas.push(crate::tablero_general::modelos::Zona { id: 1, nombre: "Z".into(), orden: 0 });
             est.mapas.push(crate::tablero_general::modelos::Mapa {
                 id: 1, id_zona: 1, nombre: "M".into(), url_imagen_fondo: None, ancho: 1000, alto: 1000, rejilla: 50,
-                color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido: false,
+                color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido: false, batalla: None,
             });
             est.aplicar_delta(&DeltaPartida::MapaCompartido { id: 1, compartido: true });
             red.tras_cambio(&est);
@@ -699,7 +699,7 @@ mod tests {
             let mut est = red.estado_partida();
             let mapa = |id, ruta: &str, compartido| crate::tablero_general::modelos::Mapa {
                 id, id_zona: 1, nombre: "M".into(), url_imagen_fondo: Some(ruta.into()), ancho: 1000, alto: 1000, rejilla: 50,
-                color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido,
+                color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido, batalla: None,
             };
             est.mapas = vec![mapa(1, "imagenes/fondo.png", true), mapa(2, "imagenes/oculto.png", false)];
         }
@@ -766,7 +766,7 @@ mod tests {
             procesar_delta(e, DeltaPartida::ZonaCreada(Zona { id: 1, nombre: "Z".into(), orden: 0 }));
             let mapa = |id| Mapa {
                 id, id_zona: 1, nombre: format!("M{id}"), url_imagen_fondo: None, ancho: 1000, alto: 1000, rejilla: 50,
-                color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido: false,
+                color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido: false, batalla: None,
             };
             let zona = Zona { id: 1, nombre: "Z".into(), orden: 0 };
             procesar_delta(e, DeltaPartida::MapaCreado(zona.clone(), mapa(1)));
@@ -1533,7 +1533,7 @@ mod tests {
             let mut est = red.estado_partida();
             let mapa = |id, ruta: &str, compartido| crate::tablero_general::modelos::Mapa {
                 id, id_zona: 1, nombre: "M".into(), url_imagen_fondo: Some(ruta.into()), ancho: 1000, alto: 1000, rejilla: 50,
-                color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido,
+                color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido, batalla: None,
             };
             est.mapas = vec![mapa(1, "imagenes/fondo.png", true), mapa(2, "imagenes/oculto.png", false)];
         }

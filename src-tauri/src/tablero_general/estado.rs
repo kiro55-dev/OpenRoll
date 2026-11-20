@@ -18,6 +18,7 @@ use crate::tablero_general::cambios_entidad::{self, CambioEntidad};
 use crate::tablero_general::modelos::*;
 use crate::tablero_general::papelera::{self, Borrado, GrupoPapelera};
 use crate::tablero_general::tablero;
+use crate::tablero_general::batalla;
 use crate::tablero_general::variables::{self, normalizar_variables};
 
 // ========================================================
@@ -109,6 +110,12 @@ pub enum DeltaPartida {
     MapaPublicoCambiado(Option<u16>),
     /// La casilla de un mapa: lo ven (o dejan de ver) los jugadores de la sala.
     MapaCompartido { id: u16, compartido: bool },
+    /// Empieza la batalla del mapa (ya resuelta: grupos, turno y vuelta 1). Ver `batalla.rs`.
+    BatallaIniciada { id_mapa: u16, batalla: Batalla },
+    /// Termina la batalla del mapa (todos sus grupos).
+    BatallaTerminada { id_mapa: u16 },
+    /// Pasa el turno de un grupo (ya resuelto: la instancia que lo tiene ahora y la vuelta en la que va).
+    TurnoPasado { id_mapa: u16, id_grupo: u16, turno: u16, ronda: u32 },
 }
 
 /// Línea de deltas.jsonl al LEER.
@@ -430,11 +437,18 @@ impl EstadoPartida {
                 self.ajustar_a_definiciones();
             }
             DeltaPartida::InstanciaCreada(inst) | DeltaPartida::InstanciaModificada(inst) => {
+                // ¿Ya estaba a la vista en este mismo mapa? Si no, al llegar puede entrar en una batalla (ver `batalla::al_llegar`)
+                let antes_visible_aqui = self
+                    .instancias_activas
+                    .iter()
+                    .find(|i| i.id_instancia == inst.id_instancia)
+                    .is_some_and(|i| i.id_mapa == inst.id_mapa && !i.oculto);
                 if let Some(pos) = self.instancias_activas.iter().position(|i| i.id_instancia == inst.id_instancia) {
                     self.instancias_activas[pos] = inst.clone();
                 } else if matches!(delta, DeltaPartida::InstanciaCreada(_)) {
                     self.instancias_activas.push(inst.clone());
                 }
+                batalla::al_llegar(self, inst.id_instancia, antes_visible_aqui);
             }
             DeltaPartida::InstanciaBorrada(id) => {
                 self.instancias_activas.retain(|i| i.id_instancia != *id);
@@ -538,6 +552,32 @@ impl EstadoPartida {
                     m.compartido = *compartido;
                 }
             }
+            DeltaPartida::BatallaIniciada { id_mapa, batalla } => {
+                if let Some(m) = self.mapas.iter_mut().find(|m| m.id == *id_mapa) {
+                    m.batalla = Some(batalla.clone());
+                }
+            }
+            DeltaPartida::BatallaTerminada { id_mapa } => {
+                if let Some(m) = self.mapas.iter_mut().find(|m| m.id == *id_mapa) {
+                    m.batalla = None;
+                }
+            }
+            DeltaPartida::TurnoPasado { id_mapa, id_grupo, turno, ronda } => {
+                let grupo = self
+                    .mapas
+                    .iter_mut()
+                    .find(|m| m.id == *id_mapa)
+                    .and_then(|m| m.batalla.as_mut())
+                    .and_then(|b| b.grupos.iter_mut().find(|g| g.id == *id_grupo));
+                if let Some(g) = grupo {
+                    g.turno = Some(*turno);
+                    g.ronda = *ronda;
+                }
+            }
+        }
+        // Las batallas siguen a las instancias (quien sale del mapa o se oculta sale de ella)
+        if self.mapas.iter().any(|m| m.batalla.is_some()) {
+            batalla::sanear(self);
         }
     }
 
@@ -685,7 +725,7 @@ pub fn compactar(almacen: &Almacen, estado: &EstadoPartida) -> Result<(), String
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::tablero_general::almacen::pruebas::dir_temporal;
     use std::fs::{self, OpenOptions};
@@ -695,7 +735,7 @@ mod tests {
         Zona { id, nombre: format!("Zona {id}"), orden: 0 }
     }
 
-    fn mapa(id: u16, id_zona: u16) -> Mapa {
+    pub(crate) fn mapa(id: u16, id_zona: u16) -> Mapa {
         Mapa {
             id,
             id_zona,
@@ -707,11 +747,11 @@ mod tests {
             color_opacidad: vec![255, 255, 255, 76],
             grosor: 1,
             orden: 0,
-            compartido: false,
+            compartido: false, batalla: None,
         }
     }
 
-    fn instancia(id: u16, vida: i16) -> Instancia {
+    pub(crate) fn instancia(id: u16, vida: i16) -> Instancia {
         Instancia {
             id_instancia: id,
             id_mapa: None,

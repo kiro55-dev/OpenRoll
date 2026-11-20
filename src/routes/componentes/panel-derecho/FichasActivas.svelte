@@ -17,7 +17,9 @@
   import { arrastreTirada } from "$lib/arrastreTirada.svelte";
   import { miniaturas } from "$lib/miniaturas.svelte";
   import { visorImagen } from "$lib/visorImagen.svelte";
+  import { tiradas } from "$lib/tiradas.svelte";
   import MenuContextual from "../comunes/MenuContextual.svelte";
+  import VentanaBatalla from "./VentanaBatalla.svelte";
 
   // La miniatura de cada ficha activa (la misma que usan el banco, el arrastre y el tablero)
   $effect(() => {
@@ -50,6 +52,10 @@
 
   let menu = $state<{ x: number; y: number; instancia: Instancia } | null>(null);
 
+  // Batalla: en un mapa en batalla el filtro «Este mapa» es obligatorio, y el host puede empezarla o terminarla desde aquí
+  const batalla = $derived(partida.batallaActual);
+  let ventanaBatalla = $state(false);
+
   function dondeEsta(i: Instancia): string {
     if (typeof i.coordenadas !== "object" || i.id_mapa === null) return "Sin colocar";
     if (i.id_mapa === partida.mapaActual?.id) return "En este mapa";
@@ -70,15 +76,41 @@
 
 <div class="cabecera">
   <span class="titulo-mini">INSTANCIAS</span>
+  <div class="acciones-cabecera">
+  {#if !esJugador}
+    {#if batalla}
+      <button
+        type="button"
+        class="filtro batalla"
+        data-conserva-foco
+        title={ayuda("Termina la batalla de este mapa (todos sus grupos) y vuelve al modo normal. Es lo mismo que escribir «Terminar» en el chat")}
+        onclick={() => void tiradas.tirar("Terminar")}
+      >
+        Terminar
+      </button>
+    {:else}
+      <button
+        type="button"
+        class="filtro batalla"
+        data-conserva-foco
+        title={ayuda("Empieza una batalla en el mapa abierto: turnos con contador de vueltas y, si quieres, una tirada de iniciativa que ordena las fichas")}
+        onclick={() => (ventanaBatalla = true)}
+      >
+        Empezar batalla
+      </button>
+    {/if}
+  {/if}
   <button
     type="button"
     class="filtro"
-    class:activo={ajustesVista.soloMapaActual}
-    aria-pressed={ajustesVista.soloMapaActual}
-    disabled={esJugador}
+    class:activo={ajustesVista.soloMapaActual || !!batalla}
+    aria-pressed={ajustesVista.soloMapaActual || !!batalla}
+    disabled={esJugador || !!batalla}
     data-conserva-foco
     title={ayuda(esJugador
       ? "Solo ves las fichas puestas en el mapa abierto"
+      : batalla
+      ? "Este mapa está en batalla: solo se ven las fichas puestas en él"
       : ajustesVista.soloMapaActual
       ? "Solo las fichas puestas en el mapa abierto. Pulsa para ver todas"
       : "Pulsa para ver solo las fichas puestas en el mapa abierto")}
@@ -86,7 +118,26 @@
   >
     Este mapa
   </button>
+  </div>
 </div>
+{#if batalla}
+  <!-- Un renglón por grupo: la vuelta en la que va y, si la ficha que tiene el turno es tuya, pasarlo -->
+  <div class="franja-batalla" data-conserva-foco>
+    {#each batalla.grupos as g (g.id)}
+      <div class="renglon-batalla">
+        <span class="etiqueta-batalla">⚔ {batalla.grupos.length > 1 ? g.nombre : "Batalla"} · Turno {g.ronda}</span>
+        {#if partida.puedePasarTurno(g)}
+          <button
+            type="button"
+            class="pasar-turno"
+            title={ayuda("Atajo: Enter sin tener nada en foco")}
+            onclick={() => void partida.pasarTurno(g.id)}
+          >Pasar turno ›</button>
+        {/if}
+      </div>
+    {/each}
+  </div>
+{/if}
 <div
   class="scroll-fichas"
   data-destino="activas"
@@ -106,6 +157,7 @@
       class:foco-ajeno={partida.idsFocoAjeno.includes(ficha.id_instancia) && !partida.estaSeleccionada(ficha.id_instancia)}
       class:arrastrada={idArrastrada === ficha.id_instancia}
       class:recibe-jugador={arrastreJugador.actual?.idEntidad === ficha.base.id}
+      class:turno={partida.tieneElTurno(ficha)}
       data-indice={i}
       data-id-entidad={ficha.base.id}
       onpointerdown={(e) => arrastre.preparar(e, { instancia: ficha, desde: "activas" })}
@@ -200,6 +252,10 @@
   {/if}
 </div>
 
+{#if ventanaBatalla && !esJugador}
+  <VentanaBatalla onCerrar={() => (ventanaBatalla = false)} />
+{/if}
+
 {#if menu}
   {@const elegida = menu.instancia}
   <div data-conserva-foco>
@@ -226,7 +282,25 @@
     cursor: pointer;
     line-height: normal;
   }
-  .filtro:hover { background: #27272a; color: #f4f4f5; }
+  .filtro:hover:not(:disabled) { background: #27272a; color: #f4f4f5; }
+  .filtro:disabled { cursor: default; }
+  .acciones-cabecera { display: flex; gap: 4px; align-items: center; }
+  .filtro.batalla { color: #60a5fa; border-color: #1e3a8a; }
+  .filtro.batalla:hover:not(:disabled) { background: rgba(59, 130, 246, 0.15); color: #bfdbfe; }
+  /* La batalla: renglón por grupo (vuelta y pasar el turno) y la ficha que tiene el turno, remarcada a la derecha */
+  .franja-batalla { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
+  .renglon-batalla {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 3px 8px; border-radius: 4px; background: rgba(59, 130, 246, 0.1); border: 1px solid #1e3a8a;
+  }
+  .etiqueta-batalla { font-size: 11px; font-weight: bold; color: #93c5fd; }
+  .pasar-turno {
+    background: #2563eb; border: none; color: white; border-radius: 3px; padding: 2px 8px;
+    font-size: 10px; font-weight: 700; cursor: pointer;
+  }
+  .pasar-turno:hover { background: #3b82f6; }
+  /* La ficha con el turno: relleno azulado y la barra ancha a su derecha (sin remarcar el borde) */
+  .tarjeta.turno { background: rgba(59, 130, 246, 0.14); box-shadow: inset -4px 0 0 #3b82f6; }
   .filtro.activo { background: #27272a; color: #ffffff; border-color: #3f3f46; font-weight: bold; }
   .scroll-fichas {
     flex: 1;

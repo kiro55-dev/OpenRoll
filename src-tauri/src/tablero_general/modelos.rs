@@ -753,6 +753,41 @@ pub struct Mapa {
     /// `MapaCompartido`: `modificar_mapa` conserva el guardado.
     #[serde(default)]
     pub compartido: bool,
+
+    /// La batalla de este mapa, si la hay (el parámetro «en batalla»: `batalla.is_some()`). Solo la cambian los deltas de batalla
+    /// (ver `batalla.rs`): `modificar_mapa` conserva la guardada.
+    #[serde(default)]
+    pub batalla: Option<Batalla>,
+}
+
+/// Una batalla en curso en un mapa: uno o varios GRUPOS, cada uno con su turno y su contador de vueltas. Las instancias visibles
+/// del mapa que no están en ningún grupo «no participan» (eso no se guarda).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Batalla {
+    pub grupos: Vec<GrupoBatalla>,
+    /// Id del siguiente grupo que se cree (los ids no se reutilizan dentro de la batalla).
+    #[serde(default)]
+    pub siguiente_id: u16,
+}
+
+/// Un grupo de una batalla. El ORDEN de los turnos no se guarda: es el de `Instancia.orden` («Fichas activas»), así el host puede
+/// reordenar a mano y el turno sigue a su instancia por id.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct GrupoBatalla {
+    pub id: u16,
+    pub nombre: String,
+    /// Ids de las instancias que participan.
+    pub miembros: Vec<u16>,
+    /// La instancia que tiene el turno (`None` si el grupo no tiene miembros).
+    #[serde(default)]
+    pub turno: Option<u16>,
+    /// Vuelta en la que va (empieza en 1; sube al volver al primero de la lista).
+    #[serde(default = "una_ronda")]
+    pub ronda: u32,
+}
+
+fn una_ronda() -> u32 {
+    1
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

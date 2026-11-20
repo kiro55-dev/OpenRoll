@@ -89,6 +89,7 @@ export const PETICIONES = new Set([
   "mover_instancia",
   "mover_instancias",
   "rotar_instancia",
+  "pasar_turno",
   "espejar_instancia",
   "borrar_instancia",
   "modificar_valor_actual",

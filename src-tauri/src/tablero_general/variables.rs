@@ -21,8 +21,9 @@ pub const MAX_ABREVIATURA_VARIABLE: usize = 10;
 pub const MAX_ESCALA_VARIABLE: i16 = 100;
 /// Tope del valor de una variable en una ficha y de su valor neutro (en positivo y en negativo).
 pub const LIMITE_VALOR_VARIABLE: i16 = 9999;
-/// Palabras del chat que no pueden ser variables: limpiar el chat, el dado, la ventaja/desventaja y «vs» (tirada bajo objetivo).
-pub const PALABRAS_RESERVADAS: [&str; 7] = ["c", "clean", "d", "adv", "desv", "dis", "vs"];
+/// Palabras del chat que no pueden ser variables: limpiar el chat, el dado, la ventaja/desventaja, «vs» (tirada bajo objetivo) y las
+/// órdenes de batalla «empezar» y «terminar».
+pub const PALABRAS_RESERVADAS: [&str; 9] = ["c", "clean", "d", "adv", "desv", "dis", "vs", "empezar", "terminar"];
 /// Tope del multiplicador y del divisor de una fórmula.
 pub const MAX_FACTOR_FORMULA: i16 = 100;
 /// Tope de opciones (rangos) de una derivada y de la longitud del nombre de una.

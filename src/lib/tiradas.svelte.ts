@@ -6,6 +6,7 @@
 // sin pasarse nada entre ellas.
 import { invoke } from "$lib/backend";
 import { esJugador } from "$lib/modo";
+import { esComandoBatalla } from "$lib/batalla";
 
 export interface Tirada {
   hora: string;
@@ -286,6 +287,8 @@ class Tiradas {
   /** La instancia con el foco (una sola), de la que salen las variables de una tirada (`2d6 + f`). La pone
    *  `partida.svelte.ts` (que ya importa este store: así no se importan el uno al otro). */
   fichaConFoco: () => number | null = () => null;
+  /** Lo que hay que releer tras `Empezar` o `Terminar` (lo pone `partida.svelte.ts`, por lo mismo). */
+  alCambiarBatalla: () => Promise<void> = async () => {};
 
   // Navegación por los comandos anteriores con ↑ ↓, como en una terminal.
   #anteriores: string[] = [];
@@ -397,6 +400,7 @@ class Tiradas {
       // La tirada ya está en el chat de la partida (con el nombre de quien tira): se vuelve a leer, así sale
       // igual para todos y no se duplica cuando llega también como cambio
       await this.cargar();
+      if (esComandoBatalla(cmd)) await this.alCambiarBatalla();
     } catch (err) {
       // El motivo, si Rust lo da (sin foco, una variable que no existe...). Solo lo ve quien tira.
       const motivo = typeof err === "string" && err.trim() ? `: ${err}` : "";

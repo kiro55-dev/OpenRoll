@@ -59,7 +59,7 @@ pub const MAX_LONGITUD_COMANDO: usize = 200;
 /// letras), que `resolver` convierte en (abreviatura, resultado). Cualquier otro texto es un error, así que nada
 /// de lo escrito llega al desglose (que lo forma `ejecutar_tiradas` con números, palabras fijas y la abreviatura
 /// que definió el host, que solo lleva letras).
-fn parsear_comando(
+pub(crate) fn parsear_comando(
     comando: &str,
     resolver: &mut dyn FnMut(&str) -> Result<(String, i32), String>,
 ) -> Result<Vec<Tirada>, String> {
@@ -308,7 +308,7 @@ fn ejecutar_con_natural(tiradas: &[Tirada]) -> Result<(String, i32, Option<(i32,
 /// Parte un comando en sus dos lados por una comparación suelta: `<=`, `>=`, `<`, `>` o `vs` (azúcar de `<=`): `1d100 vs acro`,
 /// `1d20 + 2 >= 12`. Sin comparación, todo es tirada. Un `vs` pegado a letras (parte de un nombre) no cuenta, solo puede haber una
 /// comparación y le tienen que quedar los dos lados escritos.
-fn dividir_comparacion(comando: &str) -> Result<(&str, Option<(Operador, &str)>), String> {
+pub(crate) fn dividir_comparacion(comando: &str) -> Result<(&str, Option<(Operador, &str)>), String> {
     let mut encontrada: Option<(usize, usize, Operador)> = None; // (dónde empieza, cuánto mide, cuál)
     let mut poner = |inicio: usize, largo: usize, op: Operador| -> Result<(), String> {
         if encontrada.is_some() {
@@ -354,16 +354,16 @@ fn dividir_comparacion(comando: &str) -> Result<(&str, Option<(Operador, &str)>)
 }
 
 /// Un lado de una comparación, ya tirado.
-struct Lado {
-    desglose: String,
-    total: i32,
+pub(crate) struct Lado {
+    pub(crate) desglose: String,
+    pub(crate) total: i32,
     /// `(cara, caras)` si el total sale de UN solo dado normal.
     natural: Option<(i32, i32)>,
     /// ¿Lleva algún dado? (un número o una variable no tiran nada)
     con_dados: bool,
 }
 
-fn tirar_lado(tiradas: &[Tirada]) -> Result<Lado, String> {
+pub(crate) fn tirar_lado(tiradas: &[Tirada]) -> Result<Lado, String> {
     let (desglose, total, natural) = ejecutar_con_natural(tiradas)?;
     Ok(Lado { desglose, total, natural, con_dados: tiradas.iter().any(|t| t.bonificador.is_none()) })
 }
@@ -405,6 +405,10 @@ pub fn tirar_dado_de(
     }
     if comando.chars().count() > MAX_LONGITUD_COMANDO {
         return Err(format!("El comando no puede pasar de {MAX_LONGITUD_COMANDO} caracteres"));
+    }
+    // `Empezar [tirada]` y `Terminar` no son tiradas: son órdenes de batalla (solo del host)
+    if let Some(orden) = crate::tablero_general::batalla::interpretar_comando(comando) {
+        return crate::tablero_general::batalla::ejecutar_comando(state, jugador, comando, orden);
     }
     // `1d100 <= acro`, `1d20 >= 12`, `1d100 vs 45`: dos lados que se tiran por separado y se comparan
     let (izquierda, comparacion) = dividir_comparacion(comando)?;

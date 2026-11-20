@@ -417,7 +417,7 @@ mod tests {
         std::fs::write(dir.join("imagenes/fondo.png"), &fondo).unwrap();
         red.estado_partida().mapas = vec![Mapa {
             id: 1, id_zona: 1, nombre: "M".into(), url_imagen_fondo: Some("imagenes/fondo.png".into()), ancho: 1000, alto: 1000,
-            rejilla: 50, color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido: true,
+            rejilla: 50, color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido: true, batalla: None,
         }];
 
         // --- El navegador: tres canales y una oferta, cifrada con el secreto del enlace ---

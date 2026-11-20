@@ -356,23 +356,13 @@
     {/if}
   </div>
 
-  <!-- Variables con cambios sin guardar: botón verde (o Ctrl+S) y, al cerrar, un aviso -->
+  <!-- Cerrar con variables sin guardar: aviso (el botón «Guardar cambios» está en cada grupo de variables, y Ctrl+S) -->
   {#if avisandoCierre}
     <div class="aviso-cierre" role="alert">
       <span>Hay {edicion.cuantas} variable{edicion.cuantas === 1 ? "" : "s"} con cambios sin guardar.</span>
       <button type="button" class="si" onclick={guardarYCerrar} disabled={guardandoVariables}>Guardar</button>
       <button type="button" class="no" onclick={onCerrar}>No guardar</button>
       <button type="button" class="no" onclick={() => (avisandoCierre = false)}>Cancelar</button>
-    </div>
-  {:else if edicion.hayCambios}
-    <div class="pie-guardar">
-      <button
-        type="button"
-        class="btn-guardar-cambios"
-        title={ayuda("Atajo: Ctrl + S")}
-        onclick={guardarVariables}
-        disabled={guardandoVariables}
-      >Guardar cambios</button>
     </div>
   {/if}
 </div>
@@ -485,14 +475,6 @@
   .pestana-variables { display: flex; flex-direction: column; gap: 8px; }
   .pestana-variables[hidden] { display: none; }
 
-  /* Pie de la ventana (fuera del scroll del cuerpo): lo de las variables sin guardar */
-  .pie-guardar { display: flex; justify-content: flex-start; padding: 6px 10px; border-top: 1px solid #3f3f46; background: #18181b; }
-  .btn-guardar-cambios {
-    border: none; padding: 5px 12px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;
-    background: #16a34a; color: white;
-  }
-  .btn-guardar-cambios:hover { background: #15803d; }
-  .btn-guardar-cambios:disabled { opacity: 0.6; cursor: default; }
   .aviso-cierre {
     display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 10px;
     border-top: 1px solid #7f1d1d; background: rgba(127, 29, 29, 0.35); color: #fecaca;

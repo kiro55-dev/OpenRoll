@@ -101,6 +101,11 @@ pub fn procesar_delta(state: &AppState, delta: DeltaPartida) {
 // `valoracion`: el resultado de una comparación (`1d100 <= acro`) con el nombre que le da la escala del conjunto; `None` en una tirada normal.
 pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, total: i32, publica: bool, valoracion: Option<&crate::tablero_general::escalas::Valoracion>) {
     let mut est = state.lock();
+    registrar_tirada_en(&mut est, &state.almacen, jugador, desglose, total, publica, valoracion);
+}
+
+/// Como `registrar_tirada`, con el estado ya bloqueado (para quien registra más cosas en el mismo paso).
+pub(crate) fn registrar_tirada_en(est: &mut EstadoPartida, almacen: &Almacen, jugador: IdJugador, desglose: &str, total: i32, publica: bool, valoracion: Option<&crate::tablero_general::escalas::Valoracion>) {
     let autor = est.jugadores.iter().find(|j| j.id == jugador).map(|j| j.nombre.clone()).unwrap_or_default();
     let tirada = Tiradas {
         total,
@@ -114,7 +119,7 @@ pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, to
         especial: valoracion.is_some_and(|v| v.especial),
     };
 
-    registrar(&mut est, &state.almacen, DeltaPartida::TiradaRealizada(tirada));
+    registrar(est, almacen, DeltaPartida::TiradaRealizada(tirada));
 }
 
 // Historial personal de comandos (dados.rs)
@@ -1004,7 +1009,7 @@ pub fn crear_mapa(
         color_opacidad: vec![255, 255, 255, 76],
         grosor: 1,
         orden,
-        compartido: false,
+        compartido: false, batalla: None,
     };
 
     registrar(&mut est, &state.almacen, DeltaPartida::MapaCreado(zona, nuevo_mapa.clone()));
@@ -1021,6 +1026,7 @@ pub fn modificar_mapa(mut mapa: Mapa, state: State<'_, AppState>) -> Result<(), 
     let guardado = est.mapas.iter().find(|m| m.id == mapa.id).ok_or("Ese mapa no existe")?;
 
     mapa.compartido = guardado.compartido;
+    mapa.batalla = guardado.batalla.clone();
     (mapa.ancho, mapa.alto) = if guardado.url_imagen_fondo == mapa.url_imagen_fondo {
         (guardado.ancho, guardado.alto)
     } else {
@@ -2176,7 +2182,7 @@ mod tests_fondos_antiguos {
     fn mapa(id: u16, fondo: Option<String>) -> Mapa {
         Mapa {
             id, id_zona: 1, nombre: id.to_string(), url_imagen_fondo: fondo, ancho: 1000, alto: 1000, rejilla: 50,
-            color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido: false,
+            color_opacidad: vec![255, 255, 255, 76], grosor: 1, orden: 0, compartido: false, batalla: None,
         }
     }
 

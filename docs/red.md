@@ -286,6 +286,11 @@ su pantalla relee. Las peticiones de un jugador se ejecutan **en orden**, una a 
 - **Grupos de variables (protocolo 13).** `VistaJugador.grupos_variables` / `Cambios.grupos_variables` (la lista entera si
   cambia); `DefinicionVariable` lleva `grupo`, `bases` y `opcionales`, y `ValorVariable.opcionales` los checks de una
   ficha (solo llegan a host y propietarios, como los valores). Definir grupos y variables sigue siendo solo del host.
+- **Modo batalla (protocolo 16).** `Mapa.batalla` (grupos con sus miembros, turno y vuelta) viaja con el mapa, así que llega a los
+  jugadores en `VistaJugador.mapas` y `Cambios.mapas` sin mensajes nuevos; nunca lleva instancias ocultas (el saneado las quita en
+  cuanto se ocultan). Un jugador pasa el turno con la acción `pasar_turno` (`PasarTurno { idMapa, idGrupo }`, lista blanca): solo si
+  controla la ficha que lo tiene. Empezar y terminar son órdenes de chat del host (`Empezar [tirada]`, `Terminar`): si las manda un
+  jugador, `tirar_dado_de` las rechaza.
 - **Fórmulas, rangos, parámetros calculados y tiradas `vs` (protocolo 14).** `DefinicionVariable` lleva `multiplicador`/`divisor`/`constante`/`rangos` (la lista de rangos que usa) y `opciones` (una copia de las de su lista, que deja el host: el jugador no necesita las listas)
   (de una derivada), `ValorVariable.eleccion` es el rango que ha elegido cada ficha (solo llega a host y propietarios, como los demás
   valores), `DefinicionParametro.calculo` hace que el valor de un parámetro lo calcule el host con las variables de la ficha (el jugador
