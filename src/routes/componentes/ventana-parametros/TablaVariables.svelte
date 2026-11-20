@@ -121,7 +121,8 @@
         class="grupo"
         class:activo={activo?.id === g.id}
         aria-selected={activo?.id === g.id}
-        title={ayuda(`${g.tipo === "Base" ? "Variables base" : "Variables derivadas"}. Doble clic para cambiarle el nombre`)}
+        data-destino={activo && activo.id !== g.id && activo.tipo === g.tipo ? g.id : undefined}
+        title={ayuda(`${g.tipo === "Base" ? "Variables base" : "Variables derivadas"}. Doble clic para cambiarle el nombre. Arrastra aquí una variable de otro grupo del mismo tipo para moverla`)}
         onclick={() => cambiarA(g)}
         ondblclick={() => empezarRenombrar(g)}
       >
@@ -171,6 +172,7 @@
     font-size: 11px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
   }
   .grupo:hover { color: #f4f4f5; border-color: #3f3f46; }
+  .grupo:global(.destino-arrastre) { color: white; border-color: #22c55e; background: rgba(34, 197, 94, 0.18); }
   .grupo.activo { color: white; border-color: #3b82f6; background: rgba(59, 130, 246, 0.12); }
   .grupo.mas { padding: 2px 7px; }
   .marca { color: #60a5fa; font-style: italic; font-size: 10px; }

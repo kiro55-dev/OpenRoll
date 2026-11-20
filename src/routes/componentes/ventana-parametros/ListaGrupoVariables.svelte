@@ -28,7 +28,19 @@
         onError(String(err)); // la lista vuelve sola al orden real al recargar
       }
     },
-    alPulsar: () => {}
+    alPulsar: () => {},
+    // Soltar sobre la pestaña de otro grupo del mismo tipo (bases con bases, derivadas con derivadas) lo cambia de grupo
+    selectorDestino: ".grupo[data-destino]",
+    alSoltarEnDestino: async (item, destino) => {
+      const id = Number(destino);
+      if (id === grupo.id) return;
+      try {
+        await partida.moverVariableAGrupo(item.id, id);
+        onError("");
+      } catch (err) {
+        onError(String(err));
+      }
+    }
   });
 
   $effect(() => lista.sincronizar(suyas.map((d, i) => ({ ...d, orden: i }))));

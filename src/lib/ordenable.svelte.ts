@@ -15,6 +15,11 @@ interface Opciones<T> {
   bloqueado?: () => boolean;
   /** Sin reordenar: pulsar solo elige (los jugadores no cambian el orden de la partida). */
   soloClic?: boolean;
+  /** Elementos ajenos a la lista donde se puede soltar (p. ej. otra pestaña). Deben llevar data-destino. Se marcan con la
+   *  clase `destino-arrastre` mientras el cursor está encima. */
+  selectorDestino?: string;
+  /** Se soltó sobre un destino externo: recibe el item y el valor de su data-destino. Sustituye al reordenado. */
+  alSoltarEnDestino?: (item: T, destino: string) => Promise<void> | void;
 }
 
 export class ListaOrdenable<T extends ConId> {
@@ -59,6 +64,7 @@ export class ListaOrdenable<T extends ConId> {
     const inicioY = e.clientY;
     let superadoUmbral = false;
     let indiceDestino = indice;
+    let destinoExterno: HTMLElement | null = null;
 
     const alMover = (ev: PointerEvent) => {
       if (!superadoUmbral && Math.hypot(ev.clientX - inicioX, ev.clientY - inicioY) > 4) {
@@ -74,6 +80,17 @@ export class ListaOrdenable<T extends ConId> {
 
       this.x = ev.clientX;
       this.y = ev.clientY;
+
+      // ¿Sobre un destino externo?
+      if (this.#opciones.selectorDestino) {
+        const ext = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>(this.#opciones.selectorDestino) ?? null;
+        if (ext !== destinoExterno) {
+          destinoExterno?.classList.remove("destino-arrastre");
+          ext?.classList.add("destino-arrastre");
+          destinoExterno = ext;
+        }
+        if (ext) return;
+      }
 
       // ¿Sobre qué tarjeta está el cursor?
       const sobre = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>(this.#opciones.selector);
@@ -98,7 +115,13 @@ export class ListaOrdenable<T extends ConId> {
         return;
       }
 
+      destinoExterno?.classList.remove("destino-arrastre");
       try {
+        if (destinoExterno?.dataset.destino !== undefined) {
+          // La lista vuelve sola a su orden real al recargar
+          await this.#opciones.alSoltarEnDestino?.(item, destinoExterno.dataset.destino);
+          return;
+        }
         await this.#opciones.alReordenar(this.visuales.map((v) => v.id));
       } catch (err) {
         console.error("No se pudo guardar el nuevo orden:", err);

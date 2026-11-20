@@ -579,6 +579,30 @@ pub fn modificar_definicion_variable_en(definicion: DefinicionVariable, state: &
     Ok(())
 }
 
+/// Pasa una variable a otro grupo del MISMO tipo (de bases a bases, de derivadas a derivadas). Solo cambia el grupo: sus
+/// valores, bases y opcionales siguen igual. Mismo grupo = no hace nada.
+#[tauri::command]
+pub fn mover_variable_a_grupo(id: u16, grupo: u16, state: State<'_, AppState>) -> Result<(), String> {
+    mover_variable_a_grupo_en(id, grupo, &state)
+}
+
+pub fn mover_variable_a_grupo_en(id: u16, grupo: u16, state: &AppState) -> Result<(), String> {
+    let mut est = state.lock();
+    let Some(actual) = est.definiciones_variables.iter().find(|d| d.id == id).cloned() else {
+        return Err("La variable ya no existe".into());
+    };
+    if actual.grupo == grupo {
+        return Ok(());
+    }
+    let destino = variables::tipo_de_grupo(&est.grupos_variables, grupo).ok_or("Ese grupo de variables ya no existe")?;
+    if variables::tipo_de_grupo(&est.grupos_variables, actual.grupo) != Some(destino) {
+        return Err("Solo se puede mover entre grupos del mismo tipo (bases con bases, derivadas con derivadas)".into());
+    }
+    let movida = DefinicionVariable { grupo, ..actual };
+    registrar(&mut est, &state.almacen, DeltaPartida::VariableModificada(movida));
+    Ok(())
+}
+
 /// Borra una variable: desaparece de la lista y de todas las fichas, en cascada (sale de las derivadas que la usan, y las que
 /// se quedan sin bases también se borran). El front avisa antes con `efectoDeBorrar`.
 #[tauri::command]
@@ -1899,6 +1923,23 @@ mod tests_partidas {
         modificar_definicion_variable_en(DefinicionVariable { abreviatura: "acr".into(), grupo: 1, ..acro.clone() }, &state).unwrap();
         let guardada = state.lock().definiciones_variables.iter().find(|d| d.id == acro.id).cloned().unwrap();
         assert_eq!((guardada.abreviatura.as_str(), guardada.grupo), ("acr", 2));
+
+        // Mover entre grupos: solo del mismo tipo
+        let otras_bases = crear_grupo_variables_en("Otras".into(), TipoGrupoVariables::Base, &state).unwrap();
+        let otras_der = crear_grupo_variables_en("Otras derivadas".into(), TipoGrupoVariables::Derivadas, &state).unwrap();
+        mover_variable_a_grupo_en(des.id, otras_bases.id, &state).unwrap();
+        mover_variable_a_grupo_en(acro.id, otras_der.id, &state).unwrap();
+        {
+            let est = state.lock();
+            assert_eq!(est.definiciones_variables.iter().find(|d| d.id == des.id).unwrap().grupo, otras_bases.id);
+            let a = est.definiciones_variables.iter().find(|d| d.id == acro.id).unwrap();
+            assert_eq!((a.grupo, a.bases.clone()), (otras_der.id, vec![des.id]));
+        }
+        assert!(mover_variable_a_grupo_en(des.id, otras_der.id, &state).is_err(), "base a derivadas");
+        assert!(mover_variable_a_grupo_en(acro.id, 1, &state).is_err(), "derivada a bases");
+        assert!(mover_variable_a_grupo_en(des.id, 99, &state).is_err(), "grupo inexistente");
+        mover_variable_a_grupo_en(des.id, otras_bases.id, &state).unwrap(); // el mismo: nada
+        mover_variable_a_grupo_en(acro.id, 2, &state).unwrap(); // vuelve a su sitio para lo que sigue
 
         renombrar_grupo_variables_en(2, "Pericias".into(), &state).unwrap();
         assert_eq!(state.lock().grupos_variables[1].nombre, "Pericias");

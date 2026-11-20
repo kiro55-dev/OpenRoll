@@ -739,6 +739,11 @@ class Partida {
     return this.#cambiarDefiniciones("modificar_definicion_variable", { definicion });
   }
 
+  /** Pasa la variable a otro grupo del mismo tipo (Rust rechaza bases ↔ derivadas). */
+  moverVariableAGrupo(id: number, grupo: number) {
+    return this.#cambiarDefiniciones("mover_variable_a_grupo", { id, grupo });
+  }
+
   /** Desaparece de la lista y de todas las fichas, en cascada (ver `efectoDeBorrar` en $lib/variables). */
   borrarVariable(id: number) {
     return this.#cambiarDefiniciones("borrar_definicion_variable", { id });
