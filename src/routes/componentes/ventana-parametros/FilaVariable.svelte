@@ -2,13 +2,15 @@
 <!-- Una variable de la partida en la tabla del host, editable en línea. En un grupo de BASES: nombre, abreviatura, neutro y
      escala. En uno de DERIVADAS: nombre, abreviatura, de qué bases depende (se suman) y sus opcionales (cada ficha las marca
      o no). Con el botón «ƒ» una derivada también tiene una fórmula (× multiplicador ÷ divisor + constante, redondeando hacia abajo)
-     y RANGOS (Sin entrenar +0, Entrenado +2...: cada ficha elige uno y su bono se suma). Se guarda al salir de la fila o con Enter, si cambió algo; Escape deshace lo escrito. Sin `definicion` es una
-     fila nueva (borrador): se crea en Rust en cuanto tiene nombre (y, si es derivada, al menos una base). Borrar una base
+     y RANGOS (Sin entrenar +0, Entrenado +2...: cada ficha elige uno y su bono se suma). NO se guarda sola: con cambios sin guardar la fila lleva una franja ROJA a la izquierda y, ya guardada, VERDE (ver `edicionVariables`);
+     Enter guarda esta fila, Ctrl+S o el botón «Guardar cambios» de la ventana guardan todas; Escape deshace lo escrito. Sin `definicion` es una
+     fila nueva (borrador): se crea en Rust al guardarla (con nombre y, si es derivada, al menos una base o un parámetro). Borrar una base
      que usan derivadas pide confirmar y dice qué pasará (en cascada). -->
 <script lang="ts">
   import { onMount } from "svelte";
   import { ayuda } from "$lib/ajustesVista.svelte";
   import { partida, type DefinicionVariable, type TipoGrupoVariables } from "$lib/partida.svelte";
+  import { edicionVariables as edicion } from "$lib/edicionVariables.svelte";
   import {
     LIMITE_VALOR_VARIABLE,
     MAX_ABREVIATURA_VARIABLE,
@@ -90,7 +92,17 @@
   let avanzado = $state(tieneAvanzado(definicion));
   let guardando = false;
   /** El borrador ya se creó en Rust: esta fila está a punto de sustituirse por la guardada y no debe crear otra. */
-  let creada = false;
+  let creada = $state(false);
+  /**
+   * El borrador ya creado cuya variable real YA aparece en la lista: hasta que `onCreada` lo quita pasa un momento (se vuelven a
+   * leer las fichas tras recargar las definiciones) en el que se veían las dos filas a la vez, y al desaparecer el borrador
+   * todo daba un salto. Se esconde en cuanto la real está, así que la una sustituye a la otra sin que se vea.
+   */
+  const yaEnLista = $derived(
+    creada &&
+      !definicion &&
+      partida.definicionesVariables.some((d) => d.grupo === grupo && d.nombre.trim().toLowerCase() === nombre.trim().toLowerCase())
+  );
   /** El aviso de borrar en cascada, mientras se espera la confirmación. */
   let confirmando = $state<string | null>(null);
 
@@ -115,24 +127,30 @@
     rangos = definicion.rangos ?? null;
   }
 
-  // Si la lista se relee (al guardar esta u otra), se toma lo de Rust, salvo en la fila donde se está escribiendo
+  // Si la lista se relee (al guardar esta u otra), se toma lo de Rust, salvo en una fila con cambios sin guardar
   $effect(() => {
     if (!definicion) return;
     const d = definicion;
     void [d.nombre, d.abreviatura, d.neutro, d.escala, d.bases, d.opcionales, d.parametros, d.parametros_opcionales, d.multiplicador, d.divisor, d.constante, d.rangos];
-    if (fila?.contains(document.activeElement)) return;
+    if (sucia) return;
     deshacer();
   });
 
   onMount(() => {
     if (!definicion) campoNombre?.focus();
+    // Se apunta en el registro de ediciones (se quita sola al desmontarse)
+    return edicion.registrar(clave, {
+      guardar: () => guardar(),
+      descartar: () => (definicion ? deshacer() : onDescartar?.())
+    });
   });
+  $effect(() => edicion.marcar(clave, sucia));
 
   const iguales = (a: number[], b: number[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 
-  async function guardar(conEnter = false) {
-    if (guardando || creada) return;
-    const datos = {
+  /** Lo escrito en la fila, listo para mandarlo a Rust. */
+  function leerDatos() {
+    return {
       nombre: nombre.trim(),
       abreviatura: abreviatura.trim(),
       neutro: derivada ? 0 : Number(neutro),
@@ -147,37 +165,75 @@
       constante: derivada ? Number(constante ?? 0) : 0,
       rangos: derivada ? rangos : null
     };
-    // Un borrador a medias se queda como está, sin error y sin guardarse: sin nombre, o una derivada sin ninguna base
-    if (!definicion && (!datos.nombre || (derivada && datos.bases.length === 0 && datos.parametros.length === 0))) return;
+  }
+
+  /** ¿Es igual a lo que tiene Rust? */
+  function igualA(datos: ReturnType<typeof leerDatos>, d: DefinicionVariable): boolean {
+    return (
+      datos.nombre === d.nombre &&
+      datos.abreviatura === d.abreviatura &&
+      datos.neutro === d.neutro &&
+      datos.escala === d.escala &&
+      iguales(datos.bases, d.bases) &&
+      iguales(datos.opcionales, d.opcionales) &&
+      iguales(datos.parametros, d.parametros ?? []) &&
+      iguales(datos.parametros_opcionales, d.parametros_opcionales ?? []) &&
+      datos.multiplicador === (d.multiplicador ?? 1) &&
+      datos.divisor === (d.divisor ?? 1) &&
+      datos.constante === (d.constante ?? 0) &&
+      datos.rangos === (d.rangos ?? null)
+    );
+  }
+
+  const clave = Symbol("fila-variable");
+  /** Id único del desplegable de rangos: ahora pueden estar montados a la vez varios borradores. */
+  // svelte-ignore state_referenced_locally
+  const idLista = `lista-${definicion?.id ?? "nueva"}-${Math.random().toString(36).slice(2, 8)}`;
+
+  /**
+   * Cambios sin guardar. En una variable que ya existe: lo escrito difiere de lo guardado. En un borrador: tiene algo escrito
+   * (uno vacío no cuenta, ni avisa al cerrar). Un borrador ya creado en Rust deja de contar.
+   */
+  const sucia = $derived(
+    creada
+      ? false
+      : definicion
+        ? !igualA(leerDatos(), definicion)
+        : nombre.trim() !== "" || abreviatura.trim() !== "" || dependeDe.length + opcionales.length + parametrosFijos.length + parametrosOpcionales.length > 0
+  );
+  /** Guardada en esta sesión y sin tocar desde entonces. */
+  const guardada = $derived(!!definicion && !sucia && edicion.verdes.has(definicion.id));
+
+  /** Guarda la fila. `true` = queda guardada (o no había nada que guardar); `false` = no se pudo (el error ya está a la vista). */
+  async function guardar(conEnter = false): Promise<boolean> {
+    if (guardando || creada) return true;
+    const datos = leerDatos();
+    // Un borrador vacío no se guarda ni da error
+    if (!definicion && !sucia) return true;
+    if (!definicion && !datos.nombre) {
+      onError("La variable necesita un nombre");
+      return false;
+    }
+    if (derivada && datos.bases.length === 0 && datos.parametros.length === 0) {
+      onError("Una variable derivada depende de al menos una variable base o un parámetro");
+      return false;
+    }
     if (!derivada && (neutro === null || escala === null || !Number.isInteger(datos.neutro) || !Number.isInteger(datos.escala))) {
       onError("El valor neutro y la escala deben ser números enteros");
-      return;
+      return false;
     }
-    if (
-      definicion &&
-      datos.nombre === definicion.nombre &&
-      datos.abreviatura === definicion.abreviatura &&
-      datos.neutro === definicion.neutro &&
-      datos.escala === definicion.escala &&
-      iguales(datos.bases, definicion.bases) &&
-      iguales(datos.opcionales, definicion.opcionales) &&
-      iguales(datos.parametros, definicion.parametros ?? []) &&
-      iguales(datos.parametros_opcionales, definicion.parametros_opcionales ?? []) &&
-      datos.multiplicador === (definicion.multiplicador ?? 1) &&
-      datos.divisor === (definicion.divisor ?? 1) &&
-      datos.constante === (definicion.constante ?? 0) &&
-      datos.rangos === (definicion.rangos ?? null)
-    ) {
-      return;
-    }
+    if (definicion && igualA(datos, definicion)) return true;
     guardando = true;
     try {
-      if (definicion) await partida.modificarVariable({ ...datos, id: definicion.id });
-      else {
-        // Se marca ANTES de esperar: nada (otro foco perdido, Enter...) puede crearla por segunda vez
+      if (definicion) {
+        await partida.modificarVariable({ ...datos, id: definicion.id });
+        edicion.marcarVerde(definicion.id);
+      } else {
+        // Se marca ANTES de esperar: nada (Enter, Ctrl+S...) puede crearla por segunda vez
         creada = true;
         try {
-          await partida.crearVariable(datos);
+          const nueva = await partida.crearVariable(datos);
+          edicion.marcarVerde(nueva.id); // antes de quitar el borrador: la fila real nace ya en verde
         } catch (err) {
           creada = false;
           throw err;
@@ -185,8 +241,10 @@
         onCreada?.(conEnter);
       }
       onError("");
+      return true;
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err)); // lo escrito se queda, para corregirlo
+      return false;
     } finally {
       guardando = false;
     }
@@ -200,6 +258,7 @@
     confirmando = null;
     try {
       await partida.borrarVariable(definicion.id);
+      edicion.quitarVerde(definicion.id);
       onError("");
     } catch (err) {
       onError(String(err));
@@ -223,41 +282,7 @@
     }
   }
 
-  /**
-   * ¿Se ha pulsado dentro de la fila y aún no fuera? Pulsar sobre algo que no admite foco (el texto de una opción del
-   * desplegable) hace caer el foco a la página ANTES de que llegue el `mousedown`, y no se puede evitar: por eso «perder el
-   * foco» no basta para saber que has salido de la fila (la guardaría a medias y la sustituiría por la ya creada, con el
-   * desplegable abierto dentro). Se sale de verdad al pulsar FUERA, o cuando el foco pasa a otro elemento de fuera.
-   */
-  let punteroDentro = false;
-
-  function alSalir(e: FocusEvent) {
-    if (fila?.contains(e.relatedTarget as Node | null)) return;
-    // El foco pasa a otro elemento de fuera (Tab, o un clic en algo que admite foco): sin duda se sale. Si no va a ningún
-    // sitio (null), puede ser un clic sobre texto de dentro: se decide con \`punteroDentro\`
-    if (e.relatedTarget) punteroDentro = false;
-    setTimeout(() => {
-      // La fila ya no está en la página, el foco sigue dentro, o se está pulsando dentro (el foco cayó a la página): no es salir
-      const sigue = !fila?.isConnected || fila.contains(document.activeElement) || punteroDentro;
-      if (sigue) return;
-      void guardar();
-    }, 0);
-  }
-
-  // Pulsar fuera de la fila, cuando se había pulsado dentro: ahí sí se sale (el foco ya estaba en la página y no habrá otro `focusout`)
-  $effect(() => {
-    const fuera = (e: PointerEvent) => {
-      if (!fila || fila.contains(e.target as Node)) return;
-      if (!punteroDentro) return; // si el foco estaba en un campo de la fila, lo gestiona `alSalir`
-      punteroDentro = false;
-      void guardar();
-    };
-    window.addEventListener("pointerdown", fuera, true);
-    return () => window.removeEventListener("pointerdown", fuera, true);
-  });
-
   function alPulsar(e: PointerEvent) {
-    punteroDentro = true;
     // Desde un campo, un botón o un selector no se arrastra (se escribe o se pulsa)
     if ((e.target as HTMLElement).closest("input, button, label, .selector, .avanzado")) return;
     onIniciarArrastre?.(e);
@@ -269,6 +294,9 @@
 <div
   class="fila-variable"
   class:nueva={!definicion}
+  class:sustituida={yaEnLista}
+  class:sucia
+  class:guardada
   class:fantasma-origen={arrastrando}
   data-indice={definicion ? indice : undefined}
   role="group"
@@ -276,7 +304,6 @@
   bind:this={fila}
   onpointerdown={alPulsar}
   onkeydown={alTeclear}
-  onfocusout={alSalir}
 >
   <div class="campos" class:derivada>
     <span class="asa" title={definicion ? ayuda("Arrastra para cambiar el orden") : undefined}>{definicion ? "⋮⋮" : "+"}</span>
@@ -365,8 +392,8 @@
           <label>+ <input type="number" class="campo numero" min={-LIMITE_VALOR_VARIABLE} max={LIMITE_VALOR_VARIABLE} aria-label="Constante" bind:value={constante} /></label>
         </div>
         <div class="rangos">
-          <label class="texto" for="lista-{definicion?.id ?? 'nueva'}" title={ayuda("Cada ficha elige uno de los rangos de la lista y su bono se suma al resultado. Las listas se definen una vez, abajo, y las comparten varias variables")}>Rangos:</label>
-          <select id="lista-{definicion?.id ?? 'nueva'}" class="campo" aria-label="Lista de rangos" bind:value={rangos}>
+          <label class="texto" for={idLista} title={ayuda("Cada ficha elige uno de los rangos de la lista y su bono se suma al resultado. Las listas se definen una vez, abajo, y las comparten varias variables")}>Rangos:</label>
+          <select id={idLista} class="campo" aria-label="Lista de rangos" bind:value={rangos}>
             <option value={null}>Sin rangos</option>
             {#each partida.listasRangos as l (l.id)}<option value={l.id}>{l.nombre}</option>{/each}
           </select>
@@ -386,9 +413,17 @@
 
 <style>
   .fila-variable {
-    display: flex; flex-direction: column; gap: 4px;
-    padding: 4px 6px; background: #111113; border: 1px solid #27272a; border-radius: 5px; cursor: grab;
+    position: relative; display: flex; flex-direction: column; gap: 4px;
+    /* 8 px a la izquierda (no 6): un poco de aire entre la franja de estado y el asa ⋮⋮ */
+    padding: 4px 6px 4px 8px; background: #111113; border: 1px solid #27272a; border-radius: 5px; cursor: grab;
   }
+  /* Franja de estado, como en Notepad++: roja = cambios sin guardar, verde = guardada, nada = sin tocar */
+  .fila-variable::before {
+    content: ""; position: absolute; left: -1px; top: -1px; bottom: -1px; width: 3px;
+    border-radius: 5px 0 0 5px; background: transparent; pointer-events: none;
+  }
+  .fila-variable.guardada::before { background: #22c55e; }
+  .fila-variable.sucia::before { background: #ef4444; }
   .barra-avanzado { display: flex; }
   .btn-avanzado {
     background: none; border: none; color: #71717a; cursor: pointer; font-size: 10px; padding: 0 2px; font-weight: 600;
@@ -403,6 +438,7 @@
   .campos.derivada { grid-template-columns: 14px 1fr 54px 1fr 1fr 46px; }
   .fila-variable:hover { border-color: #3f3f46; }
   .fila-variable.nueva { border-style: dashed; cursor: default; }
+  .fila-variable.sustituida { display: none; }
   .fila-variable.fantasma-origen { opacity: 0.3; }
   .asa { color: #71717a; font-size: 12px; text-align: center; }
   .campo {

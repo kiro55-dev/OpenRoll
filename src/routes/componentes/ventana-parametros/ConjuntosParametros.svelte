@@ -8,6 +8,7 @@
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { ayuda } from "$lib/ajustesVista.svelte";
   import { partida, type ResumenBiblioteca, type ResumenConjunto } from "$lib/partida.svelte";
+  import { edicionVariables } from "$lib/edicionVariables.svelte";
 
   let { onError, alCambiar }: { onError: (mensaje: string) => void; alCambiar: () => void } = $props();
 
@@ -23,6 +24,11 @@
   async function pedirCambio(valor: string) {
     if (ocupado || partida.hayFichaNuevaAbierta) return;
     aviso = "";
+    // Las filas con cambios sin guardar dejarían de corresponder a nada en el otro conjunto
+    if (edicionVariables.hayCambios) {
+      onError("Guarda o descarta los cambios sin guardar de las variables antes de cambiar de conjunto");
+      return;
+    }
     let nombre = "";
     let clave: string | null = null;
     let id = 0;

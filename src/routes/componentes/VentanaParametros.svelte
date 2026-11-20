@@ -6,7 +6,9 @@
   import { ayuda } from "$lib/ajustesVista.svelte";
   import { flip } from "svelte/animate";
   import { partida, type DefinicionParametro } from "$lib/partida.svelte";
+  import { onDestroy } from "svelte";
   import { ListaOrdenable } from "$lib/ordenable.svelte";
+  import { edicionVariables as edicion } from "$lib/edicionVariables.svelte";
   import { moverVentana } from "$lib/moverVentana";
   import { FormularioParametro, formasDisponibles, VISIBILIDADES, resumenDefinicion } from "$lib/formularioParametro.svelte";
   import ArrastreFlotante from "./comunes/ArrastreFlotante.svelte";
@@ -16,6 +18,10 @@
   import SelectorVariables from "./ventana-parametros/SelectorVariables.svelte";
 
   let { onCerrar }: { onCerrar: () => void } = $props();
+
+  // Empieza de cero (aquí, antes de que se monten las filas: si no, se borraría lo que ellas registran) y al cerrar se limpia
+  edicion.reiniciar();
+  onDestroy(() => edicion.reiniciar());
 
   /** Subpestaña: los parámetros de siempre (vida, rangos... lo que se dibuja) o las variables (Fuerza «f»...). */
   let pestana = $state<"parametros" | "variables" | "resultados">("parametros");
@@ -96,8 +102,33 @@
     error = "";
   }
 
+  /** El aviso de cerrar con variables sin guardar (Guardar / No guardar / Cancelar). */
+  let avisandoCierre = $state(false);
+  let guardandoVariables = $state(false);
+
   async function cerrar() {
-    if (await guardarSiCambio()) onCerrar();
+    if (!(await guardarSiCambio())) return;
+    if (edicion.hayCambios) {
+      avisandoCierre = true;
+      return;
+    }
+    onCerrar();
+  }
+
+  /** Guarda todas las variables pendientes (Ctrl+S y el botón verde). `true` = ya no queda nada pendiente. */
+  async function guardarVariables(): Promise<boolean> {
+    if (guardandoVariables) return false;
+    guardandoVariables = true;
+    try {
+      return await edicion.guardarTodo();
+    } finally {
+      guardandoVariables = false;
+    }
+  }
+
+  async function guardarYCerrar() {
+    if (await guardarVariables()) onCerrar();
+    else avisandoCierre = false; // algo no vale: se queda en la ventana con el error a la vista
   }
 
   async function borrar(d: DefinicionParametro) {
@@ -134,7 +165,13 @@
   }
 
   function alTeclear(e: KeyboardEvent) {
-    if (e.key === "Escape") cerrar();
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      if (edicion.hayCambios) void guardarVariables();
+    } else if (e.key === "Escape") {
+      if (avisandoCierre) avisandoCierre = false;
+      else cerrar();
+    }
     else if (e.key === "Enter" && pestana === "parametros" && creando && (e.target as HTMLElement).tagName === "INPUT") {
       e.preventDefault();
       guardar();
@@ -172,11 +209,13 @@
       <button type="button" role="tab" aria-selected={pestana === "resultados"} class:activa={pestana === "resultados"} onclick={() => cambiarPestana("resultados")}>Resultados</button>
     </div>
 
-    {#if pestana === "variables"}
+    <!-- Siempre montada (solo se oculta): lo que se haya escrito en las variables sin guardar no se pierde al cambiar de pestaña -->
+    <div class="pestana-variables" hidden={pestana !== "variables"}>
       <TablaVariables onError={(m) => (error = m)} />
-    {:else if pestana === "resultados"}
+    </div>
+    {#if pestana === "resultados"}
       <TablaEscala onError={(m) => (error = m)} />
-    {:else}
+    {:else if pestana === "parametros"}
     <p class="ayuda">Los tienen todas las fichas. Pulsa uno para configurarlo y arrástralo para cambiar el orden en que salen en ellas.</p>
 
     <div class="lista">
@@ -316,6 +355,26 @@
       <p class="error" role="alert">{error}</p>
     {/if}
   </div>
+
+  <!-- Variables con cambios sin guardar: botón verde (o Ctrl+S) y, al cerrar, un aviso -->
+  {#if avisandoCierre}
+    <div class="aviso-cierre" role="alert">
+      <span>Hay {edicion.cuantas} variable{edicion.cuantas === 1 ? "" : "s"} con cambios sin guardar.</span>
+      <button type="button" class="si" onclick={guardarYCerrar} disabled={guardandoVariables}>Guardar</button>
+      <button type="button" class="no" onclick={onCerrar}>No guardar</button>
+      <button type="button" class="no" onclick={() => (avisandoCierre = false)}>Cancelar</button>
+    </div>
+  {:else if edicion.hayCambios}
+    <div class="pie-guardar">
+      <button
+        type="button"
+        class="btn-guardar-cambios"
+        title={ayuda("Atajo: Ctrl + S")}
+        onclick={guardarVariables}
+        disabled={guardandoVariables}
+      >Guardar cambios</button>
+    </div>
+  {/if}
 </div>
 
 <ArrastreFlotante {lista} recto>
@@ -422,4 +481,26 @@
   .btn-guardar:hover { background: #1d4ed8; }
 
   .error { margin: 0; color: #f87171; font-size: 12px; }
+
+  .pestana-variables { display: flex; flex-direction: column; gap: 8px; }
+  .pestana-variables[hidden] { display: none; }
+
+  /* Pie de la ventana (fuera del scroll del cuerpo): lo de las variables sin guardar */
+  .pie-guardar { display: flex; justify-content: flex-start; padding: 6px 10px; border-top: 1px solid #3f3f46; background: #18181b; }
+  .btn-guardar-cambios {
+    border: none; padding: 5px 12px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;
+    background: #16a34a; color: white;
+  }
+  .btn-guardar-cambios:hover { background: #15803d; }
+  .btn-guardar-cambios:disabled { opacity: 0.6; cursor: default; }
+  .aviso-cierre {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 10px;
+    border-top: 1px solid #7f1d1d; background: rgba(127, 29, 29, 0.35); color: #fecaca;
+  }
+  .aviso-cierre span { flex: 1; min-width: 160px; }
+  .aviso-cierre button { border: none; border-radius: 3px; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
+  .aviso-cierre .si { background: #16a34a; color: white; }
+  .aviso-cierre .si:hover { background: #15803d; }
+  .aviso-cierre .no { background: #27272a; color: #d4d4d8; }
+  .aviso-cierre .no:hover { background: #3f3f46; }
 </style>

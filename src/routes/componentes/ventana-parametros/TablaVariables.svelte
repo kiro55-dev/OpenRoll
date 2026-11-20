@@ -143,9 +143,12 @@
 </div>
 
 {#if activo}
-  {#key activo.id}
-    <ListaGrupoVariables grupo={activo} {onError} />
-  {/key}
+  <!-- Todos los grupos montados y solo el abierto a la vista: así lo escrito sin guardar en otro grupo no se pierde al cambiar -->
+  {#each partida.gruposVariables as g (g.id)}
+    <div class="grupo-contenido" hidden={g.id !== activo.id}>
+      <ListaGrupoVariables grupo={g} {onError} />
+    </div>
+  {/each}
 
   <div class="pie-grupo">
     {#if confirmandoBorrar}
@@ -186,6 +189,8 @@
     background: #27272a; border: 1px solid #3f3f46; color: #f4f4f5; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;
   }
   .tipos button:hover { border-color: #3b82f6; }
+  .grupo-contenido { display: flex; flex-direction: column; gap: 8px; }
+  .grupo-contenido[hidden] { display: none; }
   .pie-grupo { display: flex; justify-content: flex-end; }
   .btn-borrar-grupo { background: none; border: none; color: #f87171; font-size: 10px; font-weight: 600; cursor: pointer; padding: 2px; }
   .btn-borrar-grupo:hover { text-decoration: underline; }
