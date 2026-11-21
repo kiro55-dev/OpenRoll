@@ -44,6 +44,7 @@ pub fn vista_jugador(inst: &Instancia, definiciones: &[DefinicionParametro]) -> 
     // Las variables (Fuerza, Cordura...) solo las ven el host y los propietarios
     vista.base.variables.clear();
     vista.base.pasos_valor.clear(); // preferencia de quien controla la ficha
+    vista.base.plantilla_id = None; // es de quien rellena la ficha, no de quien la ve
     vista
 }
 
@@ -178,7 +179,7 @@ pub fn cambios_para(
     let visibles: Vec<CambioEntidad> = cambios
         .iter()
         .filter(|c| match c {
-            CambioEntidad::Adjuntos(_) | CambioEntidad::Variable(_) | CambioEntidad::PasoValor(_) => false,
+            CambioEntidad::Adjuntos(_) | CambioEntidad::Variable(_) | CambioEntidad::PasoValor(_) | CambioEntidad::PlantillaId(_) => false,
             CambioEntidad::Parametro(p) => p.publico,
             _ => true,
         })
@@ -211,7 +212,7 @@ mod tests {
                 miniatura_url: None,
                 foto_encuadre: Default::default(),
                 archivos_adjuntos: vec![Some("archivos/entidad_1/notas.txt".into())],
-                es_unico: false, vision: 0,
+                es_unico: false, vision: 0, plantilla_id: None,
                 propietarios: vec![3],
             },
             valores_actuales: vec![ValorActual { id_definicion: ID_VIDA, valor: 7 }],
@@ -443,5 +444,18 @@ mod tests {
         // La pantalla del host que oculta lo privado también la ve gris
         assert!(instancias_para_el_master(std::slice::from_ref(&i), true, &defs)[0].atenuada);
         assert!(!instancias_para_el_master(std::slice::from_ref(&i), false, &defs)[0].atenuada);
+    }
+
+    #[test]
+    fn la_identidad_de_plantilla_no_sale_a_quien_no_es_dueno() {
+        let mut i = instancia();
+        i.base.plantilla_id = Some("3f2a9c1e-7b64-4d2a-9a51-0c8e2d7f6b13".into());
+        assert_eq!(vista_jugador(&i, &parametros_por_defecto()).base.plantilla_id, None);
+        // Tampoco el cambio de la ficha, salvo a su dueño
+        let cambio = [CambioEntidad::PlantillaId(Some("3f2a9c1e-7b64-4d2a-9a51-0c8e2d7f6b13".into()))];
+        let mut dueno = i.base.clone();
+        dueno.propietarios = vec![4];
+        assert!(cambios_para(4, &dueno, true, &cambio).is_some());
+        assert!(cambios_para(5, &dueno, true, &cambio).is_none());
     }
 }

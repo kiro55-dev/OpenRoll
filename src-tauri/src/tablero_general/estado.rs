@@ -776,7 +776,7 @@ pub(crate) mod tests {
                 miniatura_url: None,
                 foto_encuadre: Default::default(),
                 archivos_adjuntos: vec![],
-                es_unico: false, vision: 0,
+                es_unico: false, vision: 0, plantilla_id: None,
                 propietarios: vec![],
             },
             valores_actuales: vec![ValorActual { id_definicion: ID_VIDA, valor: vida }],

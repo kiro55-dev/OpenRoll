@@ -201,7 +201,7 @@ mod tests {
     fn ficha(id: u16, zona: u16, foto: Option<&str>, adj: &[&str], unica: bool) -> Entidad {
         Entidad {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Enemigo, parametros: vec![], variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio, zona_id: zona,
-            foto_url: foto.map(String::from), miniatura_url: None, foto_encuadre: Default::default(), archivos_adjuntos: adj.iter().map(|s| Some(s.to_string())).collect(), es_unico: unica, vision: 0,
+            foto_url: foto.map(String::from), miniatura_url: None, foto_encuadre: Default::default(), archivos_adjuntos: adj.iter().map(|s| Some(s.to_string())).collect(), es_unico: unica, vision: 0, plantilla_id: None,
             propietarios: vec![],
         }
     }

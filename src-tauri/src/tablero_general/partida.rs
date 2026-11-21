@@ -1296,7 +1296,7 @@ pub fn iniciar_borrador_entidad_en(zona_id: u16, foto_url: Option<String>, state
         miniatura_url: None,
         foto_encuadre: Default::default(),
         archivos_adjuntos: vec![],
-        es_unico: false, vision: 0,
+        es_unico: false, vision: 0, plantilla_id: None,
         propietarios: vec![],
     };
     // Los parámetros calculados nacen ya con el valor que dan las variables de por defecto
@@ -1386,6 +1386,12 @@ fn validar_entidad(est: &EstadoPartida, dir: &Path, e: &Entidad) -> Result<(), S
     if let Cuerpo::Grande(dim) = &e.cuerpo {
         if dim.len() != 2 || dim.iter().any(|&d| d == 0) {
             return Err("El tamaño del cuerpo no es válido".into());
+        }
+    }
+    // La identidad de plantilla: un UUID (o parecido) que escribe la plantilla; nada de texto libre
+    if let Some(id) = &e.plantilla_id {
+        if !(8..=64).contains(&id.len()) || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err("La identidad de la plantilla no es válida".into());
         }
     }
     if e.vision > MAX_VISION {
@@ -1713,7 +1719,7 @@ mod tests {
             miniatura_url: None,
             foto_encuadre: Default::default(),
             archivos_adjuntos: vec![],
-            es_unico: false, vision: 0,
+            es_unico: false, vision: 0, plantilla_id: None,
             propietarios,
         }
     }
@@ -1863,7 +1869,7 @@ mod tests_partidas {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Enemigo,
             parametros: parametros_por_defecto().iter().map(|d| Parametro { id_definicion: d.id, valor: d.valor_por_defecto.clone(), publico: true }).collect(),
             variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None,
-            foto_encuadre: Default::default(), archivos_adjuntos: vec![], es_unico: false, vision: 0, propietarios: vec![],
+            foto_encuadre: Default::default(), archivos_adjuntos: vec![], es_unico: false, vision: 0, plantilla_id: None, propietarios: vec![],
         };
         e.aplicar_delta(&DeltaPartida::EntidadCreada(ficha(1)));
         e.aplicar_delta(&DeltaPartida::EntidadCreada(ficha(2)));

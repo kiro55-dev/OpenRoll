@@ -10,7 +10,7 @@
   import { arrastre } from "$lib/arrastreFicha.svelte";
   import { arrastreJugador } from "$lib/arrastreJugador.svelte";
   import { esJugador } from "$lib/modo";
-  import { esArchivoPlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
+  import { esArchivoPlantilla, fichaDePlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
   import { leerArchivoPlantilla } from "$lib/plantillaIo";
 
   // Soltar aquí una instancia la elimina: se marca el banco mientras pasa por encima
@@ -98,7 +98,8 @@
   async function soltarPlantilla(origen: string | File) {
     try {
       const plantilla = await leerArchivoPlantilla(origen);
-      const existente = plantilla.id_ficha === null ? undefined : partida.banco.find((e) => e.id === plantilla.id_ficha);
+      // La ficha de la plantilla: la que guarda su identidad (ya se importó antes) o aquella de la que se exportó
+      const existente = fichaDePlantilla(plantilla, partida.banco);
       if (existente) plantillaDeFicha = { plantilla, ficha: existente };
       else await partida.abrirConPlantilla(plantilla, null);
     } catch (err) {
@@ -109,7 +110,10 @@
   function decidirPlantilla(destino: "nueva" | "existente") {
     const d = plantillaDeFicha;
     plantillaDeFicha = null;
-    if (d) void partida.abrirConPlantilla(d.plantilla, destino === "existente" ? d.ficha : null);
+    if (!d) return;
+    // Una ficha NUEVA con los datos de una plantilla que ya es de otra: no hereda la identidad (no habría dos fichas con la misma)
+    if (destino === "nueva") void partida.abrirConPlantilla({ ...d.plantilla, plantilla_id: null, id_ficha: null }, null);
+    else void partida.abrirConPlantilla(d.plantilla, d.ficha);
   }
 
   // Drag & drop de imagen desde el explorador del SO: ficha nueva con esa foto (la abierta, si hay, se guarda)

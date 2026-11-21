@@ -1,7 +1,7 @@
 // La plantilla de ficha (src/lib/plantillaFicha.ts): generarla con los datos dentro, leerla (entrada NO fiable) y pasarla a una ficha.
 import { describe, expect, it } from "vitest";
 import type { DefinicionParametro, DefinicionVariable, Entidad, GrupoVariables } from "$lib/partida.svelte";
-import { aplicarAFicha, datosDePlantilla, esArchivoPlantilla, generarPlantilla, leerPlantilla } from "$lib/plantillaFicha";
+import { aplicarAFicha, datosDePlantilla, esArchivoPlantilla, esDeEstaFicha, fichaDePlantilla, generarPlantilla, leerPlantilla, nombreTxt } from "$lib/plantillaFicha";
 import plantillaHtml from "$lib/plantilla/plantilla.html?raw";
 
 const num = (id: number, clave: string, extra: Partial<DefinicionParametro> = {}): DefinicionParametro => ({
@@ -189,3 +189,97 @@ describe("aplicar una plantilla a una ficha", () => {
     expect(avisos).toEqual([]);
   });
 });
+
+describe("la identidad de la plantilla (plantilla_id)", () => {
+  const UUID = "3f2a9c1e-7b64-4d2a-9a51-0c8e2d7f6b13";
+  const leer = (extra: Record<string, unknown>) => leerPlantilla(exportar(null, extra));
+
+  it("una plantilla en blanco no la lleva hasta que se guarda; una ficha que la tiene la exporta", () => {
+    expect(leerPlantilla(exportar(null)).plantilla_id).toBeNull();
+    const e = ficha();
+    e.plantilla_id = UUID;
+    expect(leerPlantilla(exportar(e)).plantilla_id).toBe(UUID);
+    expect(leer({ plantilla_id: "no vale <script>" }).plantilla_id).toBeNull(); // solo letras, números y guiones
+  });
+
+  it("se reconoce la ficha que guarda esa identidad, aunque el archivo venga de otro equipo", () => {
+    const a = { ...ficha(), id: 1 };
+    const b = { ...ficha(), id: 2, plantilla_id: UUID };
+    const p = leer({ plantilla_id: UUID });
+    expect(fichaDePlantilla(p, [a, b])?.id).toBe(2);
+    // Sin ninguna con esa identidad (y sin ficha de origen): no es de ninguna
+    expect(fichaDePlantilla(p, [a])).toBeUndefined();
+    // Dos fichas con la misma: no se adivina cuál; se cae a la ficha de origen, si la hay
+    const c = { ...ficha(), id: 3, plantilla_id: UUID };
+    expect(fichaDePlantilla(p, [b, c])).toBeUndefined();
+    expect(fichaDePlantilla(leer({ plantilla_id: UUID, id_ficha: 3 }), [b, c])?.id).toBe(3);
+  });
+
+  it("una plantilla exportada de una ficha sigue reconociéndose por su id", () => {
+    const p = leerPlantilla(exportar(ficha())); // ficha 7
+    expect(fichaDePlantilla(p, [{ ...ficha(), id: 7 }])?.id).toBe(7);
+    expect(esDeEstaFicha(p, { id: 7, plantilla_id: null })).toBe(true);
+    expect(esDeEstaFicha(p, { id: 8, plantilla_id: null })).toBe(false);
+    expect(esDeEstaFicha(leer({ plantilla_id: UUID }), { id: 8, plantilla_id: UUID })).toBe(true);
+  });
+
+  it("aplicarla deja la identidad en la ficha", () => {
+    const e = ficha();
+    const { entidad } = aplicarAFicha(e, leer({ plantilla_id: UUID }), ctx);
+    expect(entidad.plantilla_id).toBe(UUID);
+    // Una plantilla sin identidad no la toca
+    expect(aplicarAFicha({ ...e, plantilla_id: "otra-identidad-1" } as Entidad, leerPlantilla(exportar(null)), ctx).entidad.plantilla_id).toBe("otra-identidad-1");
+  });
+});
+
+describe("archivos de texto de la plantilla", () => {
+  const leer = (archivos: unknown) => leerPlantilla(exportar(null, { archivos }));
+
+  it("el nombre siempre acaba en .txt, venga lo que venga", () => {
+    expect(nombreTxt("Notas")).toBe("Notas.txt");
+    expect(nombreTxt("Notas.TXT")).toBe("Notas.txt");
+    expect(nombreTxt("virus.exe")).toBe("virus.txt");
+    expect(nombreTxt("../../etc/passwd")).toMatch(/^[^/\\]+\.txt$/); // nunca una ruta
+    expect(nombreTxt("a:b*c?d.pdf")).toBe("a_b_c_d.txt");
+    expect(nombreTxt("  ")).toBe("Documento.txt");
+    expect(nombreTxt(".txt")).toBe("Documento.txt");
+    expect(nombreTxt("con")).toBe("_con.txt");
+    expect(nombreTxt("a\u202eb\u0000c")).toBe("abc.txt");
+    expect(nombreTxt("x".repeat(300))).toBe("x".repeat(100) + ".txt");
+  });
+
+  it("una plantilla sin archivos (de antes) no toca los de la ficha; una con lista vacía sí quiere dejarla sin ninguno", () => {
+    expect(leerPlantilla(plantillaHtmlSinArchivos()).archivos).toBeNull();
+    expect(leer([]).archivos).toEqual([]);
+  });
+
+  it("lee los archivos: fuerza .txt, evita repetidos y solo deja que un archivo reclame cada nombre original", () => {
+    const a = leer([
+      { original: "Notas.txt", nombre: "Diario.exe", contenido: "uno" },
+      { original: "Notas.txt", nombre: "diario", contenido: "dos" },
+      { original: null, nombre: "Otro", contenido: "tres" }
+    ]).archivos!;
+    expect(a.map((x) => x.nombre)).toEqual(["Diario.txt", "diario (2).txt", "Otro.txt"]);
+    expect(a.map((x) => x.original)).toEqual(["Notas.txt", null, null]);
+  });
+
+  it("rechaza lo desmesurado", () => {
+    expect(() => leer(Array.from({ length: 51 }, (_, i) => ({ original: null, nombre: `a${i}`, contenido: "" })))).toThrow(/más de 50/);
+    expect(() => leer([{ original: null, nombre: "grande", contenido: "x".repeat(500_001) }])).toThrow(/pasa de/);
+    expect(() => leer([{ nombre: 5 }])).toThrow(/dañada/);
+  });
+
+  it("al exportar de una ficha, cada archivo sale con su nombre como original y como actual", () => {
+    const html = generarPlantilla(datosDePlantilla({
+      definiciones: PARAMETROS, grupos: GRUPOS, variables: VARIABLES, conjunto: "X", entidad: ficha(), idFicha: 7,
+      archivos: [{ original: "Notas.txt", nombre: "Notas.txt", contenido: "hola" }]
+    }));
+    expect(leerPlantilla(html).archivos).toEqual([{ original: "Notas.txt", nombre: "Notas.txt", contenido: "hola" }]);
+  });
+});
+
+/** Una plantilla de antes de los archivos de texto: sin el campo. */
+function plantillaHtmlSinArchivos(): string {
+  const datos = { formato: "openroll-plantilla", version: 1, conjunto: "X", id_ficha: null, definiciones: {}, ficha: null, foto: null };
+  return plantillaHtml.replace("__DATOS_OPENROLL__", JSON.stringify(datos));
+}

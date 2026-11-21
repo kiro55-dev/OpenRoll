@@ -49,6 +49,7 @@ async function nuevoEditor(e = entidad(), esBorrador = false) {
   partidaFalsa = {
     errorEditor: "",
     definiciones: structuredClone(DEFINICIONES),
+    conjuntos: { activo: 0, guardados: [] },
     entidadEnEdicion: e,
     avisar: vi.fn(),
     guardarEntidad: vi.fn(async () => true),
@@ -365,5 +366,81 @@ describe("cuerpo", () => {
     ed.cuerpoY = null as any; // input vacío
     expect(ed.entidad.cuerpo).toBe("Pequenio");
     expect([ed.cuerpoX, ed.cuerpoY]).toEqual([1, 1]);
+  });
+});
+
+describe("archivos de texto de una plantilla", () => {
+  const plantilla = (archivos: { original: string | null; nombre: string; contenido: string }[] | null) =>
+    ({
+      conjunto: "", id_ficha: null, plantilla_id: null, foto: null, archivos,
+      ficha: { nombre: "Orco", tipo: "Enemigo", cuerpo: [1, 1], vision: 0, parametros: [], variables: [] },
+      nombresVariables: new Map(), nombresParametros: new Map()
+    }) as any;
+  const base = () => entidad({ archivos_adjuntos: [DIR + "a.txt", DIR + "b.txt", DIR + "mapa.pdf"] });
+
+  it("renombra, reescribe, crea y quita; lo que no es .txt no se toca", async () => {
+    const ed = await nuevoEditor(base());
+    await ed.aplicarPlantilla(
+      plantilla([
+        { original: "a.txt", nombre: "alfa.txt", contenido: "nuevo a" }, // renombrado y editado
+        { original: null, nombre: "nueva.txt", contenido: "hola" } // creado en la plantilla; b.txt ya no está: se quita
+      ])
+    );
+    expect(llamadasA("renombrar_archivo_adjunto").map((a) => [a.adjunto.ruta, a.nuevoNombre])).toEqual([
+      [DIR + "a.txt", "alfa.txt"],
+      [DIR + "Documento_1.txt", "nueva.txt"]
+    ]);
+    expect(ed.adjuntos).toEqual([DIR + "alfa.txt", DIR + "mapa.pdf", DIR + "nueva.txt"]);
+    expect(await ed.guardar()).toBe(true);
+    expect(llamadasA("guardar_archivo_texto").map((a) => [a.adjunto.ruta, a.contenido])).toEqual([
+      [DIR + "alfa.txt", "nuevo a"],
+      [DIR + "nueva.txt", "hola"]
+    ]);
+  });
+
+  it("importar otra vez el mismo archivo no vuelve a renombrar ni a crear nada", async () => {
+    const ed = await nuevoEditor(base());
+    const p = plantilla([
+      { original: "a.txt", nombre: "alfa.txt", contenido: "nuevo a" },
+      { original: null, nombre: "nueva.txt", contenido: "hola" }
+    ]);
+    await ed.aplicarPlantilla(p);
+    const renombres = llamadasA("renombrar_archivo_adjunto").length;
+    const creados = llamadasA("crear_documento_texto").length;
+    await ed.aplicarPlantilla(p);
+    expect(llamadasA("renombrar_archivo_adjunto")).toHaveLength(renombres);
+    expect(llamadasA("crear_documento_texto")).toHaveLength(creados);
+    expect(ed.adjuntos).toEqual([DIR + "alfa.txt", DIR + "mapa.pdf", DIR + "nueva.txt"]);
+  });
+
+  it("un archivo sin cambios no se reescribe, y una plantilla sin archivos no toca ninguno", async () => {
+    const ed = await nuevoEditor(base());
+    await ed.aplicarPlantilla(plantilla([
+      { original: "a.txt", nombre: "a.txt", contenido: "disco:" + DIR + "a.txt" },
+      { original: "b.txt", nombre: "b.txt", contenido: "disco:" + DIR + "b.txt" }
+    ]));
+    expect(await ed.guardar()).toBe(true);
+    expect(llamadasA("guardar_archivo_texto")).toEqual([]);
+    expect(llamadasA("renombrar_archivo_adjunto")).toEqual([]);
+
+    const ed2 = await nuevoEditor(base());
+    await ed2.aplicarPlantilla(plantilla(null));
+    expect(ed2.adjuntos).toEqual([DIR + "a.txt", DIR + "b.txt", DIR + "mapa.pdf"]);
+  });
+
+  it("una plantilla con la lista vacía quita todos los .txt de la ficha (los demás archivos se quedan)", async () => {
+    const ed = await nuevoEditor(base());
+    await ed.aplicarPlantilla(plantilla([]));
+    expect(ed.adjuntos).toEqual([DIR + "mapa.pdf"]);
+  });
+
+  it("al exportar sale el contenido de cada .txt, incluido lo escrito sin guardar", async () => {
+    const ed = await nuevoEditor(base());
+    await ed.abrirPestana(0);
+    ed.escribir("sin guardar");
+    expect(await ed.archivosParaPlantilla()).toEqual([
+      { original: "a.txt", nombre: "a.txt", contenido: "sin guardar" },
+      { original: "b.txt", nombre: "b.txt", contenido: "disco:" + DIR + "b.txt" }
+    ]);
   });
 });

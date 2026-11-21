@@ -571,6 +571,10 @@ pub struct Entidad {
     /// Cuánto ve la ficha, en metros. Es un dato de SERIE de la ficha, como el nombre o el cuerpo: no es un parámetro de la partida y
     /// no se puede quitar. Por ahora no hace nada (queda para la niebla de guerra y la visión). 0 = sin definir.
     pub vision: u16,
+    /// La identidad del archivo de plantilla con el que se rellenó la ficha (un UUID que genera la propia plantilla la primera
+    /// vez que se guarda): sirve para reconocerla si ese mismo archivo vuelve a importarse, desde cualquier navegador. Es
+    /// independiente de `id`, que sigue repartiendo el host. `None` = no viene de ninguna plantilla.
+    pub plantilla_id: Option<String>,
     pub zona_id: u16,
 
     // Una criatura o NPC puede no tener foto (en JS llegará como string o null)
@@ -614,6 +618,8 @@ struct EntidadGuardada {
     cuerpo: Cuerpo,
     #[serde(default)]
     vision: u16,
+    #[serde(default)]
+    plantilla_id: Option<String>,
     zona_id: u16,
     #[serde(default)]
     foto_url: Option<String>,
@@ -667,6 +673,7 @@ impl From<EntidadGuardada> for Entidad {
             pasos_valor: g.pasos_valor,
             cuerpo: g.cuerpo,
             vision: g.vision,
+            plantilla_id: g.plantilla_id,
             zona_id: g.zona_id,
             foto_url: g.foto_url,
             miniatura_url: g.miniatura_url,

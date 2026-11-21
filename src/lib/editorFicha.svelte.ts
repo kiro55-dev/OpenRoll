@@ -23,7 +23,7 @@ import {
 } from "$lib/variables";
 import { importarImagen, urlDeImagen } from "$lib/imagenes";
 import { cargarImagen, encuadreCentrado, miniaturaWebp, type Encuadre } from "$lib/recorteFoto";
-import { aplicarAFicha, type PlantillaLeida } from "$lib/plantillaFicha";
+import { aplicarAFicha, type ArchivoPlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
 import { conjuntoActual, importarFotoPlantilla } from "$lib/plantillaIo";
 
 interface ArchivoAdjunto {
@@ -458,6 +458,7 @@ export class EditorFicha {
     e.tipo = entidad.tipo;
     e.cuerpo = entidad.cuerpo;
     e.vision = entidad.vision;
+    e.plantilla_id = entidad.plantilla_id ?? null;
     e.parametros = entidad.parametros;
     e.variables = entidad.variables;
     // La foto (entera) con su encuadre; sin foto en la plantilla se queda la que hubiera
@@ -473,10 +474,127 @@ export class EditorFicha {
         avisos.push(`La foto no se ha podido usar: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    // Los archivos de texto: la plantilla manda (se renombran, se editan, se crean y los que ya no están dejan de existir)
+    if (plantilla.ficha && plantilla.archivos) await this.#aplicarArchivos(plantilla.archivos, avisos);
     this.avisosPlantilla = avisos;
     this.datosImportados = true;
     if (this.#relojImportado) clearTimeout(this.#relojImportado);
     this.#relojImportado = setTimeout(() => (this.datosImportados = false), 4000);
+  }
+
+  /** Las rutas de los .txt adjuntos (los demás tipos de archivo no cuentan). */
+  #rutasTexto(): string[] {
+    return this.adjuntos.filter((r): r is string => !!r && esTexto(r));
+  }
+
+  /** Los .txt de la ficha tal como están ahora (lo escrito sin guardar incluido), para exportarlos en la plantilla. */
+  async archivosParaPlantilla(): Promise<ArchivoPlantilla[]> {
+    const lista: ArchivoPlantilla[] = [];
+    for (const ruta of this.#rutasTexto()) {
+      let contenido: string | undefined = this.textos[ruta];
+      if (contenido === undefined) {
+        try {
+          contenido = await invoke<string>("leer_archivo_texto", { rutaRelativa: ruta });
+        } catch {
+          contenido = ""; // no se pudo leer: sale vacío (al importar solo se cambiaría si el usuario lo edita)
+        }
+      }
+      lista.push({ original: nombreArchivo(ruta), nombre: nombreArchivo(ruta), contenido });
+    }
+    return lista;
+  }
+
+  /**
+   * Pasa los archivos de texto de una plantilla a la ficha (sin guardar: se escriben con «Guardar»). Cada uno se une, por el nombre
+   * que tenía al exportar (`original`), con el .txt de la ficha que se llama así: si el nombre cambió, ese archivo se RENOMBRA; si el
+   * contenido cambió, se reescribe; los que no existían se crean; y los .txt de la ficha que ya no están en la plantilla dejan de
+   * existir (es el cambio que el usuario espera). Los archivos que no son .txt no se tocan.
+   */
+  async #aplicarArchivos(archivos: ArchivoPlantilla[], avisos: string[]) {
+    const clave = (n: string) => n.toLowerCase();
+    const actuales = this.#rutasTexto();
+    const porNombre = new Map(actuales.map((r) => [clave(nombreArchivo(r)), r]));
+    const reclamados = new Set<string>();
+    // Primero se une cada archivo por el nombre que tenía al exportar; los que no se encuentran así (la ficha ya los tiene con su
+    // nombre nuevo, por una importación anterior de este mismo archivo) se buscan por el nombre de ahora
+    const rutas = new Map<ArchivoPlantilla, string>();
+    for (const archivo of archivos) {
+      const ruta = archivo.original ? porNombre.get(clave(archivo.original)) : undefined;
+      if (ruta && !reclamados.has(ruta)) {
+        reclamados.add(ruta);
+        rutas.set(archivo, ruta);
+      }
+    }
+    for (const archivo of archivos) {
+      if (rutas.has(archivo)) continue;
+      const ruta = porNombre.get(clave(archivo.nombre));
+      if (ruta && !reclamados.has(ruta)) {
+        reclamados.add(ruta);
+        rutas.set(archivo, ruta);
+      }
+    }
+    // Los cambios de nombre de los que ya existen van ANTES de crear los nuevos (así un nombre que quedó libre se puede reutilizar)
+    const trabajos: { ruta: string | null; archivo: ArchivoPlantilla }[] = [
+      ...archivos.filter((a) => rutas.has(a)).map((archivo) => ({ ruta: rutas.get(archivo) as string, archivo })),
+      ...archivos.filter((a) => !rutas.has(a)).map((archivo) => ({ ruta: null, archivo }))
+    ];
+
+    // Los que ya no están: dejan de ser de la ficha (el archivo se libera al guardar)
+    for (const ruta of actuales) {
+      if (reclamados.has(ruta)) continue;
+      const i = this.adjuntos.indexOf(ruta);
+      if (i >= 0) this.quitar(i);
+    }
+
+    for (const { ruta: existente, archivo } of trabajos) {
+      let ruta: string;
+      if (existente !== null) {
+        ruta = existente;
+      } else {
+        // Uno nuevo: se crea (Documento_N.txt) y se le pone su nombre
+        const antes = this.adjuntos.length;
+        this.#error = "";
+        await this.crearTexto();
+        if (this.adjuntos.length === antes) {
+          avisos.push(`No se pudo crear «${archivo.nombre}»${this.#error ? `: ${this.#error}` : ""}.`);
+          this.#error = "";
+          continue;
+        }
+        ruta = this.adjuntos[this.adjuntos.length - 1] as string;
+      }
+      // Su nombre: si cambió, se renombra ESE archivo (si ya hay otro con el nombre, se le añade un número)
+      if (nombreArchivo(ruta) !== archivo.nombre) {
+        const stem = archivo.nombre.replace(/\.txt$/i, "");
+        let hecho = false;
+        for (let n = 1; n <= 9 && !hecho; n++) {
+          const nombre = n === 1 ? archivo.nombre : `${stem} (${n}).txt`;
+          const i = this.adjuntos.indexOf(ruta);
+          this.#error = "";
+          await this.renombrar(i, nombre);
+          const ahora = this.adjuntos[i];
+          hecho = !!ahora && nombreArchivo(ahora) === nombre;
+          if (hecho && ahora) ruta = ahora;
+        }
+        this.#error = "";
+        if (!hecho) avisos.push(`No se pudo renombrar «${nombreArchivo(ruta)}» a «${archivo.nombre}».`);
+      }
+      // Su contenido: solo se reescribe si cambió
+      let actual: string | undefined = this.textos[ruta];
+      if (actual === undefined) {
+        try {
+          actual = await invoke<string>("leer_archivo_texto", { rutaRelativa: ruta });
+          this.textos[ruta] = actual;
+        } catch {
+          actual = undefined;
+        }
+      }
+      if (actual !== archivo.contenido) {
+        this.textos[ruta] = archivo.contenido;
+        this.#modificados.add(ruta);
+      }
+    }
+    this.pestana = Math.max(0, Math.min(this.pestana, this.adjuntos.length - 1));
+    if (this.adjuntos.length > 0) await this.abrirPestana(this.pestana);
   }
 
   /** `origen`: una ruta del disco (host) o el archivo que eligió el jugador en su navegador (se sube al host). */

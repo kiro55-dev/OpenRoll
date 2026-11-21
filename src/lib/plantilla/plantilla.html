@@ -27,10 +27,8 @@
   section { background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 12px; }
   section h2 { margin: 0 0 8px; font-size: 13px; color: #93c5fd; text-transform: uppercase; letter-spacing: .04em; }
   .ficha { display: flex; gap: 16px; flex-wrap: wrap; }
-  .campos { flex: 1; min-width: 300px; display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 6px 12px; align-items: center; }
+  .campos { flex: 1; min-width: 300px; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; align-items: center; }
   .campos .fila { min-width: 0; }
-  .campos .ancha { grid-column: 2 / 4; }
-  .campos .publica { justify-content: flex-end; }
   .publico { display: inline-flex; align-items: center; gap: 5px; color: #a1a1aa; font-size: 12px; white-space: nowrap; cursor: pointer; }
   label { color: #a1a1aa; }
   input, select { font: inherit; background: #09090b; border: 1px solid #3f3f46; color: white; border-radius: 4px; padding: 4px 6px; }
@@ -46,7 +44,9 @@
   .caja.sobre { border-color: #3b82f6; background: #0b1220; }
   .caja img { position: absolute; max-width: none; pointer-events: none; }
   .caja .vacia { color: #52525b; text-align: center; font-size: 12px; padding: 10px; }
-  table { width: 100%; border-collapse: collapse; }
+  /* Las mismas columnas en todos los grupos, para que todo quede alineado */
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th:nth-child(1) { width: 34%; } th:nth-child(2) { width: 15%; } th:nth-child(3) { width: 39%; } th:nth-child(4) { width: 12%; }
   th { text-align: left; color: #71717a; font-size: 11px; font-weight: 600; padding: 3px 6px; }
   td { padding: 3px 6px; border-top: 1px solid #222226; vertical-align: middle; }
   td.nombre { font-weight: 600; }
@@ -58,6 +58,16 @@
   .grupo + .grupo { margin-top: 10px; }
   .grupo h3 { margin: 0 0 4px; font-size: 12px; color: #e4e4e7; }
   .aviso { color: #a1a1aa; font-size: 12px; }
+  .pestanas-txt { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; align-items: center; }
+  .pestana-txt { background: #111113; border: 1px solid #27272a; color: #a1a1aa; padding: 3px 10px; font-size: 12px; font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pestana-txt:hover { color: #f4f4f5; border-color: #3f3f46; }
+  .pestana-txt.activa { color: white; border-color: #3b82f6; background: rgba(59, 130, 246, 0.12); }
+  .nombre-txt { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .nombre-txt input { width: 260px; }
+  .quitar-txt { background: #7f1d1d; color: #fca5a5; border: none; padding: 4px 10px; font-size: 12px; font-weight: 600; margin-left: auto; }
+  .quitar-txt:hover { background: #991b1b; }
+  textarea { width: 100%; min-height: 240px; resize: vertical; font: 12px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; background: #09090b; border: 1px solid #3f3f46; color: white; border-radius: 4px; padding: 8px; }
+  textarea:focus { outline: none; border-color: #3b82f6; }
   .error { color: #f87171; font-size: 12px; }
 </style>
 </head>
@@ -72,7 +82,7 @@
   <p class="error" id="error" hidden></p>
 
   <section>
-    <h2>Ficha</h2>
+    <h2>Parámetros visuales</h2>
     <div class="ficha">
       <div class="foto">
         <div class="caja" id="caja"><div class="vacia" id="sin-foto">Sin foto<br>Arrastra una imagen aquí</div></div>
@@ -91,6 +101,13 @@
     <h2>Variables</h2>
     <div id="variables"></div>
   </section>
+
+  <section id="seccion-archivos">
+    <h2>Archivos de texto</h2>
+    <p class="ayuda">Notas de la ficha. Son siempre archivos .txt: se crean, se editan y se renombran aquí, y OpenRoll hace lo mismo con los de la ficha al importar.</p>
+    <div class="pestanas-txt" id="pestanas-txt"></div>
+    <div id="panel-txt"></div>
+  </section>
 </div>
 
 <script type="application/json" id="datos-openroll">__DATOS_OPENROLL__</script>
@@ -106,6 +123,7 @@
   const MIME_ADMITIDOS = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
 
   const f = DATOS.ficha || {};
+  const MAX_ARCHIVOS = 50, MAX_TEXTO = 500000, MAX_NOMBRE_TXT = 100;
   const estado = {
     nombre: f.nombre || "",
     tipo: f.tipo || "Jugador",
@@ -210,7 +228,7 @@
   // ---------------------------------------------------------------- campos de la ficha
   function campos() {
     const c = $("campos");
-    const fila = (etiqueta, ...hijos) => { c.append(el("label", { texto: etiqueta }), el("div", { class: "fila ancha" }, ...hijos)); };
+    const fila = (etiqueta, ...hijos) => { c.append(el("label", { texto: etiqueta }), el("div", { class: "fila" }, ...hijos)); };
     fila("Nombre", el("input", { type: "text", maxlength: 100, value: estado.nombre, oninput: (e) => { estado.nombre = e.target.value; marcar(); } }));
     const tipo = el("select", { onchange: (e) => { estado.tipo = e.target.value; marcar(); } });
     for (const t of ["Jugador", "NPC", "Enemigo", "Objeto"]) tipo.append(el("option", { value: t, texto: t, selected: t === estado.tipo }));
@@ -237,8 +255,7 @@
         : null;
       c.append(el("label", { texto: etiqueta }),
         el("div", { class: "fila" }, entrada, d.unidad ? el("span", { class: "unidad", texto: d.unidad }) : null,
-          d.calculo ? el("span", { class: "unidad", texto: "(se calcula)" }) : null),
-        el("div", { class: "fila publica" }, publica));
+          d.calculo ? el("span", { class: "unidad", texto: "(se calcula)" }) : null, publica));
     }
   }
 
@@ -299,6 +316,77 @@
       cont.append(el("div", { class: "grupo" }, el("h3", { texto: g.nombre }), tabla));
     }
     refrescarResultados();
+  }
+
+  // ---------------------------------------------------------------- archivos de texto (.txt)
+  // Cada archivo: `original` = su nombre en la ficha al exportar (null: creado aquí), `nombre` sin la extensión (que siempre es .txt) y el
+  // contenido. Si `nombre` + ".txt" no coincide con `original`, OpenRoll sabe que es un cambio de nombre de ESE archivo.
+  const quitarTxt = (n) => String(n).replace(/\.txt$/i, "");
+  const archivos = (DATOS.archivos || []).slice(0, MAX_ARCHIVOS).map((a) => ({
+    original: typeof a.original === "string" ? a.original : null,
+    nombre: quitarTxt(a.nombre || "Documento"),
+    contenido: String(a.contenido || "")
+  }));
+  let activo = 0;
+  /** Sin puntos ni caracteres de ruta: así no se puede escribir otra extensión ni salirse de la carpeta. */
+  const limpiarNombre = (v) => v.replace(/[\u0000-\u001f\\/:*?"<>|.]/g, "").slice(0, MAX_NOMBRE_TXT);
+  /** El nombre, sin repetirse con los demás archivos (sin mirar mayúsculas). */
+  function nombreLibre(nombre, excepto) {
+    const usados = new Set(archivos.filter((a) => a !== excepto).map((a) => a.nombre.toLowerCase()));
+    const base = nombre.trim() || "Documento";
+    let c = base;
+    for (let n = 2; usados.has(c.toLowerCase()); n++) c = base + " (" + n + ")";
+    return c;
+  }
+  function pintarArchivos() {
+    const pestanas = $("pestanas-txt"), panel = $("panel-txt");
+    pestanas.replaceChildren();
+    panel.replaceChildren();
+    if (activo >= archivos.length) activo = Math.max(0, archivos.length - 1);
+    archivos.forEach((a, i) => {
+      const b = el("button", { type: "button", class: "secundario pestana-txt" + (i === activo ? " activa" : ""), texto: a.nombre + ".txt",
+        onclick: () => { activo = i; pintarArchivos(); } });
+      a.boton = b;
+      pestanas.append(b);
+    });
+    pestanas.append(el("button", { type: "button", class: "secundario", texto: "+ Nuevo", disabled: archivos.length >= MAX_ARCHIVOS,
+      onclick: () => {
+        archivos.push({ original: null, nombre: nombreLibre("Documento", null), contenido: "" });
+        activo = archivos.length - 1;
+        marcar(); pintarArchivos();
+        const t = $("panel-txt").querySelector("textarea");
+        if (t) t.focus();
+      } }));
+    if (archivos.length === 0) { panel.append(el("p", { class: "aviso", texto: "Sin archivos de texto. Pulsa «+ Nuevo» para crear uno." })); return; }
+    const a = archivos[activo];
+    const nombre = el("input", { type: "text", maxlength: MAX_NOMBRE_TXT, "aria-label": "Nombre del archivo",
+      oninput: (e) => {
+        const limpio = limpiarNombre(e.target.value);
+        if (limpio !== e.target.value) e.target.value = limpio; // nada de puntos: la extensión es siempre .txt
+        a.nombre = limpio;
+        if (a.boton) a.boton.textContent = (limpio || "Documento") + ".txt";
+        marcar();
+      },
+      onchange: (e) => { a.nombre = nombreLibre(limpiarNombre(e.target.value), a); e.target.value = a.nombre; if (a.boton) a.boton.textContent = a.nombre + ".txt"; marcar(); } });
+    nombre.value = a.nombre;
+    panel.append(el("div", { class: "nombre-txt" }, el("label", { texto: "Nombre" }), nombre, el("span", { class: "unidad", texto: ".txt" }),
+      el("button", { type: "button", class: "quitar-txt", texto: "Quitar",
+        onclick: () => { archivos.splice(activo, 1); marcar(); pintarArchivos(); } })));
+    const texto = el("textarea", { maxlength: MAX_TEXTO, spellcheck: "false", "aria-label": "Contenido del archivo",
+      oninput: (e) => { a.contenido = e.target.value; marcar(); } });
+    texto.value = a.contenido;
+    panel.append(texto);
+  }
+  /** Los archivos tal como se guardan: nombre con .txt, sin repetirse. */
+  function archivosGuardados() {
+    const usados = new Set();
+    return archivos.map((a) => {
+      const base = (limpiarNombre(a.nombre).trim() || "Documento");
+      let c = base;
+      for (let n = 2; usados.has(c.toLowerCase()); n++) c = base + " (" + n + ")";
+      usados.add(c.toLowerCase());
+      return { original: a.original, nombre: c + ".txt", contenido: a.contenido.slice(0, MAX_TEXTO) };
+    });
   }
 
   // ---------------------------------------------------------------- foto (misma cuenta que la caja de foto de OpenRoll)
@@ -427,6 +515,7 @@
       version: 1,
       conjunto: DATOS.conjunto,
       id_ficha: DATOS.id_ficha,
+      plantilla_id: DATOS.plantilla_id || null,
       definiciones: defs,
       ficha: {
         nombre: estado.nombre.trim(),
@@ -441,7 +530,8 @@
             opcionales: [...v.opcionales], parametros_marcados: [...v.parametros_marcados] };
         })
       },
-      foto: estado.foto
+      foto: estado.foto,
+      archivos: archivosGuardados()
     };
   }
   async function fotoAdmitida() {
@@ -456,6 +546,8 @@
     copia.querySelector("#datos-openroll").textContent = JSON.stringify(datosActuales()).replace(/</g, "\\u003c");
     copia.querySelector("#campos").replaceChildren();
     copia.querySelector("#variables").replaceChildren();
+    copia.querySelector("#pestanas-txt").replaceChildren();
+    copia.querySelector("#panel-txt").replaceChildren();
     const caja = copia.querySelector("#caja");
     caja.querySelectorAll("img").forEach((i) => i.remove());
     caja.classList.remove("movible", "sobre");
@@ -540,8 +632,18 @@
     a.click();
     a.remove();
   }
+  // La identidad de este archivo: un UUID aleatorio que se genera la PRIMERA vez que se guarda (y ya no cambia). OpenRoll lo guarda
+  // en la ficha que crea con él, y así reconoce el archivo si vuelve a importarse, desde cualquier navegador.
+  function uuid() {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+    return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
+  }
   async function guardar() {
     try {
+      if (!DATOS.plantilla_id) DATOS.plantilla_id = uuid();
       await fotoAdmitida();
       const html = documentoGuardado();
       if (await guardarEnSuSitio(html)) {
@@ -569,6 +671,7 @@
   document.title = (estado.nombre || "Ficha") + " · OpenRoll";
   campos();
   variables();
+  pintarArchivos();
   pintarFoto();
 })();
 </script>

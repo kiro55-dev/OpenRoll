@@ -23,6 +23,8 @@ pub enum CambioEntidad {
     Cuerpo(Cuerpo),
     /// La visión de la ficha, en metros.
     Vision(u16),
+    /// La identidad de plantilla de la ficha (ver `Entidad.plantilla_id`).
+    PlantillaId(Option<String>),
     Zona(u16),
     /// Otra foto: la miniatura propia (recorte de la anterior) deja de valer.
     Foto(Option<String>),
@@ -68,6 +70,9 @@ pub fn entre(antes: &Entidad, despues: &Entidad) -> Vec<CambioEntidad> {
     }
     if antes.vision != despues.vision {
         cambios.push(CambioEntidad::Vision(despues.vision));
+    }
+    if antes.plantilla_id != despues.plantilla_id {
+        cambios.push(CambioEntidad::PlantillaId(despues.plantilla_id.clone()));
     }
     if antes.zona_id != despues.zona_id {
         cambios.push(CambioEntidad::Zona(despues.zona_id));
@@ -115,6 +120,7 @@ pub fn aplicar(e: &mut Entidad, cambios: &[CambioEntidad]) {
             }
             CambioEntidad::Cuerpo(c) => e.cuerpo = c.clone(),
             CambioEntidad::Vision(v) => e.vision = *v,
+            CambioEntidad::PlantillaId(p) => e.plantilla_id = p.clone(),
             CambioEntidad::Zona(z) => e.zona_id = *z,
             CambioEntidad::Foto(f) => {
                 e.foto_url = f.clone();
@@ -147,7 +153,7 @@ mod tests {
             miniatura_url: Some("miniaturas/ficha/entidad_1_1.webp".into()),
             foto_encuadre: Default::default(),
             archivos_adjuntos: vec![Some("archivos/entidad_1/notas.txt".into())],
-            es_unico: false, vision: 0,
+            es_unico: false, vision: 0, plantilla_id: None,
             propietarios: vec![],
         }
     }
@@ -189,6 +195,7 @@ mod tests {
         despues.variables[1].valor = 14;
         despues.cuerpo = Cuerpo::Grande(vec![2, 3]);
         despues.vision = 18;
+        despues.plantilla_id = Some("3f2a9c1e-7b64-4d2a-9a51-0c8e2d7f6b13".into());
         despues.zona_id = 4;
         despues.foto_url = Some("imagenes/b.png".into());
         despues.foto_encuadre = EncuadreFoto { x: 10, y: 20, zoom: 150 };
@@ -197,7 +204,7 @@ mod tests {
         despues.propietarios = vec![3];
 
         let cambios = entre(&antes, &despues);
-        assert_eq!(cambios.len(), 12, "un cambio por campo");
+        assert_eq!(cambios.len(), 13, "un cambio por campo");
         assert!(cambios.contains(&CambioEntidad::Vision(18)));
         assert!(cambios.contains(&CambioEntidad::Variable(ValorVariable { id_definicion: 2, valor: 14, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] })), "solo la variable que cambió");
         let mut aplicada = antes.clone();

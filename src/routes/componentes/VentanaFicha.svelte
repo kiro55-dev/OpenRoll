@@ -13,13 +13,14 @@
   import { EditorFicha } from "$lib/editorFicha.svelte";
   import { esImagen } from "$lib/imagenes";
   import { alSoltarArchivos } from "$lib/soltarArchivos";
+  import { open } from "@tauri-apps/plugin-dialog";
   import { moverVentana } from "$lib/moverVentana";
   import { esJugador } from "$lib/modo";
   import { LIMITE_VALOR_VARIABLE, etiquetaVariable, textoModificador } from "$lib/variables";
   import CajaFoto from "./ventana-ficha/CajaFoto.svelte";
   import CampoNumero from "./ventana-ficha/CampoNumero.svelte";
   import AdjuntosFicha from "./ventana-ficha/AdjuntosFicha.svelte";
-  import { esArchivoPlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
+  import { esArchivoPlantilla, esDeEstaFicha, type PlantillaLeida } from "$lib/plantillaFicha";
   import { exportarPlantilla, leerArchivoPlantilla } from "$lib/plantillaIo";
 
   let { entidad }: { entidad: Entidad } = $props();
@@ -66,11 +67,16 @@
   let plantillaAjena = $state<PlantillaLeida | null>(null);
   let exportando = $state(false);
 
+  /** Aplica la plantilla a esta ficha (que pasa a guardar su identidad: la próxima vez ese archivo se reconoce como suyo). */
+  function aplicar(p: PlantillaLeida) {
+    void editor.aplicarPlantilla(p);
+  }
+
   /** La de esta misma ficha (o sobre una ficha nueva, que no tiene nada que perder) se aplica; la de otra pide confirmar. */
   function recibirPlantilla(p: PlantillaLeida) {
-    if (editor.esBorrador || p.id_ficha === ficha.id) {
+    if (editor.esBorrador || esDeEstaFicha(p, ficha)) {
       plantillaAjena = null;
-      void editor.aplicarPlantilla(p);
+      aplicar(p);
     } else {
       plantillaAjena = p;
     }
@@ -95,11 +101,25 @@
     void soltarPlantilla(archivo);
   }
 
+  /** «Importar ficha»: el explorador de archivos para buscar la plantilla (el host con el diálogo del sistema; un jugador, con el de su navegador). */
+  async function importar() {
+    if (esJugador) {
+      const entrada = document.createElement("input");
+      entrada.type = "file";
+      entrada.accept = ".html,.htm,text/html";
+      entrada.onchange = () => entrada.files?.[0] && void soltarPlantilla(entrada.files[0]);
+      entrada.click();
+      return;
+    }
+    const ruta = await open({ multiple: false, directory: false, filters: [{ name: "Ficha de OpenRoll", extensions: ["html", "htm"] }] });
+    if (typeof ruta === "string") await soltarPlantilla(ruta);
+  }
+
   async function exportar() {
     if (exportando) return;
     exportando = true;
     try {
-      await exportarPlantilla($state.snapshot(ficha) as Entidad, editor.esBorrador ? null : ficha.id);
+      await exportarPlantilla($state.snapshot(ficha) as Entidad, editor.esBorrador ? null : ficha.id, await editor.archivosParaPlantilla());
     } catch (err) {
       partida.errorEditor = `No se pudo exportar la plantilla: ${err instanceof Error ? err.message : String(err)}`;
     } finally {
@@ -149,7 +169,7 @@
       {#if ficha.foto_url}<p class="ayuda-foto">Arrastrar para mover · rueda para acercar</p>{/if}
     </div>
 
-    <!-- Una fila por dato y todos los cuadros empiezan en la misma línea vertical: etiqueta · cuadro · «Hacer público» -->
+    <!-- Una fila por dato y todos los cuadros empiezan en la misma línea vertical: etiqueta · cuadro (con «Hacer público» pegado a él) -->
     <div class="campos-grid">
       <label class="et" for="f-nombre">Nombre</label>
       <div class="celda ancha"><input id="f-nombre" type="text" class="input-texto" maxlength="100" bind:value={ficha.nombre} /></div>
@@ -184,14 +204,14 @@
 
       <span class="et">Cuerpo</span>
       <div class="celda ancha">
-        <CampoNumero bind:value={editor.cuerpoX} min={1} max={255} ancho={70} titulo="Ancho en casillas (rueda del ratón para ajustar)" />
+        <CampoNumero bind:value={editor.cuerpoX} min={1} max={255} ancho={36} titulo="Ancho en casillas (rueda del ratón para ajustar)" />
         <span class="separador-x">×</span>
-        <CampoNumero bind:value={editor.cuerpoY} min={1} max={255} ancho={70} sufijo="casillas" titulo="Alto en casillas (rueda del ratón para ajustar)" />
+        <CampoNumero bind:value={editor.cuerpoY} min={1} max={255} ancho={36} sufijo="casillas" titulo="Alto en casillas (rueda del ratón para ajustar)" />
       </div>
 
       <span class="et">Visión</span>
       <div class="celda ancha">
-        <CampoNumero bind:value={ficha.vision} min={0} max={10000} ancho={90} sufijo="m" titulo="Cuánto ve la ficha, en metros (por ahora no hace nada; rueda del ratón para ajustar)" />
+        <CampoNumero bind:value={ficha.vision} min={0} max={10000} ancho={45} sufijo="m" titulo="Cuánto ve la ficha, en metros (por ahora no hace nada; rueda del ratón para ajustar)" />
       </div>
 
       <!-- Los parámetros de la partida, uno por fila y en su orden -->
@@ -200,12 +220,18 @@
           <label class="et" for="f-param-{d.id}">{d.clave}{d.tiene_maximo ? " (máx.)" : ""}</label>
           <div class="celda">
             <CampoNumero
-              ancho={90}
+              ancho={45}
               sufijo={d.unidad ?? ""}
               soloLectura={editor.esCalculado(d.id)}
               titulo={editor.descripcionCalculo(d.id) ?? "Rueda del ratón para subir/bajar"}
               bind:value={() => editor.numero(d.id), (v) => editor.ponerNumero(d.id, v)}
             />
+            {#if d.visibilidad === "Variable"}
+              <label class="check" title={ayuda("Los jugadores ven este valor de la ficha")}>
+                <input type="checkbox" bind:checked={() => editor.esPublico(d.id), (v) => editor.ponerPublico(d.id, v)} />
+                <span>Hacer público</span>
+              </label>
+            {/if}
           </div>
         {:else}
           <label class="et" for="f-param-{d.id}">{d.clave}</label>
@@ -217,16 +243,14 @@
               maxlength="2000"
               bind:value={() => editor.texto(d.id), (v) => editor.ponerTexto(d.id, v)}
             />
+            {#if d.visibilidad === "Variable"}
+              <label class="check" title={ayuda("Los jugadores ven este valor de la ficha")}>
+                <input type="checkbox" bind:checked={() => editor.esPublico(d.id), (v) => editor.ponerPublico(d.id, v)} />
+                <span>Hacer público</span>
+              </label>
+            {/if}
           </div>
         {/if}
-        <div class="celda publica">
-          {#if d.visibilidad === "Variable"}
-            <label class="check" title={ayuda("Los jugadores ven este valor de la ficha")}>
-              <input type="checkbox" bind:checked={() => editor.esPublico(d.id), (v) => editor.ponerPublico(d.id, v)} />
-              <span>Hacer público</span>
-            </label>
-          {/if}
-        </div>
       {/each}
     </div>
   </div>
@@ -393,6 +417,7 @@
     <div class="seccion">
       {#if editor.seccion === "ficha"}
         <!-- Todo en una: foto y datos, los archivos adjuntos y las variables (como la plantilla) -->
+        <h3 class="titulo-seccion">Parámetros visuales</h3>
         {@render datos()}
         <AdjuntosFicha {editor} />
         {#if editor.variables.length > 0}
@@ -419,7 +444,7 @@
             onclick={() => {
               const p = plantillaAjena;
               plantillaAjena = null;
-              if (p) void editor.aplicarPlantilla(p);
+              if (p) aplicar(p);
             }}
           >Proceder</button>
         </div>
@@ -448,9 +473,10 @@
         type="button"
         class="btn-exportar"
         disabled={exportando}
-        title={ayuda("Guarda una plantilla de esta ficha (un .html con sus datos y su foto) para rellenarla fuera de OpenRoll con cualquier navegador. Después se arrastra a OpenRoll: al banco o a esta ventana")}
+        title={ayuda("Exporta a tus archivos esta ficha con sus datos a un html")}
         onclick={exportar}
-      >Exportar plantilla</button>
+      >Exportar ficha</button>
+      <button type="button" class="btn-exportar" title={ayuda("También se puede arrastrar desde archivos")} onclick={importar}>Importar ficha</button>
       <div class="botones-derecha">
         <button type="button" class="btn-cancelar" onclick={() => editor.cancelar()}>Cancelar</button>
         <button type="button" class="btn-guardar" onclick={() => editor.guardar()} disabled={editor.guardando}>Guardar</button>
@@ -526,7 +552,12 @@
   }
   .redondo:checked { border-color: #3b82f6; }
   .redondo:checked::before { transform: scale(1); }
-  .tabla-variables { width: 100%; border-collapse: collapse; font-size: 11px; }
+  /* Las mismas columnas en todos los grupos (nombre, abreviatura, valor u opciones, resultado), para que todo quede alineado */
+  .tabla-variables { width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; }
+  .tabla-variables th:nth-child(1) { width: 34%; }
+  .tabla-variables th:nth-child(2) { width: 15%; }
+  .tabla-variables th:nth-child(3) { width: 39%; }
+  .tabla-variables th:nth-child(4) { width: 12%; }
   .tabla-variables th { color: #71717a; font-size: 10px; font-weight: 600; text-align: left; padding: 2px 6px; border-bottom: 1px solid #27272a; }
   .tabla-variables td { padding: 3px 6px; border-bottom: 1px solid #1f1f23; }
   .tabla-variables .nombre { color: #f4f4f5; font-weight: 600; }
@@ -543,12 +574,10 @@
 
   /* Una fila por dato; las tres columnas (etiqueta, cuadro, «Hacer público») son las mismas en todas, así que todos los cuadros
      empiezan en la misma línea vertical */
-  .campos-grid { flex: 1; min-width: 300px; display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 6px 12px; align-items: center; }
+  .campos-grid { flex: 1; min-width: 300px; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; align-items: center; }
   .et { color: #a1a1aa; font-size: 11px; }
   .celda { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .celda.ancha { grid-column: 2 / 4; }
-  .celda.publica { justify-content: flex-end; }
-  .celda .input-texto { width: 100%; }
+  .celda .input-texto { width: 27ch; max-width: 100%; flex: none; }
 
   .check { cursor: pointer; display: inline-flex; align-items: center; gap: 5px; color: #a1a1aa; font-size: 11px; white-space: nowrap; }
   .check input { cursor: pointer; accent-color: #3b82f6; margin: 0; }

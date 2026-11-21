@@ -9,7 +9,7 @@ import { esJugador } from "$lib/modo";
 import { importarImagen, urlDeImagen } from "$lib/imagenes";
 import { partida, type Entidad } from "$lib/partida.svelte";
 import { encuadreCentrado } from "$lib/recorteFoto";
-import { MIME_FOTO, datosDePlantilla, generarPlantilla, leerPlantilla, type FotoPlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
+import { MIME_FOTO, datosDePlantilla, generarPlantilla, leerPlantilla, type ArchivoPlantilla, type FotoPlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
 
 /** El nombre del conjunto de parámetros en uso (un jugador no lo sabe: los conjuntos son del host). */
 export function conjuntoActual(): string {
@@ -52,7 +52,7 @@ const nombreDeArchivo = (nombre: string) => nombre.replace(/[\\/:*?"<>|]+/g, "_"
  * Exporta la plantilla: en blanco (`entidad` null, con el conjunto en uso) o con los datos de una ficha (lo que tiene ahora en el
  * editor, sin guardar incluido) y su foto. `idFicha`: la ficha de la que sale (null si es nueva sin guardar). `true` si se guardó.
  */
-export async function exportarPlantilla(entidad: Entidad | null, idFicha: number | null = null): Promise<boolean> {
+export async function exportarPlantilla(entidad: Entidad | null, idFicha: number | null = null, archivos: ArchivoPlantilla[] = []): Promise<boolean> {
   const datos = datosDePlantilla({
     definiciones: partida.definiciones,
     grupos: partida.gruposVariables,
@@ -60,7 +60,8 @@ export async function exportarPlantilla(entidad: Entidad | null, idFicha: number
     conjunto: conjuntoActual(),
     entidad,
     idFicha,
-    foto: entidad ? await fotoDe(entidad) : null
+    foto: entidad ? await fotoDe(entidad) : null,
+    archivos
   });
   const html = generarPlantilla(datos);
   const nombre = `${nombreDeArchivo(entidad ? entidad.nombre : datos.conjunto || "Ficha")}.html`;

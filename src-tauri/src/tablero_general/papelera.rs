@@ -340,7 +340,7 @@ mod tests {
         Entidad {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Enemigo, parametros: vec![], variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio,
             zona_id: zona, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
-            archivos_adjuntos: vec![], es_unico: unica, vision: 0, propietarios: vec![],
+            archivos_adjuntos: vec![], es_unico: unica, vision: 0, plantilla_id: None, propietarios: vec![],
         }
     }
     fn instancia(id: u16, base: &Entidad, mapa: Option<u16>) -> Instancia {

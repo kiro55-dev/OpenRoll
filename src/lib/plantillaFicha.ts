@@ -32,6 +32,14 @@ export const MIME_FOTO: Record<string, string> = {
   "image/gif": "gif",
   "image/bmp": "bmp"
 };
+/** Tope de archivos de texto de una plantilla (`MAX_ADJUNTOS_FICHA` en Rust) y del contenido de cada uno. */
+export const MAX_ARCHIVOS_TEXTO = 50;
+export const MAX_CARACTERES_ARCHIVO = 500_000;
+const MAX_STEM_ARCHIVO = 100;
+const RESERVADOS_WINDOWS = new Set([
+  "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+  "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"
+]);
 const TIPOS: TipoEntidad[] = ["Enemigo", "NPC", "Jugador", "Objeto"];
 const MAX_NOMBRE = 100;
 const MAX_TEXTO = 2000;
@@ -71,6 +79,17 @@ export interface FichaPlantilla {
   }[];
 }
 
+/**
+ * Un archivo de texto de la ficha dentro de la plantilla. `original` es el nombre que tenía en la ficha al exportar (null: se creó en la
+ * plantilla) y `nombre` el de ahora: si son distintos, es un cambio de nombre y la app sabe qué archivo renombrar. El contenido va
+ * dentro del HTML. Siempre `.txt`.
+ */
+export interface ArchivoPlantilla {
+  original: string | null;
+  nombre: string;
+  contenido: string;
+}
+
 /** Lo que va dentro del HTML. */
 export interface DatosPlantilla {
   formato: string;
@@ -79,17 +98,25 @@ export interface DatosPlantilla {
   conjunto: string;
   /** La ficha de la que salió (null: en blanco, o de una ficha nueva sin guardar). */
   id_ficha: number | null;
+  /** La identidad de este ARCHIVO: un UUID que genera la propia plantilla la primera vez que se guarda (null hasta entonces, o en una
+   *  plantilla en blanco recién exportada). La ficha que se crea con él lo guarda, así se reconoce si vuelve a importarse. */
+  plantilla_id: string | null;
   definiciones: { parametros: DefinicionParametro[]; grupos_variables: GrupoVariables[]; variables: DefinicionVariable[] };
   ficha: FichaPlantilla | null;
   foto: FotoPlantilla | null;
+  /** Los archivos de texto de la ficha. Una plantilla de antes de este apartado no lo trae: en ese caso no se tocan los de la ficha. */
+  archivos: ArchivoPlantilla[];
 }
 
 /** Lo que se queda de una plantilla leída: sus datos y, de sus definiciones, solo los nombres (para emparejar por nombre). */
 export interface PlantillaLeida {
   conjunto: string;
   id_ficha: number | null;
+  plantilla_id: string | null;
   ficha: FichaPlantilla | null;
   foto: FotoPlantilla | null;
+  /** `null` = la plantilla no lleva archivos de texto (no se toca ninguno). */
+  archivos: ArchivoPlantilla[] | null;
   nombresVariables: Map<number, string>;
   nombresParametros: Map<number, string>;
 }
@@ -97,6 +124,7 @@ export interface PlantillaLeida {
 // ------------------------------------------------------------------
 // Exportar
 // ------------------------------------------------------------------
+
 
 const ladosDe = (c: Cuerpo): [number, number] => (typeof c === "object" ? [c.Grande[0] ?? 1, c.Grande[1] ?? 1] : [1, 1]);
 
@@ -109,6 +137,7 @@ export function datosDePlantilla(p: {
   entidad?: Entidad | null;
   idFicha?: number | null;
   foto?: FotoPlantilla | null;
+  archivos?: ArchivoPlantilla[];
 }): DatosPlantilla {
   const e = p.entidad ?? null;
   return {
@@ -116,6 +145,8 @@ export function datosDePlantilla(p: {
     version: VERSION_PLANTILLA,
     conjunto: p.conjunto,
     id_ficha: p.idFicha ?? null,
+    // Desde una ficha que ya tiene identidad, la lleva; en blanco no: la plantilla se la pone al guardarse por primera vez
+    plantilla_id: e?.plantilla_id ?? null,
     definiciones: { parametros: p.definiciones, grupos_variables: p.grupos, variables: p.variables },
     ficha: e
       ? {
@@ -143,7 +174,8 @@ export function datosDePlantilla(p: {
           })
         }
       : null,
-    foto: p.foto ?? null
+    foto: p.foto ?? null,
+    archivos: p.archivos ?? []
   };
 }
 
@@ -177,6 +209,32 @@ const objeto = (v: unknown, que: string): Record<string, unknown> => {
   return v as Record<string, unknown>;
 };
 
+/**
+ * El nombre de un archivo de texto como se acepta: SIEMPRE `.txt`. Quita lo que no es un nombre (rutas, caracteres prohibidos, control
+ * e invisibles), cambia cualquier otra extensión por `.txt` (o la añade) y esquiva los nombres reservados de Windows. Es la defensa de
+ * la app por si alguien edita la plantilla a mano; la plantilla ya no deja escribir otra cosa.
+ */
+export function nombreTxt(nombre: string): string {
+  let n = String(nombre)
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "")
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .trim();
+  const conTxt = /^(.*)\.txt$/i.exec(n);
+  const conOtra = /^(.*\S)\.[^.\s]+$/.exec(n);
+  n = conTxt ? conTxt[1] : conOtra ? conOtra[1] : n;
+  n = n.replace(/[.\s]+$/, "").slice(0, MAX_STEM_ARCHIVO).replace(/[.\s]+$/, "");
+  if (!n) n = "Documento";
+  if (RESERVADOS_WINDOWS.has(n.toLowerCase())) n = `_${n}`;
+  return `${n}.txt`;
+}
+
+/** Un nombre que no choque (sin mirar mayúsculas) con los `usados`: «Notas.txt» → «Notas (2).txt». */
+function nombreLibre(nombre: string, usados: Set<string>): string {
+  let candidato = nombre;
+  for (let n = 2; usados.has(candidato.toLowerCase()); n++) candidato = nombre.replace(/\.txt$/i, ` (${n}).txt`);
+  return candidato;
+}
+
 /** ¿Parece una plantilla de ficha? (por la extensión: el contenido lo comprueba `leerPlantilla`) */
 export const esArchivoPlantilla = (nombre: string) => /\.html?$/i.test(nombre.trim());
 
@@ -197,6 +255,7 @@ export function leerPlantilla(html: string): PlantillaLeida {
   if (!esEntero(d.version) || d.version < 1) throw new Error("La plantilla está dañada (versión)");
   if (d.version > VERSION_PLANTILLA) throw new Error("La plantilla es de una versión más nueva de OpenRoll: actualiza la app");
   const idFicha = d.id_ficha === null || d.id_ficha === undefined ? null : esEntero(d.id_ficha) ? d.id_ficha : null;
+  const plantillaId = typeof d.plantilla_id === "string" && /^[A-Za-z0-9-]{8,64}$/.test(d.plantilla_id) ? d.plantilla_id : null;
 
   // De las definiciones con que se hizo solo interesan los nombres (para emparejar si el conjunto cambió)
   const nombresVariables = new Map<number, string>();
@@ -218,8 +277,10 @@ export function leerPlantilla(html: string): PlantillaLeida {
   return {
     conjunto: typeof d.conjunto === "string" ? d.conjunto.slice(0, MAX_NOMBRE) : "",
     id_ficha: idFicha,
+    plantilla_id: plantillaId,
     ficha: d.ficha === null || d.ficha === undefined ? null : leerFicha(objeto(d.ficha, "ficha")),
     foto: d.foto === null || d.foto === undefined ? null : leerFoto(objeto(d.foto, "foto")),
+    archivos: d.archivos === null || d.archivos === undefined ? null : leerArchivos(d.archivos),
     nombresVariables,
     nombresParametros
   };
@@ -258,6 +319,26 @@ function leerFicha(f: Record<string, unknown>): FichaPlantilla {
   };
 }
 
+function leerArchivos(v: unknown): ArchivoPlantilla[] {
+  if (!Array.isArray(v) || v.length > MAX_ARCHIVOS_TEXTO) throw new Error(`La plantilla no puede llevar más de ${MAX_ARCHIVOS_TEXTO} archivos de texto`);
+  const usados = new Set<string>();
+  const originales = new Set<string>();
+  return v.map((x) => {
+    const a = objeto(x, "archivo");
+    const contenido = typeof a.contenido === "string" ? a.contenido : "";
+    if (typeof a.nombre !== "string") throw new Error("La plantilla está dañada (archivo)");
+    // Siempre .txt y sin repetirse (dos archivos no pueden llamarse igual)
+    const nombre = nombreLibre(nombreTxt(a.nombre), usados);
+    if (contenido.length > MAX_CARACTERES_ARCHIVO) throw new Error(`El archivo «${nombre}» de la plantilla pasa de ${MAX_CARACTERES_ARCHIVO / 1000} mil caracteres`);
+    usados.add(nombre.toLowerCase());
+    // El nombre que tenía en la ficha: sirve para saber a qué archivo se refiere; uno solo puede reclamarlo
+    let original: string | null = typeof a.original === "string" && a.original.trim() ? nombreTxt(a.original) : null;
+    if (original && originales.has(original.toLowerCase())) original = null;
+    if (original) originales.add(original.toLowerCase());
+    return { original, nombre, contenido };
+  });
+}
+
 function leerFoto(f: Record<string, unknown>): FotoPlantilla {
   const mime = texto(f.mime, 40, "foto");
   const datos = texto(f.datos, Math.ceil((MAX_BYTES_FOTO * 4) / 3) + 8, "foto");
@@ -271,6 +352,21 @@ function leerFoto(f: Record<string, unknown>): FotoPlantilla {
 // ------------------------------------------------------------------
 // Aplicar a una ficha
 // ------------------------------------------------------------------
+
+/** La ficha de `fichas` a la que corresponde la plantilla: la que guarda su identidad (si hay exactamente una) o, si no, la del `id_ficha`
+ *  con que se exportó. `undefined` si no es de ninguna (plantilla nueva, o de otra partida). */
+export function fichaDePlantilla(p: Pick<PlantillaLeida, "plantilla_id" | "id_ficha">, fichas: readonly Entidad[]): Entidad | undefined {
+  if (p.plantilla_id) {
+    const iguales = fichas.filter((f) => f.plantilla_id === p.plantilla_id);
+    if (iguales.length === 1) return iguales[0];
+  }
+  return p.id_ficha === null ? undefined : fichas.find((f) => f.id === p.id_ficha);
+}
+
+/** ¿Es la plantilla de ESTA ficha? (misma identidad, o la ficha de la que se exportó) */
+export function esDeEstaFicha(p: Pick<PlantillaLeida, "plantilla_id" | "id_ficha">, ficha: Pick<Entidad, "id" | "plantilla_id">): boolean {
+  return (!!p.plantilla_id && ficha.plantilla_id === p.plantilla_id) || p.id_ficha === ficha.id;
+}
 
 const clave = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 
@@ -303,6 +399,8 @@ export function aplicarAFicha(
   if (!mismoConjunto) {
     avisos.push(`La plantilla es del conjunto «${plantilla.conjunto}» y la partida usa «${ctx.conjunto}»: solo se ha copiado lo que coincide por nombre.`);
   }
+  // La ficha pasa a ser la de este archivo (así se reconoce si vuelve a importarse)
+  if (plantilla.plantilla_id) e.plantilla_id = plantilla.plantilla_id;
   if (!f) return { entidad: e, avisos };
 
   if (f.nombre) e.nombre = f.nombre;
