@@ -374,7 +374,7 @@ mod tests {
         let antes = vista_para(7, &e);
         assert!(antes.historial_tiradas.is_empty());
 
-        let tirada = |jugador, autor: &str| Tiradas { total: 9, comando: "1d10 (9)".into(), hora: "10:00".into(), jugador, autor: autor.into(), publica: true, veredicto: String::new(), acierta: None, especial: false };
+        let tirada = |jugador, autor: &str| Tiradas { total: 9, comando: "1d10 (9)".into(), hora: "10:00".into(), jugador, autor: autor.into(), publica: true, veredicto: String::new(), acierta: None, especial: false, informativa: false };
         e.aplicar_delta(&DeltaPartida::TiradaRealizada(tirada(1, "Ana")));
         let despues = vista_para(7, &e);
         assert_eq!(despues.historial_tiradas[0].autor, "Ana", "un jugador ve lo que tira otro");
@@ -395,7 +395,7 @@ mod tests {
     #[test]
     fn las_tiradas_privadas_del_host_no_llegan_a_los_jugadores() {
         let mut e = estado();
-        let tirada = |publica| Tiradas { total: 9, comando: "1d10 (9)".into(), hora: "10:00".into(), jugador: 0, autor: String::new(), publica, veredicto: String::new(), acierta: None, especial: false };
+        let tirada = |publica| Tiradas { total: 9, comando: "1d10 (9)".into(), hora: "10:00".into(), jugador: 0, autor: String::new(), publica, veredicto: String::new(), acierta: None, especial: false, informativa: false };
         e.aplicar_delta(&DeltaPartida::TiradaRealizada(tirada(true)));
         let antes = vista_para(7, &e);
         e.aplicar_delta(&DeltaPartida::TiradaRealizada(tirada(false)));

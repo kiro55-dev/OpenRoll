@@ -289,7 +289,7 @@ su pantalla relee. Las peticiones de un jugador se ejecutan **en orden**, una a 
 - **Modo batalla (protocolo 16).** `Mapa.batalla` (grupos con sus miembros, turno y vuelta) viaja con el mapa, así que llega a los
   jugadores en `VistaJugador.mapas` y `Cambios.mapas` sin mensajes nuevos; nunca lleva instancias ocultas (el saneado las quita en
   cuanto se ocultan). Un jugador pasa el turno con la acción `pasar_turno` (`PasarTurno { idMapa, idGrupo }`, lista blanca): solo si
-  controla la ficha que lo tiene. Empezar y terminar son órdenes de chat del host (`Empezar [tirada]`, `Terminar`): si las manda un
+  controla la ficha que lo tiene. Empezar y terminar son órdenes de chat del host (`Batalla [tirada]`, `Terminar`): si las manda un
   jugador, `tirar_dado_de` las rechaza.
 - **Fórmulas, rangos, parámetros calculados y tiradas `vs` (protocolo 14).** `DefinicionVariable` lleva `multiplicador`/`divisor`/`constante`/`rangos` (la lista de rangos que usa) y `opciones` (una copia de las de su lista, que deja el host: el jugador no necesita las listas)
   (de una derivada), `ValorVariable.eleccion` es el rango que ha elegido cada ficha (solo llega a host y propietarios, como los demás

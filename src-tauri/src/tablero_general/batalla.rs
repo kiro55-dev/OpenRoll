@@ -1,8 +1,8 @@
 // src-tauri/src/tablero_general/batalla.rs
 //
 // El modo batalla de un mapa (`Mapa.batalla`): uno o varios GRUPOS, cada uno con su turno y su contador de vueltas.
-//  * Se empieza con el comando de chat `Empezar [tirada]` y se acaba con `Terminar` (solo el host). Con tirada, cada ficha tira con
-//    SUS variables y parámetros y se reordenan de mayor a menor («Fichas activas»); sin ella no se reordena.
+//  * Se empieza con el comando de chat `Batalla [tirada]` y se acaba con `Terminar` (solo el host). Con tirada, cada ficha tira con
+//    SUS variables (como cualquier tirada del chat: los parámetros visuales no se tiran) y se reordenan de mayor a menor («Fichas activas»); sin ella no se reordena.
 //  * El orden de los turnos de un grupo es el de `Instancia.orden`: el host puede reordenar a mano y el turno sigue a su instancia.
 //    Al llegar al último se vuelve al primero y la vuelta (`ronda`) sube en uno.
 //  * Pasa el turno el dueño de la ficha que lo tiene (el host, siempre).
@@ -13,7 +13,7 @@ use crate::tablero_general::dados::{dividir_comparacion, parsear_comando, tirar_
 use crate::tablero_general::estado::{DeltaPartida, EstadoPartida};
 use crate::tablero_general::jugadores::controla_instancia;
 use crate::tablero_general::modelos::{IdJugador, ID_HOST};
-use crate::tablero_general::modelos::{Batalla, GrupoBatalla, ValorParametro};
+use crate::tablero_general::modelos::{Batalla, GrupoBatalla};
 use crate::tablero_general::partida::{registrar, registrar_tirada_en, AppState};
 use crate::tablero_general::variables;
 
@@ -26,19 +26,19 @@ pub const NOMBRE_GRUPO_UNICO: &str = "Batalla";
 
 #[derive(Debug, PartialEq)]
 pub enum ComandoBatalla {
-    /// `Empezar [tirada]`: lo que sigue a la palabra (puede estar vacío).
+    /// `Batalla [tirada]`: lo que sigue a la palabra (puede estar vacío).
     Empezar(String),
     /// `Terminar`: lo que sigue a la palabra (debe estar vacío).
     Terminar(String),
 }
 
-/// ¿Es el comando una orden de batalla? La primera palabra entera (sin distinguir mayúsculas) es `empezar` o `terminar`.
+/// ¿Es el comando una orden de batalla? La primera palabra entera (sin distinguir mayúsculas) es `batalla` o `terminar`.
 pub fn interpretar_comando(comando: &str) -> Option<ComandoBatalla> {
     let t = comando.trim();
     let fin = t.find(char::is_whitespace).unwrap_or(t.len());
     let (palabra, resto) = t.split_at(fin);
     let resto = resto.trim().to_string();
-    if palabra.eq_ignore_ascii_case("empezar") {
+    if palabra.eq_ignore_ascii_case("batalla") {
         Some(ComandoBatalla::Empezar(resto))
     } else if palabra.eq_ignore_ascii_case("terminar") {
         Some(ComandoBatalla::Terminar(resto))
@@ -180,21 +180,14 @@ pub fn al_llegar(est: &mut EstadoPartida, id_instancia: u16, antes_visible_aqui:
 // Empezar y terminar
 // ------------------------------------------------------------------
 
-/// Lo que vale en la iniciativa de una ficha un término de letras: una variable suya o, si no lo es, uno de sus parámetros
-/// numéricos (por su nombre). Solo esta tirada admite parámetros.
+/// Lo que vale en la iniciativa de una ficha un término de letras: una variable SUYA, exactamente como en una tirada del chat
+/// (`resolver_variable`, pero de cada ficha en vez de la que tiene el foco). Un parámetro visual no se tira: si depende de una
+/// variable, se tira esa variable.
 fn valor_de_termino(est: &EstadoPartida, id_instancia: u16, texto: &str) -> Result<(String, i32), String> {
     let inst = est.instancias_activas.iter().find(|i| i.id_instancia == id_instancia).ok_or("Esa ficha ya no está activa")?;
-    if let Some(def) = variables::buscar(&est.definiciones_variables, texto) {
-        let nombre = if def.abreviatura.is_empty() { &def.nombre } else { &def.abreviatura };
-        return Ok((nombre.clone(), variables::resultado(&est.definiciones_variables, &inst.base.parametros, &inst.base.variables, def)));
-    }
-    let k = texto.trim().to_lowercase();
-    let def = est
-        .definiciones_parametros
-        .iter()
-        .find(|d| d.clave.trim().to_lowercase() == k && matches!(d.valor_por_defecto, ValorParametro::Numero(_)))
-        .ok_or_else(|| format!("«{}» no es una variable ni un parámetro numérico", texto.trim()))?;
-    Ok((def.clave.clone(), variables::valor_de_parametro(&inst.base.parametros, def.id)))
+    let def = variables::buscar(&est.definiciones_variables, texto).ok_or_else(|| format!("«{}» no es una variable", texto.trim()))?;
+    let nombre = if def.abreviatura.is_empty() { &def.nombre } else { &def.abreviatura };
+    Ok((nombre.clone(), variables::resultado(&est.definiciones_variables, &inst.base.parametros, &inst.base.variables, def)))
 }
 
 /// Los ids de todas las instancias en su orden, con los `participantes` repartidos por los mismos huecos pero ordenados como
@@ -214,7 +207,7 @@ fn orden_completo(est: &EstadoPartida, participantes: &[u16], nuevo_orden: &[u16
     ids
 }
 
-/// `Empezar [tirada]` en el mapa que tiene abierto el host. `comando` es lo escrito (para el historial) y `tirada` lo que sigue a
+/// `Batalla [tirada]` en el mapa que tiene abierto el host. `comando` es lo escrito (para el historial) y `tirada` lo que sigue a
 /// la palabra. Devuelve la línea que se ve en el chat.
 pub fn empezar_en(state: &AppState, comando: &str, tirada: &str) -> Result<String, String> {
     let mut est = state.lock();
@@ -268,8 +261,16 @@ pub fn empezar_en(state: &AppState, comando: &str, tirada: &str) -> Result<Strin
         registrar(&mut est, &state.almacen, DeltaPartida::InstanciasReordenadas(completo));
     }
     registrar(&mut est, &state.almacen, DeltaPartida::BatallaIniciada { id_mapa, batalla });
-    let linea = if resumen.is_empty() { format!("Batalla empezada ({} fichas)", participantes.len()) } else { format!("Batalla empezada: {resumen}") };
-    registrar_tirada_en(&mut est, &state.almacen, ID_HOST, &linea, participantes.len() as i32, true, None);
+    // En el chat sale el comando equivalente tal cual (`Batalla 1d20 + velocidad`) y, entre paréntesis, el resultado: las fichas (con su tirada si la hubo)
+    if resumen.is_empty() {
+        resumen = participantes
+            .iter()
+            .map(|id| est.instancias_activas.iter().find(|i| i.id_instancia == *id).map(|i| i.base.nombre.clone()).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(" · ");
+    }
+    let linea = format!("{comando} ({resumen})");
+    registrar_tirada_en(&mut est, &state.almacen, ID_HOST, &linea, participantes.len() as i32, true, None, true);
     drop(est);
     state.almacen.anadir_historial(comando);
     Ok(linea)
@@ -282,8 +283,8 @@ pub fn terminar_en(state: &AppState, comando: &str) -> Result<String, String> {
     let batalla = batalla_de(&est, id_mapa).map_err(|_| "El mapa abierto no está en batalla".to_string())?;
     let vueltas = batalla.grupos.iter().map(|g| g.ronda).max().unwrap_or(1);
     registrar(&mut est, &state.almacen, DeltaPartida::BatallaTerminada { id_mapa });
-    let linea = format!("Batalla terminada en el turno {vueltas}");
-    registrar_tirada_en(&mut est, &state.almacen, ID_HOST, &linea, vueltas as i32, true, None);
+    let linea = format!("{comando} (Batalla terminada en {vueltas} {})", if vueltas == 1 { "turno" } else { "turnos" });
+    registrar_tirada_en(&mut est, &state.almacen, ID_HOST, &linea, vueltas as i32, true, None, true);
     drop(est);
     state.almacen.anadir_historial(comando);
     Ok(linea)
@@ -328,12 +329,12 @@ mod tests {
 
     #[test]
     fn interpreta_empezar_y_terminar() {
-        assert_eq!(interpretar_comando("Empezar"), Some(ComandoBatalla::Empezar(String::new())));
-        assert_eq!(interpretar_comando("  empezar 1d20 + des "), Some(ComandoBatalla::Empezar("1d20 + des".into())));
-        assert_eq!(interpretar_comando("EMPEZAR\t1d20"), Some(ComandoBatalla::Empezar("1d20".into())));
+        assert_eq!(interpretar_comando("Batalla"), Some(ComandoBatalla::Empezar(String::new())));
+        assert_eq!(interpretar_comando("  batalla 1d20 + des "), Some(ComandoBatalla::Empezar("1d20 + des".into())));
+        assert_eq!(interpretar_comando("BATALLA\t1d20"), Some(ComandoBatalla::Empezar("1d20".into())));
         assert_eq!(interpretar_comando("terminar"), Some(ComandoBatalla::Terminar(String::new())));
         assert_eq!(interpretar_comando("Terminar ya"), Some(ComandoBatalla::Terminar("ya".into())));
-        assert_eq!(interpretar_comando("empezarya"), None, "palabra entera");
+        assert_eq!(interpretar_comando("batallaya"), None, "palabra entera");
         assert_eq!(interpretar_comando("1d20"), None);
         assert_eq!(interpretar_comando(""), None);
     }
@@ -500,42 +501,35 @@ mod tests {
     #[test]
     fn empezar_sin_tirada_no_reordena_y_deja_el_turno_en_el_primero() {
         let s = partida("batalla_sin_tirada");
-        let linea = ejecutar_comando(&s, ID_HOST, "Empezar", ComandoBatalla::Empezar(String::new())).unwrap();
-        assert!(linea.contains("3 fichas"), "{linea}");
+        let linea = ejecutar_comando(&s, ID_HOST, "Batalla", ComandoBatalla::Empezar(String::new())).unwrap();
+        assert_eq!(linea, "Batalla (F1 · F2 · F4)");
         assert_eq!(miembros(&s), vec![1, 2, 4], "la oculta no participa; la de otro mapa tampoco");
         let est = s.lock();
         let g = &est.mapas[0].batalla.as_ref().unwrap().grupos[0];
         assert_eq!((g.turno, g.ronda), (Some(1), 1));
         assert!(est.mapas[1].batalla.is_none());
         // Una línea en el chat
-        assert!(est.historial_tiradas[0].comando.contains("Batalla empezada"));
+        assert!(est.historial_tiradas[0].informativa);
         drop(est);
         // Empezar otra vez en el mismo mapa no se puede
-        assert!(empezar_en(&s, "Empezar", "").is_err());
+        assert!(empezar_en(&s, "Batalla", "").is_err());
     }
 
     #[test]
-    fn empezar_con_tirada_ordena_de_mayor_a_menor_con_variables_y_parametros() {
+    fn empezar_con_tirada_ordena_de_mayor_a_menor_con_las_variables_de_cada_ficha() {
+        use crate::tablero_general::variables::pruebas::var;
         let s = partida("batalla_con_tirada");
         {
             let mut est = s.lock();
-            // Velocidad = 6 + id (la 1 tiene 7, la 2 tiene 8, la 4 tiene 10) y un dado de 1 cara no varía: el resultado es seguro
-            est.definiciones_parametros = parametros_por_defecto();
-            let defs = est.definiciones_parametros.clone();
+            // Destreza (neutro 0, escala 1: su resultado es su valor) = 6 + id: la 1 tiene 7, la 2 tiene 8, la 4 tiene 10; un dado de
+            // 1 cara no varía, así que el resultado es seguro
+            est.definiciones_variables = vec![var(1, "Destreza", "des", 0, 1)];
             for i in est.instancias_activas.iter_mut() {
-                let velocidad = 6 + i.id_instancia as i16;
-                i.base.parametros = defs
-                    .iter()
-                    .map(|d| Parametro {
-                        id_definicion: d.id,
-                        valor: if d.id == ID_VELOCIDAD { ValorParametro::Numero(velocidad) } else { d.valor_por_defecto.clone() },
-                        publico: true,
-                    })
-                    .collect();
+                i.base.variables = vec![ValorVariable { id_definicion: 1, valor: 6 + i.id_instancia as i16, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] }];
             }
         }
-        let linea = empezar_en(&s, "Empezar 1d1 + Velocidad", "1d1 + Velocidad").unwrap();
-        assert!(linea.contains("F4 11") && linea.contains("F2 9") && linea.contains("F1 8"), "{linea}");
+        let linea = empezar_en(&s, "Batalla 1d1 + des", "1d1 + des").unwrap();
+        assert_eq!(linea, "Batalla 1d1 + des (F4 11 · F2 9 · F1 8)");
         assert_eq!(miembros(&s), vec![4, 2, 1], "de mayor a menor");
         let est = s.lock();
         assert_eq!(est.mapas[0].batalla.as_ref().unwrap().grupos[0].turno, Some(4));
@@ -546,22 +540,31 @@ mod tests {
     }
 
     #[test]
+    fn un_parametro_visual_no_se_tira_ni_en_la_iniciativa() {
+        let s = partida("batalla_parametro");
+        s.lock().definiciones_parametros = crate::tablero_general::modelos::parametros_por_defecto();
+        let e = empezar_en(&s, "Batalla Velocidad", "Velocidad").unwrap_err();
+        assert!(e.contains("no es una variable"), "{e}");
+        assert!(s.lock().mapas[0].batalla.is_none());
+    }
+
+    #[test]
     fn en_un_empate_se_respeta_el_orden_que_ya_tenian() {
         let s = partida("batalla_empate");
-        empezar_en(&s, "Empezar 1d1", "1d1").unwrap();
+        empezar_en(&s, "Batalla 1d1", "1d1").unwrap();
         assert_eq!(miembros(&s), vec![1, 2, 4]);
     }
 
     #[test]
     fn empezar_rechaza_lo_que_no_vale() {
         let s = partida("batalla_errores");
-        assert!(empezar_en(&s, "Empezar 1d20 <= 5", "1d20 <= 5").unwrap_err().contains("comparaciones"));
-        assert!(empezar_en(&s, "Empezar Inventada", "Inventada").is_err(), "ni variable ni parámetro");
+        assert!(empezar_en(&s, "Batalla 1d20 <= 5", "1d20 <= 5").unwrap_err().contains("comparaciones"));
+        assert!(empezar_en(&s, "Batalla Inventada", "Inventada").is_err(), "no es una variable");
         assert!(s.lock().mapas[0].batalla.is_none(), "un error no deja nada a medias");
         s.lock().mapa_del_host.abierto = None;
-        assert!(empezar_en(&s, "Empezar", "").is_err(), "sin mapa abierto");
+        assert!(empezar_en(&s, "Batalla", "").is_err(), "sin mapa abierto");
         // Un jugador no puede
-        let e = ejecutar_comando(&s, 3, "Empezar", ComandoBatalla::Empezar(String::new())).unwrap_err();
+        let e = ejecutar_comando(&s, 3, "Batalla", ComandoBatalla::Empezar(String::new())).unwrap_err();
         assert!(e.contains("Solo el host"), "{e}");
     }
 
@@ -569,12 +572,12 @@ mod tests {
     fn terminar_quita_la_batalla_y_avisa_en_el_chat() {
         let s = partida("batalla_terminar");
         assert!(terminar_en(&s, "Terminar").is_err(), "sin batalla");
-        empezar_en(&s, "Empezar", "").unwrap();
+        empezar_en(&s, "Batalla", "").unwrap();
         pasar_turno_en(&s, ID_HOST, 1, 1).unwrap();
         pasar_turno_en(&s, ID_HOST, 1, 1).unwrap();
         pasar_turno_en(&s, ID_HOST, 1, 1).unwrap(); // vuelve al primero: turno 2
         let linea = ejecutar_comando(&s, ID_HOST, "Terminar", ComandoBatalla::Terminar(String::new())).unwrap();
-        assert!(linea.contains("turno 2"), "{linea}");
+        assert_eq!(linea, "Terminar (Batalla terminada en 2 turnos)");
         assert!(s.lock().mapas[0].batalla.is_none());
         assert!(ejecutar_comando(&s, ID_HOST, "Terminar ya", ComandoBatalla::Terminar("ya".into())).is_err());
     }

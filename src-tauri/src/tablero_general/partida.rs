@@ -101,11 +101,11 @@ pub fn procesar_delta(state: &AppState, delta: DeltaPartida) {
 // `valoracion`: el resultado de una comparación (`1d100 <= acro`) con el nombre que le da la escala del conjunto; `None` en una tirada normal.
 pub fn registrar_tirada(state: &AppState, jugador: IdJugador, desglose: &str, total: i32, publica: bool, valoracion: Option<&crate::tablero_general::escalas::Valoracion>) {
     let mut est = state.lock();
-    registrar_tirada_en(&mut est, &state.almacen, jugador, desglose, total, publica, valoracion);
+    registrar_tirada_en(&mut est, &state.almacen, jugador, desglose, total, publica, valoracion, false);
 }
 
 /// Como `registrar_tirada`, con el estado ya bloqueado (para quien registra más cosas en el mismo paso).
-pub(crate) fn registrar_tirada_en(est: &mut EstadoPartida, almacen: &Almacen, jugador: IdJugador, desglose: &str, total: i32, publica: bool, valoracion: Option<&crate::tablero_general::escalas::Valoracion>) {
+pub(crate) fn registrar_tirada_en(est: &mut EstadoPartida, almacen: &Almacen, jugador: IdJugador, desglose: &str, total: i32, publica: bool, valoracion: Option<&crate::tablero_general::escalas::Valoracion>, informativa: bool) {
     let autor = est.jugadores.iter().find(|j| j.id == jugador).map(|j| j.nombre.clone()).unwrap_or_default();
     let tirada = Tiradas {
         total,
@@ -117,6 +117,7 @@ pub(crate) fn registrar_tirada_en(est: &mut EstadoPartida, almacen: &Almacen, ju
         veredicto: valoracion.map(|v| v.nombre.clone()).unwrap_or_default(),
         acierta: valoracion.map(|v| v.acierta),
         especial: valoracion.is_some_and(|v| v.especial),
+        informativa,
     };
 
     registrar(est, almacen, DeltaPartida::TiradaRealizada(tirada));

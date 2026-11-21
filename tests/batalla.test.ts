@@ -8,11 +8,11 @@ const grupo = (id: number, miembros: number[], turno: number | null, ronda = 1):
 const instancias = [inst(1, 0), inst(2, 1), inst(3, 2), inst(4, 3)];
 
 describe("las órdenes de batalla del chat", () => {
-  it("Empezar y Terminar, con o sin texto detrás y sin mirar mayúsculas", () => {
-    expect(esComandoBatalla("Empezar")).toBe(true);
-    expect(esComandoBatalla("  empezar 1d20 + des")).toBe(true);
+  it("Batalla y Terminar, con o sin texto detrás y sin mirar mayúsculas", () => {
+    expect(esComandoBatalla("Batalla")).toBe(true);
+    expect(esComandoBatalla("  batalla 1d20 + des")).toBe(true);
     expect(esComandoBatalla("TERMINAR")).toBe(true);
-    expect(esComandoBatalla("empezarya")).toBe(false);
+    expect(esComandoBatalla("batallaya")).toBe(false);
     expect(esComandoBatalla("1d20")).toBe(false);
     expect(esComandoBatalla("")).toBe(false);
   });

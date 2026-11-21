@@ -1,6 +1,6 @@
 <!-- src/routes/componentes/panel-derecho/VentanaBatalla.svelte -->
 <!-- Ventana flotante (no modal) para empezar una batalla en el mapa abierto: la tirada de iniciativa (opcional) con la que cada ficha
-     se ordena en «Fichas activas». Todo lo que se pone aquí se manda al chat como el comando `Empezar <tirada>`, igual que si se
+     se ordena en «Fichas activas». Todo lo que se pone aquí se manda al chat como el comando `Batalla <tirada>`, igual que si se
      escribiera a mano. Solo el host. -->
 <script lang="ts">
   import { ayuda } from "$lib/ajustesVista.svelte";
@@ -11,13 +11,14 @@
   let { onCerrar }: { onCerrar: () => void } = $props();
 
   let ventana = $state<HTMLDivElement | null>(null);
+  let campo = $state<HTMLInputElement | null>(null);
   let pos = $state({ x: 420, y: 90 });
   let tirada = $state("");
   let empezando = $state(false);
   let aviso = $state("");
 
-  /** Lo que se manda al chat: `Empezar` o `Empezar 1d20 + des`. */
-  const comando = $derived(`Empezar ${tirada.trim()}`.trim());
+  /** Lo que se manda al chat: `Batalla` o `Batalla 1d20 + des`. */
+  const comando = $derived(`Batalla ${tirada.trim()}`.trim());
 
   async function empezar() {
     if (empezando) return;
@@ -41,7 +42,8 @@
     }
   }
 
-  $effect(() => ventana?.focus());
+  // Al abrirla, el foco va directo al campo de la tirada (así se escribe y Enter empieza)
+  $effect(() => campo?.focus());
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -63,15 +65,14 @@
 
   <div class="cuerpo">
     <label for="b-tirada">Tirada para ordenar las fichas (opcional):</label>
-    <!-- svelte-ignore a11y_autofocus -->
     <input
       id="b-tirada"
       type="text"
       class="input-texto"
       maxlength="120"
-      placeholder="p. ej. 1d20 + Destreza + Velocidad"
-      autofocus
-      title={ayuda("Cada ficha tira con SUS variables y parámetros (un parámetro se escribe por su nombre). Se ordenan de mayor a menor; en un empate se respeta el orden que ya tenían. Vacío: no se reordenan")}
+      placeholder="p. ej. 1d20 + Destreza"
+      bind:this={campo}
+      title={ayuda("Cada ficha tira con SUS variables, como en cualquier tirada del chat. Se ordenan de mayor a menor; en un empate se respeta el orden que ya tenían. Vacío: no se reordenan")}
       bind:value={tirada}
     />
     <p class="ayuda">

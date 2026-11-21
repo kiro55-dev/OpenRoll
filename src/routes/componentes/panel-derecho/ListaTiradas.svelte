@@ -12,12 +12,12 @@
     <div
       class="linea-tirada"
       class:error={t.total === null}
-      class:arrastrable={t.total !== null}
+      class:arrastrable={t.total !== null && !t.informativa}
       role="listitem"
-      title={ayuda(t.total === null ? undefined : "Arrastrar sobre un valor de una ficha:\nBotón izquierdo: quita\nBotón derecho: suma")}
-      onpointerdown={(e) => t.total !== null && arrastreTirada.preparar(e, t.total)}
+      title={ayuda(t.total === null || t.informativa ? undefined : "Arrastrar sobre un valor de una ficha:\nBotón izquierdo: quita\nBotón derecho: suma")}
+      onpointerdown={(e) => t.total !== null && !t.informativa && arrastreTirada.preparar(e, t.total)}
     >
-      {#if t.total !== null}
+      {#if t.total !== null && !t.informativa}
         <strong class="total">= {t.total}</strong>
       {/if}
       {#if t.total !== null && t.veredicto}

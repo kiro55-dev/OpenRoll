@@ -814,6 +814,9 @@ pub struct Tiradas {
     /// Solo en una comparación: el resultado salió de una regla del dado natural (crítico, pifia...), no del nivel normal.
     #[serde(default)]
     pub especial: bool,
+    /// Una línea del chat que solo informa (empezar o terminar una batalla): sin total ni arrastre.
+    #[serde(default)]
+    pub informativa: bool,
 }
 
 fn tirada_publica() -> bool {

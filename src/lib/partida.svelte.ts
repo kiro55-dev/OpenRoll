@@ -37,7 +37,7 @@ export interface Mapa {
   orden: number;
   /** Lo ven los jugadores de la sala (la casilla del mapa). Lo cambia solo `compartirMapa`. */
   compartido: boolean;
-  /** La batalla en curso en este mapa (el parámetro «en batalla»), o nada. La cambian solo `Empezar`, `Terminar` y pasar el turno. */
+  /** La batalla en curso en este mapa (el parámetro «en batalla»), o nada. La cambian solo `Batalla`, `Terminar` y pasar el turno. */
   batalla?: Batalla | null;
 }
 
@@ -1700,7 +1700,7 @@ export const partida = new Partida();
 
 // Las variables de una tirada (`2d6 + f`) salen de la ficha con el foco o, sin él, de la última que lo tuvo
 tiradas.fichaConFoco = () => partida.fichaParaVariables;
-// `Empezar` y `Terminar` cambian mapas e instancias (el orden de «Fichas activas»): se vuelve a leer lo que cambió
+// `Batalla` y `Terminar` cambian mapas e instancias (el orden de «Fichas activas»): se vuelve a leer lo que cambió
 tiradas.alCambiarBatalla = async () => {
   await partida.recargarEntidades();
   await partida.recargarBatallas();

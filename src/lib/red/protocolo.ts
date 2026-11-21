@@ -30,6 +30,7 @@ export interface TiradaChat {
   acierta?: boolean | null;
   /** El resultado salió de una regla del dado natural (crítico, pifia...). */
   especial?: boolean;
+  informativa?: boolean;
 }
 
 /** `red::vista::VistaJugador`: lo que ve este jugador de la partida (lo mismo que lee la app, filtrado). */

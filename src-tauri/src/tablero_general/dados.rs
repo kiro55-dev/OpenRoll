@@ -618,7 +618,7 @@ mod tests {
         }
 
         let mut e = crate::tablero_general::estado::EstadoPartida::default();
-        let t = crate::tablero_general::modelos::Tiradas { total: 3, comando: "1d6 (3)".into(), hora: "10:00".into(), jugador: 0, autor: String::new(), publica: true, veredicto: String::new(), acierta: None, especial: false };
+        let t = crate::tablero_general::modelos::Tiradas { total: 3, comando: "1d6 (3)".into(), hora: "10:00".into(), jugador: 0, autor: String::new(), publica: true, veredicto: String::new(), acierta: None, especial: false, informativa: false };
         e.aplicar_delta(&DeltaPartida::TiradaRealizada(t));
         e.aplicar_delta(&DeltaPartida::HistorialTiradasLimpiado);
         assert!(e.historial_tiradas.is_empty());

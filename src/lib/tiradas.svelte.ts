@@ -24,6 +24,8 @@ export interface Tirada {
   acierta?: boolean | null;
   /** El resultado salió de una regla del dado natural (crítico, pifia...). */
   especial?: boolean;
+  /** Una línea que solo informa (empezar o terminar una batalla): se ve sin total y no se arrastra. */
+  informativa?: boolean;
 }
 
 /** La clase de color de un veredicto: acierto o fallo, y dorado o rojo si es una regla del dado natural (crítico o pifia). */
@@ -287,7 +289,7 @@ class Tiradas {
   /** La instancia con el foco (una sola), de la que salen las variables de una tirada (`2d6 + f`). La pone
    *  `partida.svelte.ts` (que ya importa este store: así no se importan el uno al otro). */
   fichaConFoco: () => number | null = () => null;
-  /** Lo que hay que releer tras `Empezar` o `Terminar` (lo pone `partida.svelte.ts`, por lo mismo). */
+  /** Lo que hay que releer tras `Batalla` o `Terminar` (lo pone `partida.svelte.ts`, por lo mismo). */
   alCambiarBatalla: () => Promise<void> = async () => {};
 
   // Navegación por los comandos anteriores con ↑ ↓, como en una terminal.
@@ -300,8 +302,8 @@ class Tiradas {
   /** Carga el historial guardado en Rust. */
   async cargar() {
     // El chat es de todos: cada tirada lleva el nombre de quien la hizo (`autor`, vacío si fue el host)
-    const guardadas = await invoke<{ hora: string; comando: string; total: number; autor?: string; publica?: boolean; veredicto?: string; acierta?: boolean | null; especial?: boolean }[]>("obtener_historial_tiradas");
-    this.historial = guardadas.map((t) => ({ hora: t.hora, comando: t.comando, total: t.total, autor: t.autor ?? "", publica: t.publica ?? true, veredicto: t.veredicto ?? "", acierta: t.acierta ?? null, especial: t.especial ?? false }));
+    const guardadas = await invoke<{ hora: string; comando: string; total: number; autor?: string; publica?: boolean; veredicto?: string; acierta?: boolean | null; especial?: boolean; informativa?: boolean }[]>("obtener_historial_tiradas");
+    this.historial = guardadas.map((t) => ({ hora: t.hora, comando: t.comando, total: t.total, autor: t.autor ?? "", publica: t.publica ?? true, veredicto: t.veredicto ?? "", acierta: t.acierta ?? null, especial: t.especial ?? false, informativa: t.informativa ?? false }));
     this.#salirDelHistorial(); // los comandos anteriores (↑ ↓) también son de la partida abierta
   }
 

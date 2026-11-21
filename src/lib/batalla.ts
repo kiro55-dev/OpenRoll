@@ -4,10 +4,10 @@
 // es quien decide y guarda; esto solo lee lo que llega en `Mapa.batalla` y calcula lo mismo para pintarlo).
 import type { Batalla, GrupoBatalla, Instancia } from "./partida.svelte";
 
-/** ¿Es una orden de batalla escrita en el chat? (`Empezar [tirada]` o `Terminar`; la primera palabra entera, sin mayúsculas). Igual que
+/** ¿Es una orden de batalla escrita en el chat? (`Batalla [tirada]` o `Terminar`; la primera palabra entera, sin mayúsculas). Igual que
  *  `batalla::interpretar_comando` de Rust. */
 export function esComandoBatalla(comando: string): boolean {
-  return /^(empezar|terminar)(\s|$)/i.test(comando.trim());
+  return /^(batalla|terminar)(\s|$)/i.test(comando.trim());
 }
 
 /** Los miembros de un grupo que existen, en el orden de «Fichas activas» (el de los turnos). */
