@@ -63,7 +63,7 @@
     <span class="estado" id="estado">Sin cambios</span>
     <button type="button" class="guardar" id="guardar">Guardar</button>
   </header>
-  <p class="ayuda" id="ayuda-guardar">Rellena la ficha y pulsa «Guardar». Después arrastra este archivo a OpenRoll (al banco de fichas, o a la ventana de la ficha).</p>
+  <p class="ayuda" id="ayuda-guardar">Rellena la ficha (la rueda del ratón sube y baja los números) y pulsa «Guardar». Después arrastra este archivo a OpenRoll (al banco de fichas, o a la ventana de la ficha).</p>
   <p class="error" id="error" hidden></p>
 
   <section>
@@ -189,6 +189,16 @@
       td.className = "resultado" + (r > 0 ? " positivo" : r < 0 ? " negativo" : "");
     }
   }
+
+  // La rueda del ratón sobre un campo numérico lo sube o lo baja de 1 en 1 (como en OpenRoll), sin hacer falta pulsarlo
+  document.addEventListener("wheel", (e) => {
+    const campo = e.target instanceof Element ? e.target.closest("input[type=number]") : null;
+    if (!campo || campo.disabled || campo.readOnly) return;
+    e.preventDefault();
+    const min = campo.min === "" ? -Infinity : Number(campo.min), max = campo.max === "" ? Infinity : Number(campo.max);
+    campo.value = String(Math.min(max, Math.max(min, Math.round(Number(campo.value) || 0) + (e.deltaY < 0 ? 1 : -1))));
+    campo.dispatchEvent(new Event("input", { bubbles: true })); // para que se guarde, se marque «sin guardar» y se recalculen los resultados
+  }, { passive: false });
 
   // ---------------------------------------------------------------- campos de la ficha
   function campos() {
@@ -433,15 +443,63 @@
     copia.querySelector("#error").hidden = true;
     return "<!doctype html>\n" + copia.outerHTML;
   }
-  const nombreArchivo = () => (estado.nombre.trim() || "ficha").replace(/[\\/:*?"<>|]+/g, "_") + ".html";
+  // El nombre del archivo tal como está abierto (si viene del disco): mientras no se cambie el nombre de la ficha se guarda con ESE
+  // nombre, aunque el archivo se haya movido o renombrado; si se cambia el nombre de la ficha, con el nuevo
+  const archivoAbierto = (() => {
+    try {
+      const n = decodeURIComponent(location.pathname.split("/").pop() || "");
+      return /\.html?$/i.test(n) ? n : "";
+    } catch (e) { return ""; }
+  })();
+  const nombreInicial = estado.nombre;
+  const nombreArchivo = () =>
+    archivoAbierto && estado.nombre === nombreInicial
+      ? archivoAbierto
+      : (estado.nombre.trim() || "ficha").replace(/[\\/:*?"<>|]+/g, "_") + ".html";
+  // La última carpeta donde se guardó (el manejador del archivo, en IndexedDB) para abrir el diálogo ahí la próxima vez. Si el
+  // navegador no lo permite (modo privado, otro origen...) simplemente no se recuerda nada.
+  function baseDeDatos() {
+    return new Promise((ok, mal) => {
+      const r = indexedDB.open("openroll-plantilla", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("k");
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => mal(r.error);
+    });
+  }
+  async function recordarCarpeta() {
+    try {
+      const bd = await baseDeDatos();
+      return await new Promise((ok) => {
+        const q = bd.transaction("k").objectStore("k").get("ultimo");
+        q.onsuccess = () => ok(q.result || null);
+        q.onerror = () => ok(null);
+      });
+    } catch (e) { return null; }
+  }
+  async function guardarCarpeta(manejador) {
+    try {
+      const bd = await baseDeDatos();
+      bd.transaction("k", "readwrite").objectStore("k").put(manejador, "ultimo");
+    } catch (e) { /* no pasa nada: la próxima vez se abrirá donde el navegador recuerde */ }
+  }
+  let nombreDelManejador = "";
+  let motivoDescarga = ""; // por qué no se pudo guardar en su sitio (si el navegador lo tiene y falló)
   let manejador = null; // Chrome/Edge: el archivo elegido la primera vez, que se sobrescribe después
   /** Chrome/Edge: se elige el archivo la primera vez (el mismo que se tiene abierto) y después se sobrescribe. `false` si este
    *  navegador no puede (entonces se descarga una copia). Cancelar el diálogo lanza `AbortError`. */
   async function guardarEnSuSitio(html) {
     if (!window.showSaveFilePicker) return false;
     try {
+      // Si el nombre de la ficha ha cambiado desde la última vez, se guarda con el nombre nuevo (otro archivo), no encima del anterior
+      if (manejador && nombreDelManejador !== nombreArchivo()) manejador = null;
       if (!manejador) {
-        manejador = await window.showSaveFilePicker({ suggestedName: nombreArchivo(), types: [{ description: "Ficha de OpenRoll", accept: { "text/html": [".html"] } }] });
+        nombreDelManejador = nombreArchivo();
+        // El diálogo se abre en la carpeta donde se guardó la última vez (aunque se haya cerrado el navegador entre medias)
+        const inicio = await recordarCarpeta();
+        const opciones = { id: "openroll-ficha", suggestedName: nombreArchivo(), types: [{ description: "Ficha de OpenRoll", accept: { "text/html": [".html"] } }] };
+        if (inicio) opciones.startIn = inicio;
+        manejador = await window.showSaveFilePicker(opciones);
+        guardarCarpeta(manejador);
       }
       const w = await manejador.createWritable();
       await w.write(html);
@@ -450,6 +508,7 @@
     } catch (err) {
       manejador = null;
       if (err && err.name === "AbortError") throw err;
+      motivoDescarga = err && err.message ? err.message : String(err);
       return false; // sin permiso desde un archivo local, por ejemplo: se descarga
     }
   }
@@ -467,7 +526,7 @@
         $("ayuda-guardar").textContent = "Guardado. Arrastra este archivo a OpenRoll cuando quieras.";
       } else {
         descargar(html);
-        $("ayuda-guardar").textContent = "Se ha descargado «" + nombreArchivo() + "» (en tu carpeta de descargas): ESE es el archivo que tienes que pasar a OpenRoll, y el que tienes que abrir para seguir editando.";
+        $("ayuda-guardar").textContent = "Este navegador no deja guardar sobre el archivo abierto" + (motivoDescarga ? " (" + motivoDescarga + ")" : "") + ", así que se ha descargado «" + nombreArchivo() + "» en tu carpeta de descargas (si ya había uno con ese nombre, el navegador le añade un número): ESE es el archivo que tienes que pasar a OpenRoll, y el que tienes que abrir para seguir editando.";
       }
       sucio = false;
       $("estado").textContent = "Guardado";

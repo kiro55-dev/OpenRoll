@@ -443,6 +443,9 @@ export class EditorFicha {
 
   /** Lo que no se pudo pasar de la última plantilla aplicada (se ve en la ventana). */
   avisosPlantilla = $state<string[]>([]);
+  /** Se ve unos segundos tras importar una plantilla («Datos importados»). */
+  datosImportados = $state(false);
+  #relojImportado: ReturnType<typeof setTimeout> | null = null;
 
   async aplicarPlantilla(plantilla: PlantillaLeida) {
     const { entidad, avisos } = aplicarAFicha($state.snapshot(this.entidad) as Entidad, plantilla, {
@@ -471,6 +474,9 @@ export class EditorFicha {
       }
     }
     this.avisosPlantilla = avisos;
+    this.datosImportados = true;
+    if (this.#relojImportado) clearTimeout(this.#relojImportado);
+    this.#relojImportado = setTimeout(() => (this.datosImportados = false), 4000);
   }
 
   /** `origen`: una ruta del disco (host) o el archivo que eligió el jugador en su navegador (se sube al host). */

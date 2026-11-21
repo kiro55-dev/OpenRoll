@@ -425,6 +425,10 @@
       <p class="error" role="alert">{editor.error}</p>
     {/if}
 
+    {#if editor.datosImportados}
+      <p class="importado" role="status">Datos importados, pulse guardar para confirmar</p>
+    {/if}
+
     <div class="pie">
       {#if !editor.esBorrador && !esJugador}
         <button type="button" class="btn-borrar" onclick={() => editor.borrar()} disabled={editor.guardando}>Borrar ficha</button>
@@ -556,6 +560,7 @@
   .botones-aviso { display: flex; justify-content: flex-end; gap: 6px; }
   .btn-proceder { background: #b91c1c; color: white; border: none; padding: 5px 12px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; }
   .btn-proceder:hover { background: #dc2626; }
+  .importado { margin: 0 0 6px; color: #4ade80; font-size: 12px; }
   .avisos-plantilla { margin-bottom: 6px; color: #fbbf24; font-size: 11px; }
   .avisos-plantilla p { margin: 0; }
   .botones-derecha { display: flex; gap: 6px; margin-left: auto; }

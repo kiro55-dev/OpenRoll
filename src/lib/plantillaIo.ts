@@ -63,7 +63,7 @@ export async function exportarPlantilla(entidad: Entidad | null, idFicha: number
     foto: entidad ? await fotoDe(entidad) : null
   });
   const html = generarPlantilla(datos);
-  const nombre = entidad ? `${nombreDeArchivo(entidad.nombre)} - plantilla.html` : `${nombreDeArchivo(datos.conjunto || "Ficha")} - plantilla.html`;
+  const nombre = `${nombreDeArchivo(entidad ? entidad.nombre : datos.conjunto || "Ficha")}.html`;
   if (esJugador) {
     // En el navegador: se descarga
     const a = document.createElement("a");
