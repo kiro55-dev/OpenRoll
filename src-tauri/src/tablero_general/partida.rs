@@ -1278,6 +1278,19 @@ pub fn iniciar_borrador_entidad_en(zona_id: u16, foto_url: Option<String>, state
     // y esos archivos no son de nadie: se limpia aquí, en el único momento en que es seguro.
     archivos::borrar_carpeta_entidad(&state.almacen.dir(), id);
 
+    // Los archivos de texto con los que nace toda ficha del conjunto (se crean ya en su carpeta: cancelar la ficha la borra entera)
+    let mut adjuntos: Vec<Option<String>> = Vec::new();
+    for a in &est.archivos_texto_defecto {
+        match archivos::crear_texto_con_nombre(&state.almacen.dir(), id, &a.nombre, &a.contenido) {
+            Ok(ruta) => adjuntos.push(Some(ruta)),
+            Err(e) => {
+                archivos::borrar_carpeta_entidad(&state.almacen.dir(), id);
+                reservas.remove(&id);
+                return Err(e);
+            }
+        }
+    }
+
     // Sin valores todavía: normalizar pone el de por defecto de cada parámetro
     let mut parametros = Vec::new();
     normalizar_parametros(&est.definiciones_parametros, &mut parametros);
@@ -1295,7 +1308,7 @@ pub fn iniciar_borrador_entidad_en(zona_id: u16, foto_url: Option<String>, state
         foto_url,
         miniatura_url: None,
         foto_encuadre: Default::default(),
-        archivos_adjuntos: vec![],
+        archivos_adjuntos: adjuntos,
         es_unico: false, vision: 0, plantilla_id: None,
         propietarios: vec![],
     };
@@ -1377,6 +1390,9 @@ fn validar_entidad(est: &EstadoPartida, dir: &Path, e: &Entidad) -> Result<(), S
     let adjuntos: Vec<&String> = e.archivos_adjuntos.iter().flatten().collect();
     if adjuntos.len() > MAX_ADJUNTOS_FICHA {
         return Err(format!("Una ficha no puede tener más de {MAX_ADJUNTOS_FICHA} archivos"));
+    }
+    if adjuntos.iter().filter(|r| r.to_lowercase().ends_with(".txt")).count() > archivos::MAX_ARCHIVOS_TEXTO {
+        return Err(format!("Una ficha no puede tener más de {} archivos de texto", archivos::MAX_ARCHIVOS_TEXTO));
     }
     if adjuntos.iter().collect::<std::collections::HashSet<_>>().len() != adjuntos.len() {
         return Err("Hay un archivo adjunto repetido".into());
@@ -1891,6 +1907,31 @@ mod tests_partidas {
             e.aplicar_delta(&d);
             assert_eq!(e.instancias_activas.last().unwrap().id_instancia, i);
         }
+    }
+
+    #[test]
+    fn una_ficha_no_pasa_de_20_archivos_de_texto_y_un_texto_no_pasa_de_100000_caracteres() {
+        let state = estado_en_a("tope_txt");
+        ficha_con_instancias(&state);
+        let mut f = state.lock().banco_entidades[0].clone();
+        let txt = |n: usize| (0..n).map(|i| Some(format!("archivos/entidad_{}/N{i}.txt", f.id))).collect::<Vec<_>>();
+        f.archivos_adjuntos = txt(archivos::MAX_ARCHIVOS_TEXTO);
+        assert!(validar_entidad(&state.lock(), &state.almacen.dir(), &f).is_ok());
+        f.archivos_adjuntos = txt(archivos::MAX_ARCHIVOS_TEXTO + 1);
+        let e = validar_entidad(&state.lock(), &state.almacen.dir(), &f).unwrap_err();
+        assert!(e.contains("archivos de texto"), "{e}");
+        // Otros adjuntos (un PDF) no cuentan para el tope de .txt
+        let mut g = f.clone();
+        g.archivos_adjuntos = txt(archivos::MAX_ARCHIVOS_TEXTO);
+        g.archivos_adjuntos.push(Some(format!("archivos/entidad_{}/mapa.pdf", f.id)));
+        assert!(validar_entidad(&state.lock(), &state.almacen.dir(), &g).is_ok());
+
+        // Guardar el texto de un archivo: 100 000 caracteres sí (aunque pasen de 100 000 bytes), uno más no
+        let dir = state.almacen.dir();
+        let adj = archivos::crear_documento_texto(&dir, f.clone()).unwrap();
+        assert!(archivos::guardar_texto(&dir, adj.clone(), &"é".repeat(archivos::MAX_CARACTERES_TEXTO)).is_ok());
+        let e = archivos::guardar_texto(&dir, adj, &"é".repeat(archivos::MAX_CARACTERES_TEXTO + 1)).unwrap_err();
+        assert!(e.contains("100000"), "{e}");
     }
 
     #[test]

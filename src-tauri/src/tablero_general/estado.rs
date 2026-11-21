@@ -86,6 +86,8 @@ pub enum DeltaPartida {
     ListaRangosBorrada(u16),
     /// La escala de resultados del conjunto activo (o ninguna). Ya validada.
     EscalaResultadoCambiada(Option<EscalaResultado>),
+    /// Los archivos de texto por defecto del conjunto activo (la lista entera, ya validada y con sus ids).
+    ArchivosTextoDefectoCambiados(Vec<ArchivoTextoDefecto>),
     /// Instancia nueva (o reemplaza la de ese id). Las reglas para construirla están en `instancias.rs`.
     InstanciaCreada(Instancia),
     /// Instancia cambiada entera: movida, quitada del tablero o una ficha única reutilizada.
@@ -158,6 +160,9 @@ pub struct EstadoPartida {
     /// definiciones de arriba. `None` = solo «Éxito» o «Fallo».
     #[serde(default)]
     pub escala_resultado: Option<EscalaResultado>,
+    /// Los .txt con los que nace una ficha nueva (ver archivos_defecto.rs). Es la «viva» del conjunto activo, como las definiciones.
+    #[serde(default)]
+    pub archivos_texto_defecto: Vec<ArchivoTextoDefecto>,
     /// Los conjuntos de parámetros que guarda la partida (ver conjuntos.rs). Las definiciones de arriba son las del ACTIVO.
     /// Las partidas anteriores a los conjuntos lo reciben al cargar (`conjuntos::asegurar`).
     #[serde(default)]
@@ -230,6 +235,7 @@ impl Default for EstadoPartida {
             grupos_variables: grupos_por_defecto(),
             listas_rangos: Vec::new(),
             escala_resultado: None,
+            archivos_texto_defecto: Vec::new(),
             conjuntos_parametros: crate::tablero_general::conjuntos::conjuntos_iniciales(),
             conjunto_activo: 1,
             zonas: Vec::new(),
@@ -514,6 +520,7 @@ impl EstadoPartida {
                 }
             }
             DeltaPartida::EscalaResultadoCambiada(escala) => self.escala_resultado = escala.clone(),
+            DeltaPartida::ArchivosTextoDefectoCambiados(lista) => self.archivos_texto_defecto = lista.clone(),
             DeltaPartida::ListaRangosGuardada(lista) => {
                 match self.listas_rangos.iter().position(|l| l.id == lista.id) {
                     Some(pos) => self.listas_rangos[pos] = lista.clone(),

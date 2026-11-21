@@ -17,8 +17,8 @@ use crate::tablero_general::modelos::*;
 
 pub const MAX_NOMBRE_JUGADOR: usize = 30;
 
-/// Tamaño máximo de un texto (.txt adjunto) que mande un jugador por red.
-pub const MAX_TEXTO_JUGADOR: usize = 256 * 1024;
+/// Caracteres máximos de un texto (.txt adjunto) que mande un jugador por red: el mismo tope que para todos (`archivos`).
+pub const MAX_TEXTO_JUGADOR: usize = crate::tablero_general::archivos::MAX_CARACTERES_TEXTO;
 
 /// Extensiones de adjunto que un jugador puede crear o subir. Solo texto: un .txt se muestra siempre como
 /// texto y no puede ejecutar nada. Los PDF están prohibidos a propósito (pueden llevar JavaScript, acciones

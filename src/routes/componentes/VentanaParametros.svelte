@@ -14,6 +14,7 @@
   import ArrastreFlotante from "./comunes/ArrastreFlotante.svelte";
   import TablaVariables from "./ventana-parametros/TablaVariables.svelte";
   import TablaEscala from "./ventana-parametros/TablaEscala.svelte";
+  import TablaArchivosTexto from "./ventana-parametros/TablaArchivosTexto.svelte";
   import ConjuntosParametros from "./ventana-parametros/ConjuntosParametros.svelte";
   import SelectorVariables from "./ventana-parametros/SelectorVariables.svelte";
 
@@ -23,10 +24,11 @@
   edicion.reiniciar();
   onDestroy(() => edicion.reiniciar());
 
-  /** Subpestaña: los parámetros de siempre (vida, rangos... lo que se dibuja) o las variables (Fuerza «f»...). */
-  let pestana = $state<"parametros" | "variables" | "resultados">("parametros");
+  /** Subpestaña: los parámetros de siempre (vida, rangos... lo que se dibuja), las variables (Fuerza «f»...), la escala de resultados o los .txt por defecto. */
+  type Pestana = "parametros" | "variables" | "resultados" | "txt";
+  let pestana = $state<Pestana>("parametros");
 
-  async function cambiarPestana(p: "parametros" | "variables" | "resultados") {
+  async function cambiarPestana(p: Pestana) {
     if (p === pestana) return;
     if (!(await guardarSiCambio())) return; // un parámetro editado que no vale se queda a la vista con su error
     error = "";
@@ -185,7 +187,7 @@
 <div
   class="ventana-flotante"
   style="left: {pos.x}px; top: {pos.y}px;"
-  style:width={pestana === "variables" || pestana === "resultados" ? "560px" : null}
+  style:width={pestana === "variables" || pestana === "resultados" || pestana === "txt" ? "560px" : null}
   style:max-height="min(66.667vh, calc(100vh - {pos.y}px - 12px))"
   role="dialog"
   aria-label="Parámetros de la partida"
@@ -207,11 +209,16 @@
       <button type="button" role="tab" aria-selected={pestana === "parametros"} class:activa={pestana === "parametros"} onclick={() => cambiarPestana("parametros")}>Parámetros visuales</button>
       <button type="button" role="tab" aria-selected={pestana === "variables"} class:activa={pestana === "variables"} onclick={() => cambiarPestana("variables")}>Variables</button>
       <button type="button" role="tab" aria-selected={pestana === "resultados"} class:activa={pestana === "resultados"} onclick={() => cambiarPestana("resultados")}>Resultados</button>
+      <button type="button" role="tab" aria-selected={pestana === "txt"} class:activa={pestana === "txt"} onclick={() => cambiarPestana("txt")}>TXT por defecto</button>
     </div>
 
     <!-- Siempre montada (solo se oculta): lo que se haya escrito en las variables sin guardar no se pierde al cambiar de pestaña -->
     <div class="pestana-variables" hidden={pestana !== "variables"}>
       <TablaVariables onError={(m) => (error = m)} />
+    </div>
+    <!-- También siempre montada: lo escrito en un archivo sin guardar no se pierde al cambiar de pestaña -->
+    <div class="pestana-variables" hidden={pestana !== "txt"}>
+      <TablaArchivosTexto onError={(m) => (error = m)} />
     </div>
     {#if pestana === "resultados"}
       <TablaEscala onError={(m) => (error = m)} />

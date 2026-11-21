@@ -1,6 +1,7 @@
 // Dar de alta a los archivos
 pub mod almacen;
 pub mod archivos;
+pub mod archivos_defecto;
 pub mod batalla;
 pub mod cambios_entidad;
 pub mod conjuntos;

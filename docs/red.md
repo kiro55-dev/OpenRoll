@@ -187,9 +187,10 @@ https://kiro55-dev.github.io/OpenRoll/#t=…&s=…&k=…
     pasar por otro en el chat (`jugadores::registrar`). Los nombres de ficha tampoco admiten esos caracteres.
   - Instancias: sin ids repetidos en una petición y máximo `MAX_INSTANCIAS_PROPIAS` (30) instancias de sus
     fichas a la vez. Si los ids de instancia llegan a 65535 se reutiliza el menor libre (`instancias.rs`).
-  - Archivos: máximo `MAX_ADJUNTOS_JUGADOR` (10) archivos y 2 MiB por carpeta de ficha con lo que crea un jugador;
-    en cualquier ficha, nombre ≤ 100 caracteres, texto de parámetro ≤ 2000 y ≤ 50 adjuntos sin repetir
-    (`validar_entidad`).
+  - Archivos: máximo `MAX_ADJUNTOS_JUGADOR` (20, el mismo `MAX_ARCHIVOS_TEXTO` de toda ficha) archivos y 2 MiB por
+    carpeta de ficha con lo que crea un jugador, y cada .txt ≤ `MAX_TEXTO_JUGADOR` (100 000 caracteres, contados como
+    caracteres y no como bytes); en cualquier ficha, nombre ≤ 100 caracteres, texto de parámetro ≤ 2000, ≤ 50 adjuntos
+    sin repetir y ≤ 20 de ellos .txt (`validar_entidad`).
   - Imágenes subidas: ≤ 8 MiB, ≤ 8192 px por lado y ≤ 40 Mpx (una «bomba» de pocos MB colgaría a quien la abra);
     la miniatura propia de una ficha, WebP de ≤ 512 px. Las subidas que ninguna ficha usa se borran al cerrar la
     sala, al expulsar al jugador y al generar enlace nuevo (`recursos::descartar`, nunca borra lo que se usa).

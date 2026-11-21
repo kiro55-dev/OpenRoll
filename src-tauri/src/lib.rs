@@ -14,6 +14,7 @@ use tablero_general::conjuntos::{
     anadir_conjunto_de_serie, anadir_de_biblioteca, borrar_conjunto, borrar_de_biblioteca, exportar_conjunto, guardar_en_biblioteca,
     importar_conjunto, listar_biblioteca_conjuntos, obtener_conjuntos_parametros, renombrar_conjunto, usar_conjunto,
 };
+use tablero_general::archivos_defecto::{guardar_archivos_texto_defecto, obtener_archivos_texto_defecto};
 use tablero_general::escalas::{guardar_escala_resultado, obtener_ejemplos_escala, obtener_escala_resultado};
 use tablero_general::rangos::{borrar_lista_rangos, crear_lista_rangos, modificar_lista_rangos, obtener_listas_rangos};
 use tablero_general::batalla::{
@@ -164,6 +165,8 @@ pub fn run() {
             modificar_lista_rangos,
             borrar_lista_rangos,
             guardar_escala_resultado,
+            obtener_archivos_texto_defecto,
+            guardar_archivos_texto_defecto,
             obtener_ejemplos_escala,
             renombrar_conjunto,
             borrar_conjunto,

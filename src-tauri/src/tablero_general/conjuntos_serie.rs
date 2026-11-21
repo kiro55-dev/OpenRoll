@@ -147,6 +147,7 @@ pub fn dnd5e() -> ConjuntoParametros {
         variables,
         listas_rangos: vec![],
         escala_resultado: Some(escala("dnd")),
+        archivos_texto: vec![],
     }
 }
 
@@ -227,6 +228,7 @@ pub fn pathfinder2e() -> ConjuntoParametros {
         variables,
         listas_rangos: listas,
         escala_resultado: None,
+        archivos_texto: vec![],
     }
 }
 
@@ -335,6 +337,7 @@ pub fn cthulhu7e() -> ConjuntoParametros {
         variables,
         listas_rangos: vec![],
         escala_resultado: Some(escala("cthulhu")),
+        archivos_texto: vec![],
     }
 }
 

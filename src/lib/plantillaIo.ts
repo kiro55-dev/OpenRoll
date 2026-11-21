@@ -61,7 +61,8 @@ export async function exportarPlantilla(entidad: Entidad | null, idFicha: number
     entidad,
     idFicha,
     foto: entidad ? await fotoDe(entidad) : null,
-    archivos
+    // En blanco, la plantilla trae los .txt con los que nace toda ficha del conjunto; de una ficha, los suyos
+    archivos: entidad ? archivos : partida.archivosTextoDefecto.map((a) => ({ original: null, nombre: `${a.nombre}.txt`, contenido: a.contenido }))
   });
   const html = generarPlantilla(datos);
   const nombre = `${nombreDeArchivo(entidad ? entidad.nombre : datos.conjunto || "Ficha")}.html`;

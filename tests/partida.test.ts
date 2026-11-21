@@ -38,6 +38,8 @@ function crearBackend() {
     escala: null as any,
     /** Las listas de rangos del conjunto activo. */
     listasRangos: [] as any[],
+    /** Los .txt por defecto del conjunto activo (Rust los valida y da id a los nuevos). */
+    archivosTexto: [] as { id: number; nombre: string; contenido: string }[],
     papelera: [] as { zonas: any[]; banco: any[] }[],
     partidas: ["A", "B"] as string[],
     actual: "A",
@@ -72,6 +74,13 @@ function crearBackend() {
         case "obtener_conjuntos_parametros": return clon(b.conjuntos);
         case "obtener_escala_resultado": return clon(b.escala);
         case "obtener_listas_rangos": return clon(b.listasRangos);
+        case "obtener_archivos_texto_defecto": return clon(b.archivosTexto);
+        case "guardar_archivos_texto_defecto": {
+          if (args.archivos.some((a: any) => !a.nombre.trim() || a.nombre.includes("."))) throw "El nombre no vale";
+          let siguiente = Math.max(0, ...args.archivos.map((a: any) => a.id));
+          b.archivosTexto = args.archivos.map((a: any) => ({ ...clon(a), id: a.id || ++siguiente }));
+          return clon(b.archivosTexto);
+        }
         case "crear_lista_rangos": {
           if (b.listasRangos.some((l: any) => l.nombre === args.lista.nombre)) throw "Ya hay una lista de rangos que se llama";
           const l = { ...clon(args.lista), id: Math.max(0, ...b.listasRangos.map((x: any) => x.id)) + 1 };
@@ -901,6 +910,33 @@ describe("fichas: selección y vida", () => {
     backend.escala = escala;
     await partida.usarConjunto(2);
     expect(partida.escala).toEqual(escala);
+  });
+
+  it("los .txt por defecto se leen, se añaden, se cambian, se reordenan y se borran sin tocar lo demás, y se releen al cambiar de conjunto", async () => {
+    const partida = await nuevoStore();
+    expect(partida.archivosTextoDefecto).toEqual([]);
+    // Uno nuevo (id 0) se añade al final y Rust le da su id
+    const historia = await partida.guardarArchivoTextoDefecto({ id: 0, nombre: "Historia", contenido: "Érase" });
+    const notas = await partida.guardarArchivoTextoDefecto({ id: 0, nombre: "Notas", contenido: "" });
+    expect([historia.id, notas.id]).toEqual([1, 2]);
+    expect(partida.archivosTextoDefecto.map((a) => a.nombre)).toEqual(["Historia", "Notas"]);
+    // Cambiar uno manda la lista guardada con SOLO ese cambiado
+    await partida.guardarArchivoTextoDefecto({ id: 1, nombre: "Pasado", contenido: "Érase" });
+    expect(llamadas("guardar_archivos_texto_defecto").at(-1)!.args.archivos.map((a: any) => a.nombre)).toEqual(["Pasado", "Notas"]);
+    // Reordenar y borrar
+    await partida.reordenarArchivosTextoDefecto([2, 1]);
+    expect(partida.archivosTextoDefecto.map((a) => a.id)).toEqual([2, 1]);
+    await partida.reordenarArchivosTextoDefecto([1]); // una lista incompleta no pierde archivos
+    expect(partida.archivosTextoDefecto.map((a) => a.id)).toEqual([2, 1]);
+    await partida.borrarArchivoTextoDefecto(2);
+    expect(partida.archivosTextoDefecto.map((a) => a.nombre)).toEqual(["Pasado"]);
+    // Un error de Rust llega a quien llama y la pantalla se queda con lo guardado
+    await expect(partida.guardarArchivoTextoDefecto({ id: 0, nombre: "a.b", contenido: "" })).rejects.toBeTruthy();
+    expect(partida.archivosTextoDefecto.map((a) => a.nombre)).toEqual(["Pasado"]);
+    // Al cambiar de conjunto se relee (cada conjunto tiene los suyos)
+    backend.archivosTexto = [{ id: 7, nombre: "Del otro", contenido: "" }];
+    await partida.usarConjunto(2);
+    expect(partida.archivosTextoDefecto.map((a) => a.nombre)).toEqual(["Del otro"]);
   });
 
   it("las listas de rangos se leen con las definiciones, se crean, se cambian y se borran, y cada cambio relee las variables", async () => {

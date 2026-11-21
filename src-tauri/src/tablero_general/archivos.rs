@@ -15,6 +15,11 @@ use crate::tablero_general::modelos::{ArchivoAdjunto, Entidad};
 
 const MAX_BYTES_ARCHIVO: u64 = 150 * 1024 * 1024; // 150 MB
 const MAX_LONGITUD_NOMBRE: usize = 120;
+/// Los archivos de texto (.txt) de una ficha: cuántos y cuántos caracteres cada uno. UN solo tope para todo el programa (la ficha, lo que
+/// escribe un jugador, la plantilla HTML y los archivos por defecto del conjunto): 20 × 100 000 caracteres caben de sobra en los 2 MiB
+/// que puede ocupar un jugador en una ficha.
+pub const MAX_ARCHIVOS_TEXTO: usize = 20;
+pub const MAX_CARACTERES_TEXTO: usize = 100_000;
 pub const RESERVADOS_WINDOWS: [&str; 22] = [
     "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9", "lpt1",
     "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
@@ -63,7 +68,7 @@ fn carpeta_entidad(dir_datos: &Path, entidad_id: u16) -> Result<(PathBuf, String
     Ok((dir_datos.join(&rel), rel))
 }
 
-fn nombre_valido(nombre: &str) -> Result<(), String> {
+pub fn nombre_valido(nombre: &str) -> Result<(), String> {
     let stem = nombre.split('.').next().unwrap_or("").to_lowercase();
     if RESERVADOS_WINDOWS.contains(&stem.as_str()) {
         return Err(format!("«{nombre}» es un nombre reservado del sistema"));
@@ -108,9 +113,27 @@ pub fn crear_documento_texto(dir_datos: &Path, entidad: Entidad) -> Result<Archi
     Ok(ArchivoAdjunto { ruta: format!("{carpeta_rel}/{nombre}"), entidad_archivo: entidad })
 }
 
+/// Crea `<nombre>.txt` con `contenido` en la carpeta de la ficha `entidad_id` y devuelve su ruta relativa (así nace una ficha con los
+/// archivos por defecto de su conjunto). Falla si ya existe: la carpeta de una ficha nueva se limpió antes.
+pub fn crear_texto_con_nombre(dir_datos: &Path, entidad_id: u16, nombre: &str, contenido: &str) -> Result<String, String> {
+    let (carpeta_abs, carpeta_rel) = carpeta_entidad(dir_datos, entidad_id)?;
+    let fichero = format!("{nombre}.txt");
+    nombre_valido(&fichero)?;
+    fs::create_dir_all(&carpeta_abs).map_err(|e| format!("No se pudo crear carpeta: {e}"))?;
+    let destino = carpeta_abs.join(&fichero);
+    if destino.exists() {
+        return Err(format!("El archivo «{fichero}» ya existe"));
+    }
+    fs::write(&destino, contenido.as_bytes()).map_err(|e| format!("Error al crear «{fichero}»: {e}"))?;
+    Ok(format!("{carpeta_rel}/{fichero}"))
+}
+
 /// Actualiza el texto de un archivo EXISTENTE. Si el archivo ya no existe es un error: guardar
 /// no debe resucitar en silencio un archivo que se perdió.
 pub fn guardar_texto(dir_datos: &Path, adjunto: ArchivoAdjunto, contenido: &str) -> Result<ArchivoAdjunto, String> {
+    if contenido.chars().count() > MAX_CARACTERES_TEXTO {
+        return Err(format!("Un archivo de texto no puede pasar de {MAX_CARACTERES_TEXTO} caracteres"));
+    }
     let destino = ruta_segura(dir_datos, &adjunto.ruta, &["archivos"])?;
     if !destino.is_file() {
         return Err(format!("El archivo «{}» ya no existe", nombre_de(&adjunto.ruta)));

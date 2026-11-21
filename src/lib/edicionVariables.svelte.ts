@@ -19,8 +19,11 @@ export class EdicionVariables {
   #filas = new Map<symbol, FilaEditable>();
   /** Las que tienen cambios sin guardar. */
   #sucias = $state(new Set<symbol>());
-  /** Ids (de Rust) de las variables guardadas en esta sesión, hasta que se vuelvan a editar o se cierre la ventana. */
-  verdes = $state(new Set<number>());
+  /**
+   * Ids (de Rust) de las filas guardadas en esta sesión, hasta que se vuelvan a editar o se cierre la ventana. Las variables van con su
+   * id; los archivos de texto por defecto con «txt:<id>» (los ids de unos y otros se pisarían).
+   */
+  verdes = $state(new Set<number | string>());
 
   get hayCambios(): boolean {
     return this.#sucias.size > 0;
@@ -52,12 +55,12 @@ export class EdicionVariables {
     return this.#sucias.has(clave);
   }
 
-  marcarVerde(id: number) {
+  marcarVerde(id: number | string) {
     if (this.verdes.has(id)) return;
     this.verdes = new Set(this.verdes).add(id);
   }
 
-  quitarVerde(id: number) {
+  quitarVerde(id: number | string) {
     if (!this.verdes.has(id)) return;
     const nuevo = new Set(this.verdes);
     nuevo.delete(id);

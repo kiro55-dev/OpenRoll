@@ -32,9 +32,11 @@ export const MIME_FOTO: Record<string, string> = {
   "image/gif": "gif",
   "image/bmp": "bmp"
 };
-/** Tope de archivos de texto de una plantilla (`MAX_ADJUNTOS_FICHA` en Rust) y del contenido de cada uno. */
-export const MAX_ARCHIVOS_TEXTO = 50;
-export const MAX_CARACTERES_ARCHIVO = 500_000;
+/** Tope de archivos de texto de una ficha y de caracteres de cada uno (`MAX_ARCHIVOS_TEXTO` y `MAX_CARACTERES_TEXTO` en Rust: el mismo para todo el programa). */
+export const MAX_ARCHIVOS_TEXTO = 20;
+export const MAX_CARACTERES_ARCHIVO = 100_000;
+/** Caracteres del nombre de un archivo de texto, sin la extensión (`MAX_NOMBRE_ARCHIVO` en Rust). */
+export const MAX_NOMBRE_ARCHIVO_TEXTO = 100;
 const MAX_STEM_ARCHIVO = 100;
 const RESERVADOS_WINDOWS = new Set([
   "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",

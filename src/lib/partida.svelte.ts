@@ -226,6 +226,13 @@ export interface EjemploEscala {
   escala: EscalaResultado;
 }
 
+/** Un .txt con el que nace toda ficha nueva del conjunto activo (`ArchivoTextoDefecto` en Rust). `nombre` va sin «.txt». */
+export interface ArchivoTextoDefecto {
+  id: number;
+  nombre: string;
+  contenido: string;
+}
+
 export interface ListaConjuntos {
   activo: number;
   guardados: ResumenConjunto[];
@@ -416,6 +423,8 @@ class Partida {
   listasRangos = $state<ListaRangos[]>([]);
   /** La escala de resultados del conjunto activo (`null` = solo «Éxito» o «Fallo»). Solo la lee el host: el jugador recibe ya el veredicto. */
   escala = $state<EscalaResultado | null>(null);
+  /** Los .txt por defecto de las fichas nuevas del conjunto activo, en su orden. Solo los lee el host (el jugador recibe sus fichas ya hechas). */
+  archivosTextoDefecto = $state<ArchivoTextoDefecto[]>([]);
   /** Escalas de ejemplo (Cthulhu, D&D...) con las que rellenar el editor. */
   ejemplosEscala = $state<EjemploEscala[]>([]);
 
@@ -695,7 +704,43 @@ class Partida {
       this.conjuntos = await invoke<ListaConjuntos>("obtener_conjuntos_parametros");
       this.escala = (await invoke<EscalaResultado | null>("obtener_escala_resultado")) ?? null;
       this.listasRangos = (await invoke<ListaRangos[]>("obtener_listas_rangos")) ?? [];
+      this.archivosTextoDefecto = (await invoke<ArchivoTextoDefecto[]>("obtener_archivos_texto_defecto")) ?? [];
     }
+  }
+
+  /**
+   * Guarda la lista entera de .txt por defecto del conjunto activo (Rust la valida y da el motivo si falla, y asigna el id a los
+   * archivos nuevos, que van con id 0). Devuelve lo guardado. Pase lo que pase se vuelve a leer lo de Rust.
+   */
+  async guardarArchivosTextoDefecto(lista: ArchivoTextoDefecto[]): Promise<ArchivoTextoDefecto[]> {
+    try {
+      return (await invoke<ArchivoTextoDefecto[]>("guardar_archivos_texto_defecto", { archivos: lista })) ?? [];
+    } finally {
+      this.archivosTextoDefecto = (await invoke<ArchivoTextoDefecto[]>("obtener_archivos_texto_defecto")) ?? [];
+    }
+  }
+
+  /**
+   * Guarda UN archivo por defecto sin tocar lo que otras filas tengan escrito sin guardar: lo guardado, con este cambiado (id > 0) o
+   * añadido al final (id 0). Devuelve el archivo guardado, con su id.
+   */
+  async guardarArchivoTextoDefecto(archivo: ArchivoTextoDefecto): Promise<ArchivoTextoDefecto> {
+    const actuales = $state.snapshot(this.archivosTextoDefecto) as ArchivoTextoDefecto[];
+    const lista = archivo.id === 0 ? [...actuales, archivo] : actuales.map((a) => (a.id === archivo.id ? archivo : a));
+    const guardada = await this.guardarArchivosTextoDefecto(lista);
+    return archivo.id === 0 ? guardada[guardada.length - 1] : (guardada.find((a) => a.id === archivo.id) as ArchivoTextoDefecto);
+  }
+
+  /** Nuevo orden de los .txt por defecto (los ids, todos). */
+  reordenarArchivosTextoDefecto(ids: number[]) {
+    const actuales = $state.snapshot(this.archivosTextoDefecto) as ArchivoTextoDefecto[];
+    const lista = ids.map((id) => actuales.find((a) => a.id === id)).filter((a): a is ArchivoTextoDefecto => !!a);
+    return this.guardarArchivosTextoDefecto(lista.length === actuales.length ? lista : actuales);
+  }
+
+  borrarArchivoTextoDefecto(id: number) {
+    const actuales = $state.snapshot(this.archivosTextoDefecto) as ArchivoTextoDefecto[];
+    return this.guardarArchivosTextoDefecto(actuales.filter((a) => a.id !== id));
   }
 
   /** Crea una lista de rangos. Cambiar una lista cambia las variables que la usan, y con ellas las fichas: se vuelve a leer todo. */

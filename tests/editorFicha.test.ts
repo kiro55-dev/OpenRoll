@@ -413,6 +413,17 @@ describe("archivos de texto de una plantilla", () => {
     expect(ed.adjuntos).toEqual([DIR + "alfa.txt", DIR + "mapa.pdf", DIR + "nueva.txt"]);
   });
 
+  it("una plantilla en blanco con los .txt por defecto, sobre una ficha nueva que ya los trae, no crea ni renombra nada", async () => {
+    const ed = await nuevoEditor(base());
+    await ed.aplicarPlantilla(plantilla([
+      { original: null, nombre: "a.txt", contenido: "disco:" + DIR + "a.txt" },
+      { original: null, nombre: "b.txt", contenido: "disco:" + DIR + "b.txt" }
+    ]));
+    expect(llamadasA("crear_documento_texto")).toEqual([]);
+    expect(llamadasA("renombrar_archivo_adjunto")).toEqual([]);
+    expect(ed.adjuntos).toEqual([DIR + "a.txt", DIR + "b.txt", DIR + "mapa.pdf"]);
+  });
+
   it("un archivo sin cambios no se reescribe, y una plantilla sin archivos no toca ninguno", async () => {
     const ed = await nuevoEditor(base());
     await ed.aplicarPlantilla(plantilla([

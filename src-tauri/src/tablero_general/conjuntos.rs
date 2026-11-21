@@ -28,7 +28,7 @@ pub const FORMATO: &str = "openroll-conjunto";
 /// Versión del formato del archivo. Un archivo de una versión MÁS NUEVA se rechaza con un motivo claro.
 pub const VERSION_ARCHIVO: u32 = 1;
 /// Tope del tamaño del archivo a importar (se mira antes de leerlo).
-pub const MAX_BYTES_ARCHIVO: u64 = 1024 * 1024;
+pub const MAX_BYTES_ARCHIVO: u64 = 8 * 1024 * 1024;
 pub const MAX_NOMBRE_CONJUNTO: usize = 60;
 pub const MAX_DESCRIPCION_CONJUNTO: usize = 300;
 /// Conjuntos que puede guardar una partida.
@@ -54,6 +54,7 @@ fn generico() -> ConjuntoParametros {
         variables: Vec::new(),
         listas_rangos: Vec::new(),
         escala_resultado: None,
+        archivos_texto: Vec::new(),
     }
 }
 
@@ -92,6 +93,7 @@ impl EstadoPartida {
             variables: self.definiciones_variables.clone(),
             listas_rangos: self.listas_rangos.clone(),
             escala_resultado: self.escala_resultado.clone(),
+            archivos_texto: self.archivos_texto_defecto.clone(),
         }
     }
 
@@ -123,6 +125,7 @@ impl EstadoPartida {
         self.definiciones_variables = nuevo.contenido.variables;
         self.listas_rangos = nuevo.contenido.listas_rangos;
         self.escala_resultado = nuevo.contenido.escala_resultado;
+        self.archivos_texto_defecto = nuevo.contenido.archivos_texto;
         self.conjunto_activo = id;
         self.reiniciar_valores_de_fichas();
         self.restaurar_valores(&nuevo.valores);
@@ -291,6 +294,7 @@ pub fn asegurar(est: &mut EstadoPartida) {
         variables: est.definiciones_variables.clone(),
         listas_rangos: est.listas_rangos.clone(),
         escala_resultado: est.escala_resultado.clone(),
+        archivos_texto: est.archivos_texto_defecto.clone(),
     };
     let g = generico();
     let es_generico = vivo.parametros == g.parametros && vivo.variables.is_empty() && vivo.grupos_variables == g.grupos_variables;
@@ -315,6 +319,7 @@ impl EstadoPartida {
         e.definiciones_variables = dnd.variables.clone();
         e.listas_rangos = dnd.listas_rangos.clone();
         e.escala_resultado = dnd.escala_resultado.clone();
+        e.archivos_texto_defecto = dnd.archivos_texto.clone();
         e.conjuntos_parametros =
             vec![ConjuntoGuardado { id: 1, origen: Some(CONJUNTO_POR_DEFECTO.into()), contenido: dnd, valores: Default::default() }];
         e.conjunto_activo = 1;
@@ -460,6 +465,9 @@ pub fn validar(mut c: ConjuntoParametros) -> Result<ConjuntoParametros, String> 
     // La escala de resultados, con las mismas reglas que al editarla a mano
     let escala_resultado = c.escala_resultado.map(crate::tablero_general::escalas::validar).transpose()?;
 
+    // Los archivos de texto por defecto, con las mismas reglas que al editarlos a mano
+    let archivos_texto = crate::tablero_general::archivos_defecto::validar(c.archivos_texto)?;
+
     Ok(ConjuntoParametros {
         nombre: c.nombre,
         descripcion: c.descripcion,
@@ -468,6 +476,7 @@ pub fn validar(mut c: ConjuntoParametros) -> Result<ConjuntoParametros, String> 
         variables: variables_validadas,
         listas_rangos: listas,
         escala_resultado,
+        archivos_texto,
     })
 }
 
@@ -617,7 +626,7 @@ pub fn renombrar_conjunto_en(id: u16, nombre: String, state: &AppState) -> Resul
         return Ok(());
     }
     // Se valida como el resto (largo, caracteres) y que no lo tenga otro
-    validar(ConjuntoParametros { nombre: nombre.clone(), descripcion: String::new(), parametros: vec![], grupos_variables: vec![], variables: vec![], listas_rangos: vec![], escala_resultado: None })?;
+    validar(ConjuntoParametros { nombre: nombre.clone(), descripcion: String::new(), parametros: vec![], grupos_variables: vec![], variables: vec![], listas_rangos: vec![], escala_resultado: None, archivos_texto: vec![] })?;
     let repetido = est.conjuntos_parametros.iter().filter(|g| g.id != id).filter_map(|g| est.contenido_de(g.id)).any(|c| c.nombre.to_lowercase() == nombre.to_lowercase());
     if repetido {
         return Err(format!("Ya hay un conjunto que se llama «{nombre}»"));
@@ -845,6 +854,7 @@ mod tests {
             variables: vec![var(1, "Destreza", "des", 10, 2), var(3, "Competencia", "com", 0, 1), derivada(4, "Acrobacias", "acro", &[1], &[3])],
             listas_rangos: vec![],
             escala_resultado: None,
+            archivos_texto: vec![],
         }
     }
 
@@ -1323,6 +1333,72 @@ mod tests {
         let mut e = EstadoPartida::default();
         e.escala_resultado = c.escala_resultado.clone();
         assert_eq!(e.contenido_de(1).unwrap().escala_resultado, c.escala_resultado);
+    }
+
+    #[test]
+    fn los_archivos_de_texto_por_defecto_son_de_cada_conjunto_y_las_fichas_nuevas_nacen_con_ellos() {
+        use crate::tablero_general::archivos_defecto::guardar_archivos_texto_defecto_en;
+        use crate::tablero_general::partida::{cancelar_borrador_entidad_en, crear_entidad_en, iniciar_borrador_entidad_en, procesar_delta};
+        let state = estado_en_a("archivos_texto_defecto");
+        state.lock().zonas = vec![Zona { id: 1, nombre: "Z".into(), orden: 0 }];
+        let nuevo = |nombre: &str, contenido: &str| ArchivoTextoDefecto { id: 0, nombre: nombre.into(), contenido: contenido.into() };
+
+        // Sin archivos por defecto la ficha nace sin adjuntos
+        assert!(iniciar_borrador_entidad_en(1, None, &state).unwrap().archivos_adjuntos.is_empty());
+
+        // Se guardan (ids asignados por Rust); guardar lo mismo no registra nada
+        let lista = guardar_archivos_texto_defecto_en(vec![nuevo("Historia", "Érase una vez"), nuevo("Notas", "")], &state).unwrap();
+        assert_eq!(lista.iter().map(|a| a.id).collect::<Vec<_>>(), vec![1, 2]);
+        let seq = state.lock().ultimo_seq;
+        guardar_archivos_texto_defecto_en(lista.clone(), &state).unwrap();
+        assert_eq!(state.lock().ultimo_seq, seq);
+        assert!(guardar_archivos_texto_defecto_en(vec![nuevo("a.b", "")], &state).is_err(), "una lista mala se rechaza entera");
+        assert_eq!(state.lock().archivos_texto_defecto, lista);
+
+        // La ficha nueva nace con los archivos, en orden y con su texto; el borrador cancelado se los lleva
+        let f = iniciar_borrador_entidad_en(1, None, &state).unwrap();
+        let rutas: Vec<String> = f.archivos_adjuntos.iter().flatten().cloned().collect();
+        assert_eq!(rutas, vec![format!("archivos/entidad_{}/Historia.txt", f.id), format!("archivos/entidad_{}/Notas.txt", f.id)]);
+        let dir = state.almacen.dir();
+        assert_eq!(std::fs::read_to_string(dir.join(&rutas[0])).unwrap(), "Érase una vez");
+        cancelar_borrador_entidad_en(f.id, vec![], &state);
+        assert!(!dir.join(format!("archivos/entidad_{}", f.id)).exists());
+
+        // Guardada, la ficha los conserva como adjuntos suyos
+        let g = iniciar_borrador_entidad_en(1, None, &state).unwrap();
+        let guardada = crear_entidad_en(g.clone(), &state).unwrap();
+        assert_eq!(guardada.archivos_adjuntos.iter().flatten().count(), 2);
+        assert!(dir.join(format!("archivos/entidad_{}/Historia.txt", g.id)).is_file());
+
+        // Cada conjunto guarda los suyos: al pasar a otro sin archivos desaparecen de vista y al volver se recuperan
+        procesar_delta(&state, DeltaPartida::ConjuntoAnadido(ConjuntoGuardado { id: 2, origen: None, contenido: conjunto_dnd(), valores: Default::default() }));
+        procesar_delta(&state, DeltaPartida::ConjuntoActivado(2));
+        assert!(state.lock().archivos_texto_defecto.is_empty());
+        procesar_delta(&state, DeltaPartida::ConjuntoActivado(1));
+        assert_eq!(state.lock().archivos_texto_defecto, lista);
+        assert_eq!(state.lock().contenido_de(1).unwrap().archivos_texto, lista);
+    }
+
+    #[test]
+    fn los_archivos_de_texto_por_defecto_se_exportan_importan_y_se_validan() {
+        let mut c = conjunto_dnd();
+        c.archivos_texto = vec![ArchivoTextoDefecto { id: 4, nombre: "Historia".into(), contenido: "x".repeat(100_000) }];
+        let limpio = validar(c.clone()).unwrap();
+        assert_eq!(de_archivo(&a_archivo(&limpio).unwrap()).unwrap(), limpio, "la lista llena cabe en el archivo");
+        // Una lista rota rechaza todo el conjunto
+        let mut mala = c.clone();
+        mala.archivos_texto[0].nombre = "con".into();
+        assert!(validar(mala).is_err());
+        let mut larga = c.clone();
+        larga.archivos_texto[0].contenido.push('x');
+        assert!(validar(larga).is_err());
+        // Un archivo o una partida de antes de esto se leen igual, sin archivos
+        let viejo: ConjuntoParametros = serde_json::from_str(r#"{"nombre":"Viejo"}"#).unwrap();
+        assert!(viejo.archivos_texto.is_empty());
+        let e: EstadoPartida = serde_json::from_str(&serde_json::to_string(&EstadoPartida::default()).unwrap().replace(",\"archivos_texto_defecto\":[]", "")).unwrap();
+        assert!(e.archivos_texto_defecto.is_empty());
+        // Los conjuntos de serie no traen ninguno
+        assert!(integrados().iter().all(|i| i.contenido.archivos_texto.is_empty()));
     }
 
     #[test]

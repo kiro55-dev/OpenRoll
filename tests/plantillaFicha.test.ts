@@ -264,8 +264,10 @@ describe("archivos de texto de la plantilla", () => {
   });
 
   it("rechaza lo desmesurado", () => {
-    expect(() => leer(Array.from({ length: 51 }, (_, i) => ({ original: null, nombre: `a${i}`, contenido: "" })))).toThrow(/más de 50/);
-    expect(() => leer([{ original: null, nombre: "grande", contenido: "x".repeat(500_001) }])).toThrow(/pasa de/);
+    expect(() => leer(Array.from({ length: 21 }, (_, i) => ({ original: null, nombre: `a${i}`, contenido: "" })))).toThrow(/más de 20/);
+    expect(leer(Array.from({ length: 20 }, (_, i) => ({ original: null, nombre: `a${i}`, contenido: "" }))).archivos).toHaveLength(20);
+    expect(leer([{ original: null, nombre: "justo", contenido: "x".repeat(100_000) }]).archivos).toHaveLength(1);
+    expect(() => leer([{ original: null, nombre: "grande", contenido: "x".repeat(100_001) }])).toThrow(/pasa de/);
     expect(() => leer([{ nombre: 5 }])).toThrow(/dañada/);
   });
 

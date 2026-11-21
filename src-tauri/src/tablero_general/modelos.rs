@@ -363,6 +363,19 @@ pub struct ConjuntoParametros {
     /// pifias. Sin ella, solo «Éxito» o «Fallo». Ver escalas.rs.
     #[serde(default)]
     pub escala_resultado: Option<EscalaResultado>,
+    /// Los archivos de texto (.txt) con los que nace toda ficha NUEVA, en su orden (ver archivos_defecto.rs).
+    #[serde(default)]
+    pub archivos_texto: Vec<ArchivoTextoDefecto>,
+}
+
+/// Un archivo de texto que trae por defecto cada ficha nueva del conjunto: su nombre (sin «.txt») y su texto inicial.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ArchivoTextoDefecto {
+    /// Estable mientras exista (lo asigna Rust al guardar un archivo con id 0): la pantalla lo usa para seguir cada fila.
+    pub id: u16,
+    pub nombre: String,
+    #[serde(default)]
+    pub contenido: String,
 }
 
 /// Cómo se nombra el resultado de una comparación del chat. Es del conjunto de parámetros (cada rol tiene la suya): el chat solo

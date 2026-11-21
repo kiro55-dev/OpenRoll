@@ -23,7 +23,7 @@ import {
 } from "$lib/variables";
 import { importarImagen, urlDeImagen } from "$lib/imagenes";
 import { cargarImagen, encuadreCentrado, miniaturaWebp, type Encuadre } from "$lib/recorteFoto";
-import { aplicarAFicha, type ArchivoPlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
+import { aplicarAFicha, MAX_ARCHIVOS_TEXTO, type ArchivoPlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
 import { conjuntoActual, importarFotoPlantilla } from "$lib/plantillaIo";
 
 interface ArchivoAdjunto {
@@ -359,6 +359,10 @@ export class EditorFicha {
   }
 
   async crearTexto() {
+    if (this.#rutasTexto().length >= MAX_ARCHIVOS_TEXTO) {
+      this.#error = `Una ficha no puede tener más de ${MAX_ARCHIVOS_TEXTO} archivos de texto`;
+      return;
+    }
     try {
       const { ruta } = await invoke<ArchivoAdjunto>("crear_documento_texto", { entidad: this.#plano() });
       this.#anadir(ruta);

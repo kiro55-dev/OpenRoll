@@ -41,7 +41,7 @@ const MAX_FICHAS_PROPIAS: usize = 20;
 pub const MAX_INSTANCIAS_PROPIAS: usize = 30;
 /// Archivos y espacio que puede ocupar la carpeta de adjuntos de una ficha con lo que crea un jugador (si no,
 /// podría llenar el disco del host creando .txt sin fin).
-pub const MAX_ADJUNTOS_JUGADOR: usize = 10;
+pub const MAX_ADJUNTOS_JUGADOR: usize = archivos::MAX_ARCHIVOS_TEXTO;
 pub const MAX_BYTES_ADJUNTOS_JUGADOR: u64 = 2 * 1024 * 1024;
 
 /// Si en la carpeta de la ficha `id` cabe un archivo más (`nuevo`) o, con `reemplaza`, ese archivo con
@@ -290,7 +290,7 @@ pub fn permitida_con(est: &EstadoPartida, jugador: IdJugador, p: &Peticion, subi
         }
         Peticion::LeerArchivoTexto { ruta_relativa } => archivo_de_ficha_suya(est, jugador, ruta_relativa, borradores).map(|_| ()),
         Peticion::GuardarArchivoTexto { adjunto, contenido } => {
-            if contenido.len() > MAX_TEXTO_JUGADOR {
+            if contenido.chars().count() > MAX_TEXTO_JUGADOR {
                 return Err("El texto es demasiado largo".into());
             }
             archivo_de_ficha_suya(est, jugador, &adjunto.ruta, borradores).map(|_| ())

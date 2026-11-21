@@ -6,6 +6,7 @@
   import { tick } from "svelte";
   import { esTexto, nombreArchivo, type EditorFicha } from "$lib/editorFicha.svelte";
   import { esJugador } from "$lib/modo";
+  import { MAX_CARACTERES_ARCHIVO } from "$lib/plantillaFicha";
 
   let { editor }: { editor: EditorFicha } = $props();
 
@@ -142,6 +143,7 @@
       {#if ruta in editor.textos}
         <textarea
           placeholder="Notas privadas..."
+          maxlength={MAX_CARACTERES_ARCHIVO}
           value={editor.textos[ruta]}
           oninput={(e) => editor.escribir(e.currentTarget.value)}
         ></textarea>
