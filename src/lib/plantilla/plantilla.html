@@ -18,6 +18,7 @@
   .estado { font-size: 12px; color: #71717a; }
   .estado.sucio { color: #f87171; font-weight: 600; }
   .estado.ok { color: #4ade80; }
+  .estado.guardando { color: #facc15; font-weight: 600; }
   button { font: inherit; cursor: pointer; border-radius: 5px; }
   .guardar { background: #16a34a; color: white; border: none; padding: 7px 16px; font-weight: 700; }
   .guardar:hover { background: #15803d; }
@@ -78,7 +79,7 @@
     <span class="estado" id="estado">Sin cambios</span>
     <button type="button" class="guardar" id="guardar">Guardar</button>
   </header>
-  <p class="ayuda" id="ayuda-guardar">Ficha exportada desde OpenRoll, después de guardar puede arrastrarlo a OpenRoll para editar su ficha en el programa. AVISO: si necesita crear otro personaje no copie y pegue este archivo si ya contiene un personaje creado, use el original.</p>
+  <p class="ayuda" id="ayuda-guardar">Ficha exportada desde OpenRoll: https://github.com/kiro55-dev/OpenRoll, después de guardar puede arrastrarlo a OpenRoll para editar su ficha en el programa. AVISO: si necesita crear otro personaje no copie y pegue este archivo si ya contiene un personaje creado, use el original.</p>
   <p class="error" id="error" hidden></p>
 
   <section>
@@ -117,6 +118,16 @@
   // ---------------------------------------------------------------- datos
   const bloque = document.getElementById("datos-openroll");
   const DATOS = JSON.parse(bloque.textContent);
+  // El documento tal como se guarda (formulario aún sin pintar), partido en el hueco de los datos. Se saca UNA vez al abrir: guardar
+  // solo junta trozos, sin clonar ni volver a serializar la página entera (con la foto dentro eran varios MB cada vez). La marca se
+  // arma en tiempo de ejecución para que no aparezca escrita en este mismo código.
+  const ESQUELETO = (() => {
+    const marca = "\u0001DATOS" + "OPENROLL\u0001";
+    bloque.textContent = marca; // los datos ya están en DATOS; así además se libera el texto grande
+    const html = "<!doctype html>\n" + document.documentElement.outerHTML;
+    const i = html.indexOf(marca);
+    return { antes: html.slice(0, i), despues: html.slice(i + marca.length) };
+  })();
   const defs = DATOS.definiciones;
   const LIMITE_VARIABLE = 9999, MAX_PARAMETRO = 32767, MAX_CUERPO = 255, MAX_VISION = 10000;
   const MAX_BYTES_FOTO = 8 * 1024 * 1024, MAX_LADO_FOTO = 8192, MAX_PIXELES_FOTO = 40000000;
@@ -169,8 +180,10 @@
 
   // ---------------------------------------------------------------- cambios sin guardar
   let sucio = false;
+  let version = 0; // cuenta los cambios: así se sabe si se editó algo mientras se guardaba
   function marcar() {
     sucio = true;
+    version++;
     $("estado").textContent = "Cambios sin guardar";
     $("estado").className = "estado sucio";
   }
@@ -540,22 +553,21 @@
     const url = await prepararFoto(new File([blob], "foto", { type: "image/svg+xml" === estado.foto.mime ? "image/svg+xml" : estado.foto.mime }));
     estado.foto = { ...estado.foto, mime: url.slice(5, url.indexOf(";")), datos: url.slice(url.indexOf(",") + 1) };
   }
+  // Base64 limpio: se puede pegar tal cual dentro del JSON y del <script> sin escapar nada. Se comprueba una vez por foto.
+  let fotoComprobada = null;
+  const esBase64 = (s) => s === fotoComprobada || (/^[A-Za-z0-9+/=]*$/.test(s) && ((fotoComprobada = s), true));
+  /** El mismo archivo, con los datos nuevos y el formulario vacío (se vuelve a pintar al abrirlo), como Blob hecho de trozos: la foto
+   *  (lo único grande) no pasa por `JSON.stringify` ni por el escape de `<`, se pega en su hueco. */
   function documentoGuardado() {
-    // El mismo archivo, con los datos nuevos y el formulario vacío (se vuelve a pintar al abrirlo)
-    const copia = document.documentElement.cloneNode(true);
-    copia.querySelector("#datos-openroll").textContent = JSON.stringify(datosActuales()).replace(/</g, "\\u003c");
-    copia.querySelector("#campos").replaceChildren();
-    copia.querySelector("#variables").replaceChildren();
-    copia.querySelector("#pestanas-txt").replaceChildren();
-    copia.querySelector("#panel-txt").replaceChildren();
-    const caja = copia.querySelector("#caja");
-    caja.querySelectorAll("img").forEach((i) => i.remove());
-    caja.classList.remove("movible", "sobre");
-    const est = copia.querySelector("#estado");
-    est.textContent = "Sin cambios";
-    est.className = "estado";
-    copia.querySelector("#error").hidden = true;
-    return "<!doctype html>\n" + copia.outerHTML;
+    const datos = datosActuales();
+    const foto = datos.foto;
+    const aparte = foto && typeof foto.datos === "string" && esBase64(foto.datos);
+    const hueco = "@@FOTO-" + uuid() + "@@"; // aleatorio: no puede coincidir con nada escrito en la ficha
+    if (aparte) datos.foto = { ...foto, datos: hueco };
+    const json = JSON.stringify(datos).replace(/</g, "\\u003c");
+    const i = aparte ? json.indexOf(hueco) : -1;
+    const partes = i < 0 ? [json] : [json.slice(0, i), foto.datos, json.slice(i + hueco.length)];
+    return new Blob([ESQUELETO.antes, ...partes, ESQUELETO.despues], { type: "text/html" });
   }
   // El nombre del archivo tal como está abierto (si viene del disco): mientras no se cambie el nombre de la ficha se guarda con ESE
   // nombre, aunque el archivo se haya movido o renombrado; si se cambia el nombre de la ficha, con el nuevo
@@ -599,36 +611,47 @@
   let nombreDelManejador = "";
   let manejador = null; // Chrome/Edge: el archivo elegido la primera vez, que se sobrescribe después
   /** Chrome/Edge: se elige el archivo la primera vez (el mismo que se tiene abierto) y después se sobrescribe. `false` si este
-   *  navegador no puede (entonces se descarga una copia). Cancelar el diálogo lanza `AbortError`. */
-  async function guardarEnSuSitio(html) {
+   *  navegador no puede (entonces se descarga una copia). Cancelar el diálogo lanza `AbortError`. El documento (`hacer`) se arma
+   *  DESPUÉS de elegir el archivo: el diálogo sale al instante, sin esperar a la foto ni gastar el permiso del clic. */
+  async function guardarEnSuSitio(hacer) {
     if (!window.showSaveFilePicker) return false;
+    let w = null;
     try {
       // Si el nombre de la ficha ha cambiado desde la última vez, se guarda con el nombre nuevo (otro archivo), no encima del anterior
       if (manejador && nombreDelManejador !== nombreArchivo()) manejador = null;
       if (!manejador) {
         nombreDelManejador = nombreArchivo();
         // El diálogo se abre en la carpeta donde se guardó la última vez (aunque se haya cerrado el navegador entre medias)
-        const inicio = await recordarCarpeta();
+        const inicio = await carpetaRecordada;
         const opciones = { id: "openroll-ficha", suggestedName: nombreArchivo(), types: [{ description: "Ficha de OpenRoll", accept: { "text/html": [".html"] } }] };
         if (inicio) opciones.startIn = inicio;
         manejador = await window.showSaveFilePicker(opciones);
         guardarCarpeta(manejador);
       }
-      const w = await manejador.createWritable();
-      await w.write(html);
-      await w.close();
-      return true;
+      w = await manejador.createWritable();
     } catch (err) {
       manejador = null;
       if (err && err.name === "AbortError") throw err;
       return false; // sin permiso desde un archivo local, por ejemplo: se descarga
     }
+    try {
+      await w.write(await hacer());
+      await w.close();
+      return true;
+    } catch (err) {
+      try { await w.abort(); } catch (e) { /* ya estaba cerrado */ }
+      throw err; // el archivo se queda como estaba; se avisa del error
+    }
   }
+  // Se pide al abrir, así el primer «Guardar» no espera a IndexedDB antes de sacar el diálogo
+  const carpetaRecordada = window.showSaveFilePicker ? recordarCarpeta() : Promise.resolve(null);
   function descargar(html) {
-    const a = el("a", { href: URL.createObjectURL(new Blob([html], { type: "text/html" })), download: nombreArchivo() });
+    const url = URL.createObjectURL(html);
+    const a = el("a", { href: url, download: nombreArchivo() });
     document.body.append(a);
     a.click();
     a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000); // si no, cada copia descargada se queda en memoria
   }
   // La identidad de este archivo: un UUID aleatorio que se genera la PRIMERA vez que se guarda (y ya no cambia). OpenRoll lo guarda
   // en la ficha que crea con él, y así reconoce el archivo si vuelve a importarse, desde cualquier navegador.
@@ -639,19 +662,36 @@
     const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
     return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
   }
+  let guardando = false;
   async function guardar() {
+    if (guardando) return; // un Ctrl+S repetido mientras se escribe no abre otra escritura encima
+    guardando = true;
+    const antes = { texto: $("estado").textContent, clase: $("estado").className, version };
+    // Aviso amarillo mientras dura (el diálogo, la foto y la escritura pueden tardar): se pinta ANTES de empezar el trabajo pesado
+    $("estado").textContent = "Guardando…";
+    $("estado").className = "estado guardando";
+    await new Promise((ok) => requestAnimationFrame(() => setTimeout(ok, 0)));
     try {
       if (!DATOS.plantilla_id) DATOS.plantilla_id = uuid();
-      await fotoAdmitida();
-      const html = documentoGuardado();
-      if (!(await guardarEnSuSitio(html))) descargar(html);
-      sucio = false;
-      $("estado").textContent = "Guardado";
-      $("estado").className = "estado ok";
+      const hacer = async () => { await fotoAdmitida(); return documentoGuardado(); };
+      if (!(await guardarEnSuSitio(hacer))) descargar(await hacer());
+      if (version === antes.version) {
+        sucio = false;
+        $("estado").textContent = "Guardado";
+        $("estado").className = "estado ok";
+      } else { // se editó mientras se guardaba: lo guardado no incluye esos cambios
+        $("estado").textContent = "Cambios sin guardar";
+        $("estado").className = "estado sucio";
+      }
       error("");
     } catch (err) {
-      if (err && err.name === "AbortError") return; // canceló el diálogo
+      $("estado").textContent = antes.texto; // vuelve a como estaba (cancelar el diálogo no es un fallo)
+      $("estado").className = antes.clase;
+      if (version !== antes.version) marcar();
+      if (err && err.name === "AbortError") return;
       error("No se pudo guardar: " + (err && err.message ? err.message : err));
+    } finally {
+      guardando = false;
     }
   }
   $("guardar").addEventListener("click", guardar);
