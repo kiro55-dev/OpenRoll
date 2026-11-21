@@ -142,75 +142,74 @@
   });
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-<div
-  class="ventana-flotante"
-  style="left: {pos.x}px; top: {pos.y}px;"
-  role="dialog"
-  aria-label="Ficha"
-  data-ventana-ficha
-  ondragover={(e) => esJugador && e.preventDefault()}
-  ondrop={alSoltarEnElNavegador}
-  tabindex="-1"
-  onkeydown={alTeclear}
-  bind:this={ventana}
->
-  <div class="cabecera" role="presentation" onpointerdown={(e) => moverVentana(e, pos, ventana)}>
-    <span class="icono-drag">⋮⋮</span>
-    <span class="titulo">{editor.esBorrador ? "Nueva Ficha" : `Ficha: ${ficha.nombre}`}</span>
-    <button type="button" class="btn-cerrar" aria-label="Cerrar" onclick={() => editor.cancelar()}>✕</button>
-  </div>
-
-  <div class="cuerpo-ficha">
-    <div class="subpestanas" role="tablist" aria-label="Secciones de la ficha">
-      <button type="button" role="tab" aria-selected={editor.seccion === "ficha"} class:activa={editor.seccion === "ficha"} onclick={() => (editor.seccion = "ficha")}>Ficha</button>
-      <button type="button" role="tab" aria-selected={editor.seccion === "variables"} class:activa={editor.seccion === "variables"} onclick={() => (editor.seccion = "variables")}>Variables</button>
+{#snippet datos()}
+  <div class="fila-superior">
+    <div class="columna-foto">
+      <CajaFoto foto={ficha.foto_url} bind:encuadre={ficha.foto_encuadre} onCambio={() => editor.encuadreCambiado()} onElegir={(origen) => editor.ponerFoto(origen)} />
+      {#if ficha.foto_url}<p class="ayuda-foto">Arrastrar para mover · rueda para acercar</p>{/if}
     </div>
 
-    <!-- Las dos secciones siguen montadas (solo se oculta una): así no se pierde lo que se está escribiendo -->
-    <div class="seccion" style:display={editor.seccion === "ficha" ? null : "none"}>
-    <div class="fila-superior">
-      <CajaFoto foto={ficha.foto_url} bind:encuadre={ficha.foto_encuadre} onCambio={() => editor.encuadreCambiado()} onElegir={(origen) => editor.ponerFoto(origen)} />
+    <!-- Una fila por dato y todos los cuadros empiezan en la misma línea vertical: etiqueta · cuadro · «Hacer público» -->
+    <div class="campos-grid">
+      <label class="et" for="f-nombre">Nombre</label>
+      <div class="celda ancha"><input id="f-nombre" type="text" class="input-texto" maxlength="100" bind:value={ficha.nombre} /></div>
 
-      <div class="columna-campos">
-        <div class="fila">
-          <label for="f-nombre">Nombre:</label>
-          <input id="f-nombre" type="text" class="input-texto" maxlength="100" bind:value={ficha.nombre} />
-        </div>
+      <label class="et" for="f-tipo">Tipo</label>
+      <div class="celda ancha">
+        <select id="f-tipo" class="select" bind:value={ficha.tipo}>
+          <option value="Enemigo">Enemigo</option>
+          <option value="NPC">NPC</option>
+          <option value="Jugador">Jugador</option>
+          <option value="Objeto">Objeto</option>
+        </select>
+        {#if !esJugador}
+          <label class="check">
+            <input type="checkbox" bind:checked={ficha.es_unico} />
+            <span title={ayuda("Si es único solo existirá una instancia en el mundo")}>Único</span>
+          </label>
+        {/if}
+      </div>
 
-        <!-- Parámetros de la partida: los numéricos de dos en dos y, debajo de cada pareja, las
-             casillas de los que cada ficha puede hacer públicos. Luego los de texto. -->
-        {#each campos.numericos as par}
-          <div class="fila separada">
-            {#each par as d (d.id)}
-              <CampoNumero
-                etiqueta="{d.clave}{d.tiene_maximo ? ' max' : ''}:"
-                sufijo={d.unidad ?? ""}
-                soloLectura={editor.esCalculado(d.id)}
-                titulo={editor.descripcionCalculo(d.id) ?? "Rueda del ratón para subir/bajar"}
-                bind:value={() => editor.numero(d.id), (v) => editor.ponerNumero(d.id, v)}
-              />
+      <!-- La zona, si es única y de quién es una ficha lo decide el host: el jugador no lo cambia -->
+      {#if !esJugador}
+        <label class="et" for="f-zona">Zona asociada</label>
+        <div class="celda ancha">
+          <select id="f-zona" class="select" bind:value={ficha.zona_id}>
+            {#each partida.zonasOrdenadas as z (z.id)}
+              <option value={z.id}>{z.nombre}</option>
             {/each}
+          </select>
+        </div>
+      {/if}
+
+      <span class="et">Cuerpo</span>
+      <div class="celda ancha">
+        <CampoNumero bind:value={editor.cuerpoX} min={1} max={255} ancho={70} titulo="Ancho en casillas (rueda del ratón para ajustar)" />
+        <span class="separador-x">×</span>
+        <CampoNumero bind:value={editor.cuerpoY} min={1} max={255} ancho={70} sufijo="casillas" titulo="Alto en casillas (rueda del ratón para ajustar)" />
+      </div>
+
+      <span class="et">Visión</span>
+      <div class="celda ancha">
+        <CampoNumero bind:value={ficha.vision} min={0} max={10000} ancho={90} sufijo="m" titulo="Cuánto ve la ficha, en metros (por ahora no hace nada; rueda del ratón para ajustar)" />
+      </div>
+
+      <!-- Los parámetros de la partida, uno por fila y en su orden -->
+      {#each editor.definiciones as d (d.id)}
+        {#if "Numero" in d.valor_por_defecto}
+          <label class="et" for="f-param-{d.id}">{d.clave}{d.tiene_maximo ? " (máx.)" : ""}</label>
+          <div class="celda">
+            <CampoNumero
+              ancho={90}
+              sufijo={d.unidad ?? ""}
+              soloLectura={editor.esCalculado(d.id)}
+              titulo={editor.descripcionCalculo(d.id) ?? "Rueda del ratón para subir/bajar"}
+              bind:value={() => editor.numero(d.id), (v) => editor.ponerNumero(d.id, v)}
+            />
           </div>
-
-          {#if par.some((d) => d.visibilidad === "Variable")}
-            <div class="fila separada">
-              {#each par.filter((d) => d.visibilidad === "Variable") as d (d.id)}
-                <label class="check">
-                  <span>Hacer pública la {d.clave.toLowerCase()}</span>
-                  <input
-                    type="checkbox"
-                    bind:checked={() => editor.esPublico(d.id), (v) => editor.ponerPublico(d.id, v)}
-                  />
-                </label>
-              {/each}
-            </div>
-          {/if}
-        {/each}
-
-        {#each campos.textos as d (d.id)}
-          <div class="fila">
-            <label for="f-param-{d.id}">{d.clave}:</label>
+        {:else}
+          <label class="et" for="f-param-{d.id}">{d.clave}</label>
+          <div class="celda">
             <input
               id="f-param-{d.id}"
               type="text"
@@ -219,69 +218,36 @@
               bind:value={() => editor.texto(d.id), (v) => editor.ponerTexto(d.id, v)}
             />
           </div>
-        {/each}
-
-        <div class="fila">
-          <span class="etiqueta">Cuerpo:</span>
-          <div class="cuerpo">
-            <CampoNumero bind:value={editor.cuerpoX} min={1} max={255} estrecho titulo="Ancho en casillas (rueda del ratón para ajustar)" />
-            <span class="separador-x">×</span>
-            <CampoNumero bind:value={editor.cuerpoY} min={1} max={255} estrecho sufijo="m" titulo="Alto en casillas (rueda del ratón para ajustar)" />
-          </div>
-        </div>
-
-        <div class="fila">
-          <span class="etiqueta">Visión:</span>
-          <CampoNumero bind:value={ficha.vision} min={0} max={10000} sufijo="m" titulo="Cuánto ve la ficha, en metros (por ahora no hace nada; rueda del ratón para ajustar)" />
-        </div>
-
-        <div class="fila">
-          <label for="f-tipo">Tipo:</label>
-          <select id="f-tipo" class="select" bind:value={ficha.tipo}>
-            <option value="Enemigo">Enemigo</option>
-            <option value="NPC">NPC</option>
-            <option value="Jugador">Jugador</option>
-            <option value="Objeto">Objeto</option>
-          </select>
-
-          {#if !esJugador}
-            <label class="check" style="margin-left: 8px;">
-              <input type="checkbox" bind:checked={ficha.es_unico} />
-              <span title={ayuda("Si es único solo existirá una instancia en el mundo")}>Único</span>
+        {/if}
+        <div class="celda publica">
+          {#if d.visibilidad === "Variable"}
+            <label class="check" title={ayuda("Los jugadores ven este valor de la ficha")}>
+              <input type="checkbox" bind:checked={() => editor.esPublico(d.id), (v) => editor.ponerPublico(d.id, v)} />
+              <span>Hacer público</span>
             </label>
           {/if}
         </div>
-
-        <!-- La zona, si es única y de quién es una ficha lo decide el host: el jugador no lo cambia -->
-        {#if !esJugador}
-          <div class="fila">
-            <label for="f-zona">Zona asociada:</label>
-            <select id="f-zona" class="select" bind:value={ficha.zona_id}>
-              {#each partida.zonasOrdenadas as z (z.id)}
-                <option value={z.id}>{z.nombre}</option>
-              {/each}
-            </select>
-          </div>
-        {/if}
-      </div>
+      {/each}
     </div>
+  </div>
+{/snippet}
 
-    <AdjuntosFicha {editor} />
-    </div>
-
-    <!-- Variables: el host define cuáles hay (nombre, abreviatura, neutro y escala); aquí solo se pone el valor -->
-    <div class="seccion seccion-variables" style:display={editor.seccion === "variables" ? null : "none"}>
+<!-- Variables: el host define cuáles hay (nombre, abreviatura, neutro y escala); aquí solo se pone el valor. `todos`: sin pestañas de
+     grupo, una sección tras otra (la pestaña «Ficha») -->
+{#snippet variables(todos: boolean)}
+  {@const gv = todos ? null : editor.grupoVistaEfectivo}
+  <div class="seccion-variables">
       {#if editor.variables.length === 0}
         <p class="vacio">
           {esJugador ? "El host aún no ha definido variables." : "Aún no hay variables. Defínelas en ⚙ → «Editar parámetros de esta partida» → «Variables»."}
         </p>
       {:else}
         <!-- Arriba, los grupos como en su definición: «Todos» (por defecto) enseña una sección por grupo y cada grupo, solo el suyo -->
-        {#if editor.gruposVariables.length > 1}
+        {#if !todos && editor.gruposVariables.length > 1}
           <div class="grupos-ficha" role="tablist" aria-label="Grupos de variables">
-            <button type="button" role="tab" class="grupo-ficha" class:activo={editor.grupoVistaEfectivo === null} aria-selected={editor.grupoVistaEfectivo === null} onclick={() => (editor.grupoVista = null)}>Todos</button>
+            <button type="button" role="tab" class="grupo-ficha" class:activo={gv === null} aria-selected={gv === null} onclick={() => (editor.grupoVista = null)}>Todos</button>
             {#each editor.gruposVariables as grupo (grupo.id)}
-              <button type="button" role="tab" class="grupo-ficha" class:activo={editor.grupoVistaEfectivo === grupo.id} aria-selected={editor.grupoVistaEfectivo === grupo.id} onclick={() => (editor.grupoVista = grupo.id)}>
+              <button type="button" role="tab" class="grupo-ficha" class:activo={gv === grupo.id} aria-selected={gv === grupo.id} onclick={() => (editor.grupoVista = grupo.id)}>
                 {grupo.nombre}{#if grupo.tipo === "Derivadas"}<span class="marca" aria-hidden="true">ƒ</span>{/if}
               </button>
             {/each}
@@ -291,11 +257,11 @@
         <!-- Una sección por grupo: las bases con su valor y las derivadas ya calculadas, con los checks de sus opcionales -->
         {#each editor.gruposVariables as grupo (grupo.id)}
           {@const suyas = editor.variablesDe(grupo)}
-          {#if editor.grupoVistaEfectivo !== null && editor.grupoVistaEfectivo === grupo.id && suyas.length === 0}
+          {#if gv !== null && gv === grupo.id && suyas.length === 0}
             <p class="vacio">Este grupo aún no tiene variables.</p>
           {/if}
-          {#if suyas.length > 0 && (editor.grupoVistaEfectivo === null || editor.grupoVistaEfectivo === grupo.id)}
-            {#if editor.grupoVistaEfectivo === null && editor.gruposVariables.length > 1}
+          {#if suyas.length > 0 && (gv === null || gv === grupo.id)}
+            {#if gv === null && editor.gruposVariables.length > 1}
               <h4 class="titulo-grupo">{grupo.nombre}</h4>
             {/if}
             <table class="tabla-variables">
@@ -394,6 +360,51 @@
           En el chat, con el foco en una instancia de esta ficha: «2d6 + {editor.variables[0].abreviatura || editor.variables[0].nombre}» suma su resultado.
         </p>
       {/if}
+  </div>
+{/snippet}
+
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<div
+  class="ventana-flotante"
+  style="left: {pos.x}px; top: {pos.y}px;"
+  role="dialog"
+  aria-label="Ficha"
+  data-ventana-ficha
+  ondragover={(e) => esJugador && e.preventDefault()}
+  ondrop={alSoltarEnElNavegador}
+  tabindex="-1"
+  onkeydown={alTeclear}
+  bind:this={ventana}
+>
+  <div class="cabecera" role="presentation" onpointerdown={(e) => moverVentana(e, pos, ventana)}>
+    <span class="icono-drag">⋮⋮</span>
+    <span class="titulo">{editor.esBorrador ? "Nueva Ficha" : `Ficha: ${ficha.nombre}`}</span>
+    <button type="button" class="btn-cerrar" aria-label="Cerrar" onclick={() => editor.cancelar()}>✕</button>
+  </div>
+
+  <div class="cuerpo-ficha">
+    <div class="subpestanas" role="tablist" aria-label="Secciones de la ficha">
+      <button type="button" role="tab" aria-selected={editor.seccion === "ficha"} class:activa={editor.seccion === "ficha"} onclick={() => (editor.seccion = "ficha")}>Ficha</button>
+      <button type="button" role="tab" aria-selected={editor.seccion === "parametros"} class:activa={editor.seccion === "parametros"} onclick={() => (editor.seccion = "parametros")}>Parámetros visuales y archivos</button>
+      <button type="button" role="tab" aria-selected={editor.seccion === "variables"} class:activa={editor.seccion === "variables"} onclick={() => (editor.seccion = "variables")}>Variables</button>
+    </div>
+
+    <!-- Lo que se escribe está en el editor, no en la pestaña: cambiar de pestaña no pierde nada -->
+    <div class="seccion">
+      {#if editor.seccion === "ficha"}
+        <!-- Todo en una: foto y datos, los archivos adjuntos y las variables (como la plantilla) -->
+        {@render datos()}
+        <AdjuntosFicha {editor} />
+        {#if editor.variables.length > 0}
+          <h3 class="titulo-seccion">Variables</h3>
+          {@render variables(true)}
+        {/if}
+      {:else if editor.seccion === "parametros"}
+        {@render datos()}
+        <AdjuntosFicha {editor} />
+      {:else}
+        {@render variables(false)}
+      {/if}
     </div>
 
     {#if plantillaAjena}
@@ -450,7 +461,7 @@
 
 <style>
   .ventana-flotante {
-    position: fixed; z-index: 1000; width: 480px;
+    position: fixed; z-index: 1000; width: 680px; max-width: calc(100vw - 20px);
     display: flex; flex-direction: column; overflow: hidden;
     background: #18181b; border: 1px solid #3f3f46; border-radius: 8px;
     box-shadow: 0 14px 35px rgba(0, 0, 0, 0.75);
@@ -468,9 +479,13 @@
   .btn-cerrar:hover { color: white; }
 
   .cuerpo-ficha { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
-  .seccion { display: flex; flex-direction: column; gap: 8px; }
+  /* Con mucho contenido (las variables, los parámetros...) la sección hace scroll y las pestañas y los botones se quedan a la vista */
+  .seccion { display: flex; flex-direction: column; gap: 10px; max-height: min(68vh, 640px); overflow-y: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+  .seccion::-webkit-scrollbar { width: 4px; }
+  .seccion::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+  .titulo-seccion { margin: 4px 0 0; font-size: 11px; font-weight: 700; color: #93c5fd; text-transform: uppercase; letter-spacing: 0.04em; }
   /* Con muchas variables (las 18 habilidades de D&D...) la lista hace scroll y las pestañas y los botones se quedan a la vista */
-  .seccion-variables { max-height: min(60vh, 520px); overflow-y: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+  .seccion-variables { display: flex; flex-direction: column; gap: 8px; }
   .seccion-variables::-webkit-scrollbar { width: 4px; }
   .seccion-variables::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
 
@@ -522,17 +537,22 @@
   .tabla-variables .resultado.negativo { color: #f87171; }
   .vacio { margin: 0; color: #71717a; font-size: 11px; padding: 16px 4px; text-align: center; }
   .ayuda { margin: 0; color: #71717a; font-size: 10px; }
-  .fila-superior { display: flex; gap: 10px; align-items: flex-start; }
-  .columna-campos { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .fila-superior { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  .columna-foto { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+  .ayuda-foto { margin: 0; color: #71717a; font-size: 10px; max-width: 200px; text-align: center; }
 
-  .fila { display: flex; align-items: center; gap: 6px; }
-  .fila.separada { gap: 10px; }
-  .fila label, .etiqueta { color: #a1a1aa; font-size: 10px; display: flex; align-items: center; gap: 4px; }
+  /* Una fila por dato; las tres columnas (etiqueta, cuadro, «Hacer público») son las mismas en todas, así que todos los cuadros
+     empiezan en la misma línea vertical */
+  .campos-grid { flex: 1; min-width: 300px; display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 6px 12px; align-items: center; }
+  .et { color: #a1a1aa; font-size: 11px; }
+  .celda { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .celda.ancha { grid-column: 2 / 4; }
+  .celda.publica { justify-content: flex-end; }
+  .celda .input-texto { width: 100%; }
 
-  .check { cursor: pointer; }
+  .check { cursor: pointer; display: inline-flex; align-items: center; gap: 5px; color: #a1a1aa; font-size: 11px; white-space: nowrap; }
   .check input { cursor: pointer; accent-color: #3b82f6; margin: 0; }
 
-  .cuerpo { display: flex; align-items: center; gap: 4px; }
   .separador-x { color: #71717a; font-weight: bold; font-size: 11px; }
 
   .input-texto {

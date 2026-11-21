@@ -138,6 +138,8 @@ describe("aplicar una plantilla a una ficha", () => {
     expect([entidad.nombre, entidad.tipo, entidad.cuerpo, entidad.vision]).toEqual(["Orco", "Enemigo", { Grande: [2, 3] }, 18]);
     expect(entidad.parametros.find((p) => p.id_definicion === 2)?.valor).toEqual({ Numero: 12 });
     expect(entidad.parametros.find((p) => p.id_definicion === 4)?.valor).toEqual({ Numero: 0 }, );
+    // «Hacer público» viaja con el parámetro (los de visibilidad variable); la ficha de origen tenía la vida pública
+    expect(entidad.parametros.find((p) => p.id_definicion === 1)?.publico).toBe(true);
     expect(entidad.parametros.find((p) => p.id_definicion === 2)?.publico).toBe(false);
     expect(entidad.variables.find((v) => v.id_definicion === 1)?.valor).toBe(14);
     expect(entidad.variables.find((v) => v.id_definicion === 3)).toMatchObject({ eleccion: 1, opcionales: [2], parametros_marcados: [2] });

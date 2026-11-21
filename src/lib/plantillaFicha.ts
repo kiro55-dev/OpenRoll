@@ -59,7 +59,7 @@ export interface FichaPlantilla {
   tipo: TipoEntidad;
   cuerpo: [number, number];
   vision: number;
-  parametros: { id: number; clave: string; valor: number | string }[];
+  parametros: { id: number; clave: string; valor: number | string; publico?: boolean }[];
   variables: {
     id: number;
     nombre: string;
@@ -126,7 +126,8 @@ export function datosDePlantilla(p: {
           parametros: (e.parametros ?? []).map((x) => ({
             id: x.id_definicion,
             clave: p.definiciones.find((d) => d.id === x.id_definicion)?.clave ?? "",
-            valor: "Numero" in x.valor ? x.valor.Numero : x.valor.Texto
+            valor: "Numero" in x.valor ? x.valor.Numero : x.valor.Texto,
+            publico: x.publico
           })),
           variables: (e.variables ?? []).map((v) => {
             const d = p.variables.find((x) => x.id === v.id_definicion);
@@ -239,7 +240,7 @@ function leerFicha(f: Record<string, unknown>): FichaPlantilla {
         typeof p.valor === "number" && Number.isFinite(p.valor)
           ? acotar(p.valor, 0, MAX_PARAMETRO)
           : texto(p.valor ?? "", MAX_TEXTO, "parámetro");
-      return { id: p.id, clave: texto(p.clave ?? "", MAX_NOMBRE, "parámetro"), valor };
+      return { id: p.id, clave: texto(p.clave ?? "", MAX_NOMBRE, "parámetro"), valor, publico: typeof p.publico === "boolean" ? p.publico : undefined };
     }),
     variables: lista(f.variables ?? [], "variables").map((x) => {
       const v = objeto(x, "variable");
@@ -286,7 +287,7 @@ function emparejar<T extends { id: number }>(defs: T[], nombre: (d: T) => string
 
 /**
  * Los datos de la plantilla sobre una COPIA de `entidad` (ya normalizada: un parámetro y una variable por definición). Cambia nombre,
- * tipo, cuerpo, visión, los parámetros que se escriben a mano (no los calculados; `publico` no se toca) y las variables (valor de
+ * tipo, cuerpo, visión, los parámetros que se escriben a mano (no los calculados) con su «Hacer público» (solo en los de visibilidad variable) y las variables (valor de
  * las bases; rango, opcionales y parámetros marcados de las derivadas, solo los que lo sigan siendo). No toca zona, único,
  * propietarios, adjuntos, pasos ni la foto (la pone el editor). `avisos`: lo que no se pudo pasar.
  */
@@ -316,9 +317,11 @@ export function aplicarAFicha(
       if (p.clave) sinPareja.push(p.clave);
       continue;
     }
-    if (d.calculo) continue; // lo calcula Rust con las variables
     const actual = e.parametros.find((x) => x.id_definicion === d.id);
     if (!actual) continue;
+    // «Hacer público»: solo en los que cada ficha decide (los de visibilidad fija no cambian)
+    if (d.visibilidad === "Variable" && typeof p.publico === "boolean") actual.publico = p.publico;
+    if (d.calculo) continue; // lo calcula Rust con las variables
     const esNumero = "Numero" in d.valor_por_defecto;
     if (esNumero && typeof p.valor === "number") actual.valor = { Numero: p.valor };
     else if (!esNumero && typeof p.valor === "string") actual.valor = { Texto: p.valor };

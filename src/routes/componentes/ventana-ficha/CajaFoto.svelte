@@ -25,7 +25,7 @@
     onCambio?: () => void;
   } = $props();
 
-  const LADO = 110; // px de la caja (cuadrada), igual que en el CSS
+  const LADO = 180; // px de la caja (cuadrada), igual que en el CSS
   const PASO_ZOOM = 1.1;
 
   let caja = $state<HTMLDivElement | null>(null);
@@ -166,7 +166,7 @@
   .caja-foto {
     position: relative;
     box-sizing: content-box; /* el área de la foto mide justo LADO, sin restar el borde */
-    width: 110px; height: 110px; flex-shrink: 0;
+    width: 180px; height: 180px; flex-shrink: 0;
     background: #09090b; border: 1px dashed #52525b; border-radius: 6px; overflow: hidden;
     display: flex; align-items: center; justify-content: center; cursor: pointer;
     touch-action: none; user-select: none;

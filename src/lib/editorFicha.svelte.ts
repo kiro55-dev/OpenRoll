@@ -82,8 +82,8 @@ export class EditorFicha {
   /** Sus grupos: cada uno es una sección de la pestaña «Variables». */
   readonly gruposVariables: GrupoVariables[];
 
-  /** Subpestaña de la ventana: lo de siempre («Ficha») o sus variables. */
-  seccion = $state<"ficha" | "variables">("ficha");
+  /** Subpestaña de la ventana: «Ficha» (todo, como la plantilla), «Parámetros visuales y archivos» o «Variables». */
+  seccion = $state<"ficha" | "parametros" | "variables">("ficha");
   /** Qué grupo de variables se ve en la pestaña «Variables»: `null` = «Todos» (todas las secciones, una tras otra). */
   grupoVista = $state<number | null>(null);
 

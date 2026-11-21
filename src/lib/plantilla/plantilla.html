@@ -27,7 +27,11 @@
   section { background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 12px; }
   section h2 { margin: 0 0 8px; font-size: 13px; color: #93c5fd; text-transform: uppercase; letter-spacing: .04em; }
   .ficha { display: flex; gap: 16px; flex-wrap: wrap; }
-  .campos { flex: 1; min-width: 260px; display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px; align-items: center; }
+  .campos { flex: 1; min-width: 300px; display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 6px 12px; align-items: center; }
+  .campos .fila { min-width: 0; }
+  .campos .ancha { grid-column: 2 / 4; }
+  .campos .publica { justify-content: flex-end; }
+  .publico { display: inline-flex; align-items: center; gap: 5px; color: #a1a1aa; font-size: 12px; white-space: nowrap; cursor: pointer; }
   label { color: #a1a1aa; }
   input, select { font: inherit; background: #09090b; border: 1px solid #3f3f46; color: white; border-radius: 4px; padding: 4px 6px; }
   input:focus, select:focus { outline: none; border-color: #3b82f6; }
@@ -47,6 +51,7 @@
   td { padding: 3px 6px; border-top: 1px solid #222226; vertical-align: middle; }
   td.nombre { font-weight: 600; }
   td.abrev { color: #a1a1aa; }
+  .depende { color: #71717a; font-weight: 400; }
   td.resultado { font-weight: 700; text-align: right; width: 60px; }
   .positivo { color: #4ade80; } .negativo { color: #f87171; }
   .opcional { display: inline-flex; align-items: center; gap: 3px; margin-right: 8px; color: #d4d4d8; font-size: 12px; }
@@ -107,6 +112,7 @@
     cuerpo: Array.isArray(f.cuerpo) ? [f.cuerpo[0] || 1, f.cuerpo[1] || 1] : [1, 1],
     vision: Number(f.vision) || 0,
     parametros: {},
+    publicos: {},
     variables: {},
     foto: DATOS.foto || null
   };
@@ -114,6 +120,7 @@
     const p = (f.parametros || []).find((x) => x.id === d.id);
     const def = "Numero" in d.valor_por_defecto ? d.valor_por_defecto.Numero : d.valor_por_defecto.Texto;
     estado.parametros[d.id] = p ? p.valor : def;
+    estado.publicos[d.id] = p ? !!p.publico : d.visibilidad === "SiemprePublico";
   }
   for (const d of defs.variables) {
     const v = (f.variables || []).find((x) => x.id === d.id) || {};
@@ -203,7 +210,7 @@
   // ---------------------------------------------------------------- campos de la ficha
   function campos() {
     const c = $("campos");
-    const fila = (etiqueta, ...hijos) => { c.append(el("label", { texto: etiqueta }), el("div", { class: "fila" }, ...hijos)); };
+    const fila = (etiqueta, ...hijos) => { c.append(el("label", { texto: etiqueta }), el("div", { class: "fila ancha" }, ...hijos)); };
     fila("Nombre", el("input", { type: "text", maxlength: 100, value: estado.nombre, oninput: (e) => { estado.nombre = e.target.value; marcar(); } }));
     const tipo = el("select", { onchange: (e) => { estado.tipo = e.target.value; marcar(); } });
     for (const t of ["Jugador", "NPC", "Enemigo", "Objeto"]) tipo.append(el("option", { value: t, texto: t, selected: t === estado.tipo }));
@@ -223,8 +230,15 @@
             oninput: (e) => { estado.parametros[d.id] = acotar(e.target.value, 0, MAX_PARAMETRO); marcar(); refrescarResultados(); } })
         : el("input", { type: "text", maxlength: 2000, value: estado.parametros[d.id] || "",
             oninput: (e) => { estado.parametros[d.id] = e.target.value; marcar(); } });
-      fila(etiqueta, entrada, d.unidad ? el("span", { class: "unidad", texto: d.unidad }) : null,
-        d.calculo ? el("span", { class: "unidad", texto: "(se calcula)" }) : null);
+      // Tres columnas, como en OpenRoll: etiqueta · cuadro · «Hacer público» (solo si cada ficha puede decidirlo)
+      const publica = d.visibilidad === "Variable"
+        ? el("label", { class: "publico" }, el("input", { type: "checkbox", checked: !!estado.publicos[d.id],
+            onchange: (e) => { estado.publicos[d.id] = e.target.checked; marcar(); } }), document.createTextNode("Hacer público"))
+        : null;
+      c.append(el("label", { texto: etiqueta }),
+        el("div", { class: "fila" }, entrada, d.unidad ? el("span", { class: "unidad", texto: d.unidad }) : null,
+          d.calculo ? el("span", { class: "unidad", texto: "(se calcula)" }) : null),
+        el("div", { class: "fila publica" }, publica));
     }
   }
 
@@ -271,7 +285,15 @@
         }
         const td = el("td", { class: "resultado" });
         celdasResultado.push({ d, td });
-        tabla.append(el("tr", null, el("td", { class: "nombre", texto: d.nombre }), el("td", { class: "abrev", texto: d.abreviatura || "—" }),
+        // De qué depende una derivada, entre paréntesis junto al nombre (abreviaturas de sus bases y nombres de sus parámetros fijos)
+        const depende = derivadas
+          ? (d.bases || []).map((b) => { const x = defs.variables.find((v) => v.id === b); return x ? etiqueta(x) : ""; })
+              .concat((d.parametros || []).map((p) => { const x = defs.parametros.find((v) => v.id === p); return x ? x.clave : ""; }))
+              .filter(Boolean).join(" + ")
+          : "";
+        const celdaNombre = el("td", { class: "nombre", texto: d.nombre });
+        if (depende) celdaNombre.append(el("span", { class: "depende", texto: " (" + depende + ")" }));
+        tabla.append(el("tr", null, celdaNombre, el("td", { class: "abrev", texto: d.abreviatura || "—" }),
           el("td", null, medio), td));
       }
       cont.append(el("div", { class: "grupo" }, el("h3", { texto: g.nombre }), tabla));
@@ -411,7 +433,7 @@
         tipo: estado.tipo,
         cuerpo: estado.cuerpo,
         vision: estado.vision,
-        parametros: defs.parametros.map((d) => ({ id: d.id, clave: d.clave, valor: estado.parametros[d.id] })),
+        parametros: defs.parametros.map((d) => ({ id: d.id, clave: d.clave, valor: estado.parametros[d.id], publico: !!estado.publicos[d.id] })),
         variables: defs.variables.map((d) => {
           const v = estado.variables[d.id];
           const o = (d.opciones || [])[v.eleccion];

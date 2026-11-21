@@ -9,6 +9,7 @@
     min = 0,
     max = 32767,
     estrecho = false,
+    ancho = 0,
     soloLectura = false,
     titulo = "Rueda del ratón para subir/bajar"
   }: {
@@ -19,6 +20,8 @@
     max?: number;
     /** Más estrecho y centrado (para el cuerpo X × Y) */
     estrecho?: boolean;
+    /** Ancho del campo en px (0 = el de siempre). */
+    ancho?: number;
     /** Se ve el valor pero no se escribe (un parámetro que se calcula con las variables). */
     soloLectura?: boolean;
     titulo?: string;
@@ -34,7 +37,7 @@
 
 <label title={ayuda(titulo)}>
   {etiqueta}
-  <input type="number" class:estrecho class:calculado={soloLectura} {min} {max} readonly={soloLectura} bind:value onwheel={alRueda} />
+  <input type="number" class:estrecho class:calculado={soloLectura} style:width={ancho ? `${ancho}px` : null} {min} {max} readonly={soloLectura} bind:value onwheel={alRueda} />
   {#if sufijo}<span class="sufijo">{sufijo}</span>{/if}
 </label>
 
