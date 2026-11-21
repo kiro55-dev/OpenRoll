@@ -14,7 +14,7 @@ beforeEach(async () => {
 });
 
 const base = (id: number, cuerpo: any = "Pequenio"): any => ({
-  id, nombre: "F" + id, tipo: "Enemigo", parametros: [], cuerpo, zona_id: 1, foto_url: null, archivos_adjuntos: [], es_unico: false
+  id, nombre: "F" + id, tipo: "Enemigo", parametros: [], cuerpo, vision: 0, zona_id: 1, foto_url: null, archivos_adjuntos: [], es_unico: false
 });
 const instancia = (id: number, idMapa: number | null, casilla: { x: number; y: number } | null, cuerpo?: any): any => ({
   id_instancia: id, id_mapa: idMapa, base: base(1, cuerpo), valores_actuales: [],

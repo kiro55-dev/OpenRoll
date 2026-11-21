@@ -10,6 +10,8 @@
   import { arrastre } from "$lib/arrastreFicha.svelte";
   import { arrastreJugador } from "$lib/arrastreJugador.svelte";
   import { esJugador } from "$lib/modo";
+  import { esArchivoPlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
+  import { leerArchivoPlantilla } from "$lib/plantillaIo";
 
   // Soltar aquí una instancia la elimina: se marca el banco mientras pasa por encima
   const recibeInstancia = $derived(arrastre.actual?.zona === "banco" && "instancia" in arrastre.actual.origen);
@@ -89,9 +91,31 @@
     void partida.abrirEditorEntidad(item);
   }
 
+  // ---- Plantilla de ficha soltada en el banco (ver $lib/plantillaFicha) ----
+  /** Una plantilla de una ficha que YA está en el banco: se pregunta si va a esa o a una nueva. */
+  let plantillaDeFicha = $state<{ plantilla: PlantillaLeida; ficha: Entidad } | null>(null);
+
+  async function soltarPlantilla(origen: string | File) {
+    try {
+      const plantilla = await leerArchivoPlantilla(origen);
+      const existente = plantilla.id_ficha === null ? undefined : partida.banco.find((e) => e.id === plantilla.id_ficha);
+      if (existente) plantillaDeFicha = { plantilla, ficha: existente };
+      else await partida.abrirConPlantilla(plantilla, null);
+    } catch (err) {
+      partida.avisar(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function decidirPlantilla(destino: "nueva" | "existente") {
+    const d = plantillaDeFicha;
+    plantillaDeFicha = null;
+    if (d) void partida.abrirConPlantilla(d.plantilla, destino === "existente" ? d.ficha : null);
+  }
+
   // Drag & drop de imagen desde el explorador del SO: ficha nueva con esa foto (la abierta, si hay, se guarda)
   onMount(() =>
     alSoltarArchivos(async ([ruta], el) => {
+      if (esArchivoPlantilla(ruta) && el?.closest(".banco")) return soltarPlantilla(ruta);
       if (!esImagen(ruta, "ficha") || !el?.closest(".banco")) return;
       const fotoUrl = await importarImagen(ruta, "ficha");
       if (!(await partida.abrirEditorEntidad(null, fotoUrl))) {
@@ -106,7 +130,8 @@
     if (!esJugador) return;
     e.preventDefault();
     const archivo = e.dataTransfer?.files?.[0];
-    if (archivo) void ficharDesdeArchivo(archivo);
+    if (archivo && esArchivoPlantilla(archivo.name)) void soltarPlantilla(archivo);
+    else if (archivo) void ficharDesdeArchivo(archivo);
   }
 
   async function ficharDesdeArchivo(archivo: File) {
@@ -254,10 +279,33 @@
       <span class="sin-fichas">No hay fichas</span>
     {/if}
   </div>
+  {#if plantillaDeFicha}
+    <!-- La plantilla trae el id de una ficha que ya está en el banco: ¿a esa o a una nueva? -->
+    <div class="aviso-plantilla" role="dialog" aria-label="Importar plantilla">
+      <p>Estos datos corresponden con la ficha «{plantillaDeFicha.ficha.nombre}». ¿Guardar los cambios sobre esa ficha o crear una nueva?</p>
+      <div class="botones-aviso">
+        <button type="button" class="btn-aviso" onclick={() => (plantillaDeFicha = null)}>Cancelar</button>
+        <button type="button" class="btn-aviso" onclick={() => decidirPlantilla("nueva")}>Nueva ficha</button>
+        <button type="button" class="btn-aviso principal" onclick={() => decidirPlantilla("existente")}>Ficha existente</button>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
+  .aviso-plantilla {
+    position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 20; display: flex; flex-direction: column; gap: 8px;
+    padding: 10px; border-radius: 6px; background: #18181b; border: 1px solid #3f3f46; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+    color: #e4e4e7; font-size: 12px;
+  }
+  .aviso-plantilla p { margin: 0; }
+  .botones-aviso { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+  .btn-aviso { background: #27272a; color: #e4e4e7; border: 1px solid #3f3f46; border-radius: 4px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer; }
+  .btn-aviso:hover { border-color: #52525b; }
+  .btn-aviso.principal { background: #2563eb; border-color: #2563eb; color: white; }
+  .btn-aviso.principal:hover { background: #1d4ed8; }
   .banco {
+    position: relative;
     flex: 1;
     min-height: 0;
     display: flex;

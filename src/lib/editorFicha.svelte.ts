@@ -23,6 +23,8 @@ import {
 } from "$lib/variables";
 import { importarImagen, urlDeImagen } from "$lib/imagenes";
 import { cargarImagen, encuadreCentrado, miniaturaWebp, type Encuadre } from "$lib/recorteFoto";
+import { aplicarAFicha, type PlantillaLeida } from "$lib/plantillaFicha";
+import { conjuntoActual, importarFotoPlantilla } from "$lib/plantillaIo";
 
 interface ArchivoAdjunto {
   ruta: string;
@@ -31,6 +33,7 @@ interface ArchivoAdjunto {
 
 const MAX_I16 = 32767;
 const MAX_CUERPO = 255;
+const MAX_VISION = 10000;
 
 export const nombreArchivo = (ruta: string) => ruta.split(/[/\\]/).pop() ?? ruta;
 export const esTexto = (ruta: string | null | undefined) => !!ruta && ruta.toLowerCase().endsWith(".txt");
@@ -434,6 +437,42 @@ export class EditorFicha {
     }
   }
 
+  // ------------------------------------------------------------------
+  // Plantilla de ficha (ver `plantillaFicha.ts`): rellena la ventana; no se guarda hasta pulsar «Guardar»
+  // ------------------------------------------------------------------
+
+  /** Lo que no se pudo pasar de la última plantilla aplicada (se ve en la ventana). */
+  avisosPlantilla = $state<string[]>([]);
+
+  async aplicarPlantilla(plantilla: PlantillaLeida) {
+    const { entidad, avisos } = aplicarAFicha($state.snapshot(this.entidad) as Entidad, plantilla, {
+      definiciones: this.definiciones,
+      variables: this.variables,
+      conjunto: conjuntoActual()
+    });
+    const e = this.entidad;
+    e.nombre = entidad.nombre;
+    e.tipo = entidad.tipo;
+    e.cuerpo = entidad.cuerpo;
+    e.vision = entidad.vision;
+    e.parametros = entidad.parametros;
+    e.variables = entidad.variables;
+    // La foto (entera) con su encuadre; sin foto en la plantilla se queda la que hubiera
+    if (plantilla.foto) {
+      try {
+        const ruta = await importarFotoPlantilla(plantilla.foto);
+        if (ruta !== e.foto_url) this.#fotoCambiada = true;
+        e.foto_url = ruta;
+        e.foto_encuadre = { ...plantilla.foto.encuadre };
+        this.#encuadreTocado = true; // la miniatura se rehace al guardar
+        if (!this.#sesion.includes(ruta)) this.#sesion.push(ruta);
+      } catch (err) {
+        avisos.push(`La foto no se ha podido usar: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    this.avisosPlantilla = avisos;
+  }
+
   /** `origen`: una ruta del disco (host) o el archivo que eligió el jugador en su navegador (se sube al host). */
   async ponerFoto(origen: string | File) {
     try {
@@ -467,6 +506,7 @@ export class EditorFicha {
       this.ponerValorVariable(d.id, n);
     }
     this.#ponerCuerpo(this.cuerpoX, this.cuerpoY);
+    this.entidad.vision = acotar(this.entidad.vision ?? 0, 0, MAX_VISION);
   }
 
   async #descartarSesion() {

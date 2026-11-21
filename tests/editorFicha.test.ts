@@ -25,7 +25,7 @@ function entidad(extra: Record<string, any> = {}) {
   return {
     id: 7, nombre: "Orco", tipo: "Enemigo",
     parametros: [{ id_definicion: 1, valor: { Numero: 18 }, publico: true }],
-    cuerpo: "Pequenio", zona_id: 1, foto_url: null, archivos_adjuntos: [], es_unico: false, ...extra
+    cuerpo: "Pequenio", vision: 0, zona_id: 1, foto_url: null, archivos_adjuntos: [], es_unico: false, ...extra
   } as any;
 }
 

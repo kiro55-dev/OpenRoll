@@ -122,6 +122,10 @@
         <span class="label">Cuerpo</span>
         <span class="valor">{textoCuerpo(ficha.base.cuerpo)}</span>
       </div>
+      <div class="param">
+        <span class="label">Visión</span>
+        <span class="valor">{ficha.base.vision ? `${ficha.base.vision} m` : "—"}</span>
+      </div>
     </div>
   {:else}
     <div class="sin-seleccion">Pulsa una ficha activa para ver sus parámetros</div>

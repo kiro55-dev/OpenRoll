@@ -1296,7 +1296,7 @@ pub fn iniciar_borrador_entidad_en(zona_id: u16, foto_url: Option<String>, state
         miniatura_url: None,
         foto_encuadre: Default::default(),
         archivos_adjuntos: vec![],
-        es_unico: false,
+        es_unico: false, vision: 0,
         propietarios: vec![],
     };
     // Los parámetros calculados nacen ya con el valor que dan las variables de por defecto
@@ -1356,6 +1356,8 @@ fn validar_parametros(defs: &[DefinicionParametro], parametros: &[Parametro]) ->
 pub const MAX_NOMBRE_FICHA: usize = 100;
 pub const MAX_TEXTO_PARAMETRO: usize = 2000;
 pub const MAX_ADJUNTOS_FICHA: usize = 50;
+/// Tope de la visión de una ficha, en metros.
+pub const MAX_VISION: u16 = 10_000;
 
 fn validar_entidad(est: &EstadoPartida, dir: &Path, e: &Entidad) -> Result<(), String> {
     if e.nombre.trim().is_empty() {
@@ -1385,6 +1387,9 @@ fn validar_entidad(est: &EstadoPartida, dir: &Path, e: &Entidad) -> Result<(), S
         if dim.len() != 2 || dim.iter().any(|&d| d == 0) {
             return Err("El tamaño del cuerpo no es válido".into());
         }
+    }
+    if e.vision > MAX_VISION {
+        return Err(format!("La visión no puede pasar de {MAX_VISION} metros"));
     }
     if !est.zonas.iter().any(|z| z.id == e.zona_id) {
         return Err("La zona de la ficha ya no existe".into());
@@ -1708,7 +1713,7 @@ mod tests {
             miniatura_url: None,
             foto_encuadre: Default::default(),
             archivos_adjuntos: vec![],
-            es_unico: false,
+            es_unico: false, vision: 0,
             propietarios,
         }
     }
@@ -1858,7 +1863,7 @@ mod tests_partidas {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Enemigo,
             parametros: parametros_por_defecto().iter().map(|d| Parametro { id_definicion: d.id, valor: d.valor_por_defecto.clone(), publico: true }).collect(),
             variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None,
-            foto_encuadre: Default::default(), archivos_adjuntos: vec![], es_unico: false, propietarios: vec![],
+            foto_encuadre: Default::default(), archivos_adjuntos: vec![], es_unico: false, vision: 0, propietarios: vec![],
         };
         e.aplicar_delta(&DeltaPartida::EntidadCreada(ficha(1)));
         e.aplicar_delta(&DeltaPartida::EntidadCreada(ficha(2)));

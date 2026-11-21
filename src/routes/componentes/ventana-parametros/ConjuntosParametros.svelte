@@ -8,6 +8,7 @@
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { ayuda } from "$lib/ajustesVista.svelte";
   import { partida, type ResumenBiblioteca, type ResumenConjunto } from "$lib/partida.svelte";
+  import { exportarPlantilla } from "$lib/plantillaIo";
   import { edicionVariables } from "$lib/edicionVariables.svelte";
 
   let { onError, alCambiar }: { onError: (mensaje: string) => void; alCambiar: () => void } = $props();
@@ -69,6 +70,20 @@
       aviso = `Importado «${partida.conjuntos.guardados.find((c) => c.id === id)?.nombre ?? "conjunto"}». Todavía no lo usas: elígelo arriba cuando quieras.`;
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err)); // el motivo concreto: no es un conjunto, es de otra versión, algo no vale...
+    } finally {
+      ocupado = false;
+    }
+  }
+
+  async function exportarPlantillaEnBlanco() {
+    if (ocupado) return;
+    ocupado = true;
+    aviso = "";
+    try {
+      if (await exportarPlantilla(null)) aviso = "Plantilla exportada.";
+      onError("");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
     } finally {
       ocupado = false;
     }
@@ -240,6 +255,18 @@
 
 {#if gestionando}
   <div class="gestor">
+    <!-- La plantilla de ficha en blanco (un .html para rellenar fuera de OpenRoll) con los parámetros y variables en uso -->
+    <div class="fila-importar">
+      <button
+        type="button"
+        class="importar"
+        disabled={ocupado}
+        onclick={exportarPlantillaEnBlanco}
+        title={ayuda("Guarda una plantilla de ficha en blanco (un .html) con los parámetros y variables del conjunto en uso. Se rellena con cualquier navegador, sin OpenRoll, y después se arrastra al banco de fichas")}
+      >
+        Exportar plantilla de los parámetros actuales
+      </button>
+    </div>
     <div class="fila-importar">
       <button type="button" class="importar" disabled={ocupado} onclick={importar} title={ayuda("Trae un conjunto de otro archivo. No sustituye lo que tienes: se añade a la lista")}>
         Importar desde archivo…

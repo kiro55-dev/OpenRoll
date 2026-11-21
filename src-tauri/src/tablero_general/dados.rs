@@ -538,7 +538,7 @@ mod tests {
             variables: vec![ValorVariable { id_definicion: 1, valor: fuerza, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] }, ValorVariable { id_definicion: 2, valor: 9, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] }],
             pasos_valor: vec![],
             cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
-            archivos_adjuntos: vec![], es_unico: false, propietarios,
+            archivos_adjuntos: vec![], es_unico: false, vision: 0, propietarios,
         };
         let inst = |id: u16, base: Entidad| Instancia {
             id_instancia: id, id_mapa: None, base, valores_actuales: vec![], coordenadas: Coordenada::NoPuesto,

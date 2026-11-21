@@ -21,6 +21,8 @@ pub enum CambioEntidad {
     /// El paso de − / + de UN parámetro; `paso` 1 = el de serie (se quita).
     PasoValor(PasoValor),
     Cuerpo(Cuerpo),
+    /// La visión de la ficha, en metros.
+    Vision(u16),
     Zona(u16),
     /// Otra foto: la miniatura propia (recorte de la anterior) deja de valer.
     Foto(Option<String>),
@@ -63,6 +65,9 @@ pub fn entre(antes: &Entidad, despues: &Entidad) -> Vec<CambioEntidad> {
     }
     if antes.cuerpo != despues.cuerpo {
         cambios.push(CambioEntidad::Cuerpo(despues.cuerpo.clone()));
+    }
+    if antes.vision != despues.vision {
+        cambios.push(CambioEntidad::Vision(despues.vision));
     }
     if antes.zona_id != despues.zona_id {
         cambios.push(CambioEntidad::Zona(despues.zona_id));
@@ -109,6 +114,7 @@ pub fn aplicar(e: &mut Entidad, cambios: &[CambioEntidad]) {
                 }
             }
             CambioEntidad::Cuerpo(c) => e.cuerpo = c.clone(),
+            CambioEntidad::Vision(v) => e.vision = *v,
             CambioEntidad::Zona(z) => e.zona_id = *z,
             CambioEntidad::Foto(f) => {
                 e.foto_url = f.clone();
@@ -141,7 +147,7 @@ mod tests {
             miniatura_url: Some("miniaturas/ficha/entidad_1_1.webp".into()),
             foto_encuadre: Default::default(),
             archivos_adjuntos: vec![Some("archivos/entidad_1/notas.txt".into())],
-            es_unico: false,
+            es_unico: false, vision: 0,
             propietarios: vec![],
         }
     }
@@ -182,6 +188,7 @@ mod tests {
         despues.parametros[0] = Parametro { id_definicion: ID_VIDA, valor: ValorParametro::Numero(40), publico: true };
         despues.variables[1].valor = 14;
         despues.cuerpo = Cuerpo::Grande(vec![2, 3]);
+        despues.vision = 18;
         despues.zona_id = 4;
         despues.foto_url = Some("imagenes/b.png".into());
         despues.foto_encuadre = EncuadreFoto { x: 10, y: 20, zoom: 150 };
@@ -190,7 +197,8 @@ mod tests {
         despues.propietarios = vec![3];
 
         let cambios = entre(&antes, &despues);
-        assert_eq!(cambios.len(), 11, "un cambio por campo");
+        assert_eq!(cambios.len(), 12, "un cambio por campo");
+        assert!(cambios.contains(&CambioEntidad::Vision(18)));
         assert!(cambios.contains(&CambioEntidad::Variable(ValorVariable { id_definicion: 2, valor: 14, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] })), "solo la variable que cambió");
         let mut aplicada = antes.clone();
         aplicar(&mut aplicada, &cambios);

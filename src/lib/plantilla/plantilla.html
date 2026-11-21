@@ -1,0 +1,495 @@
+<!doctype html>
+<!-- Plantilla de ficha de OpenRoll. Se rellena con cualquier navegador, sin conexión ni programas, y guarda sus datos dentro de
+     sí misma. Después se arrastra este mismo archivo a OpenRoll. La genera la app (src/lib/plantillaFicha.ts); los datos van en el
+     bloque «datos-openroll». -->
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ficha · OpenRoll</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0f0f11; color: #f4f4f5; font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .pagina { max-width: 860px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 17px; flex: 1; min-width: 200px; }
+  header .conjunto { color: #a1a1aa; font-weight: normal; font-size: 13px; }
+  .estado { font-size: 12px; color: #71717a; }
+  .estado.sucio { color: #f87171; font-weight: 600; }
+  .estado.ok { color: #4ade80; }
+  button { font: inherit; cursor: pointer; border-radius: 5px; }
+  .guardar { background: #16a34a; color: white; border: none; padding: 7px 16px; font-weight: 700; }
+  .guardar:hover { background: #15803d; }
+  .secundario { background: #27272a; color: #e4e4e7; border: 1px solid #3f3f46; padding: 4px 10px; font-size: 12px; }
+  .secundario:hover { border-color: #52525b; }
+  .ayuda { color: #a1a1aa; font-size: 12px; margin: 0; }
+  section { background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 12px; }
+  section h2 { margin: 0 0 8px; font-size: 13px; color: #93c5fd; text-transform: uppercase; letter-spacing: .04em; }
+  .ficha { display: flex; gap: 16px; flex-wrap: wrap; }
+  .campos { flex: 1; min-width: 260px; display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px; align-items: center; }
+  label { color: #a1a1aa; }
+  input, select { font: inherit; background: #09090b; border: 1px solid #3f3f46; color: white; border-radius: 4px; padding: 4px 6px; }
+  input:focus, select:focus { outline: none; border-color: #3b82f6; }
+  input[type=number] { width: 90px; }
+  input:disabled { color: #93c5fd; background: #111113; }
+  .fila { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .unidad { color: #71717a; font-size: 12px; }
+  .foto { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .caja { position: relative; width: 180px; height: 180px; overflow: hidden; border: 1px dashed #52525b; border-radius: 8px;
+          background: #09090b; display: flex; align-items: center; justify-content: center; touch-action: none; user-select: none; }
+  .caja.movible { cursor: grab; }
+  .caja.sobre { border-color: #3b82f6; background: #0b1220; }
+  .caja img { position: absolute; max-width: none; pointer-events: none; }
+  .caja .vacia { color: #52525b; text-align: center; font-size: 12px; padding: 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: #71717a; font-size: 11px; font-weight: 600; padding: 3px 6px; }
+  td { padding: 3px 6px; border-top: 1px solid #222226; vertical-align: middle; }
+  td.nombre { font-weight: 600; }
+  td.abrev { color: #a1a1aa; }
+  td.resultado { font-weight: 700; text-align: right; width: 60px; }
+  .positivo { color: #4ade80; } .negativo { color: #f87171; }
+  .opcional { display: inline-flex; align-items: center; gap: 3px; margin-right: 8px; color: #d4d4d8; font-size: 12px; }
+  .grupo + .grupo { margin-top: 10px; }
+  .grupo h3 { margin: 0 0 4px; font-size: 12px; color: #e4e4e7; }
+  .aviso { color: #a1a1aa; font-size: 12px; }
+  .error { color: #f87171; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="pagina">
+  <header>
+    <h1>Ficha <span class="conjunto" id="conjunto"></span></h1>
+    <span class="estado" id="estado">Sin cambios</span>
+    <button type="button" class="guardar" id="guardar">Guardar</button>
+  </header>
+  <p class="ayuda" id="ayuda-guardar">Rellena la ficha y pulsa «Guardar». Después arrastra este archivo a OpenRoll (al banco de fichas, o a la ventana de la ficha).</p>
+  <p class="error" id="error" hidden></p>
+
+  <section>
+    <h2>Ficha</h2>
+    <div class="ficha">
+      <div class="foto">
+        <div class="caja" id="caja"><div class="vacia" id="sin-foto">Sin foto<br>Arrastra una imagen aquí</div></div>
+        <div class="fila">
+          <button type="button" class="secundario" id="elegir-foto">Cambiar foto</button>
+          <button type="button" class="secundario" id="quitar-foto">Quitar</button>
+        </div>
+        <p class="ayuda" id="ayuda-foto">Arrastra para mover · rueda para acercar</p>
+        <input type="file" id="archivo-foto" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml,image/avif" hidden />
+      </div>
+      <div class="campos" id="campos"></div>
+    </div>
+  </section>
+
+  <section id="seccion-variables">
+    <h2>Variables</h2>
+    <div id="variables"></div>
+  </section>
+</div>
+
+<script type="application/json" id="datos-openroll">__DATOS_OPENROLL__</script>
+<script>
+"use strict";
+(function () {
+  // ---------------------------------------------------------------- datos
+  const bloque = document.getElementById("datos-openroll");
+  const DATOS = JSON.parse(bloque.textContent);
+  const defs = DATOS.definiciones;
+  const LIMITE_VARIABLE = 9999, MAX_PARAMETRO = 32767, MAX_CUERPO = 255, MAX_VISION = 10000;
+  const MAX_BYTES_FOTO = 8 * 1024 * 1024, MAX_LADO_FOTO = 8192, MAX_PIXELES_FOTO = 40000000;
+  const MIME_ADMITIDOS = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
+
+  const f = DATOS.ficha || {};
+  const estado = {
+    nombre: f.nombre || "",
+    tipo: f.tipo || "Jugador",
+    cuerpo: Array.isArray(f.cuerpo) ? [f.cuerpo[0] || 1, f.cuerpo[1] || 1] : [1, 1],
+    vision: Number(f.vision) || 0,
+    parametros: {},
+    variables: {},
+    foto: DATOS.foto || null
+  };
+  for (const d of defs.parametros) {
+    const p = (f.parametros || []).find((x) => x.id === d.id);
+    const def = "Numero" in d.valor_por_defecto ? d.valor_por_defecto.Numero : d.valor_por_defecto.Texto;
+    estado.parametros[d.id] = p ? p.valor : def;
+  }
+  for (const d of defs.variables) {
+    const v = (f.variables || []).find((x) => x.id === d.id) || {};
+    estado.variables[d.id] = {
+      valor: typeof v.valor === "number" ? v.valor : d.neutro,
+      eleccion: v.eleccion || 0,
+      opcionales: new Set(v.opcionales || []),
+      parametros_marcados: new Set(v.parametros_marcados || [])
+    };
+  }
+
+  // ---------------------------------------------------------------- utilidades
+  const $ = (id) => document.getElementById(id);
+  function el(etiqueta, props, ...hijos) {
+    const e = document.createElement(etiqueta);
+    for (const [k, v] of Object.entries(props || {})) {
+      if (k === "texto") e.textContent = v; // todo texto del host va como texto, nunca como HTML
+      else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+      else if (v === true) e.setAttribute(k, "");
+      else if (v !== false && v != null) e.setAttribute(k, String(v));
+    }
+    for (const h of hijos) if (h) e.append(h);
+    return e;
+  }
+  const acotar = (n, min, max) => Math.min(max, Math.max(min, Math.round(Number(n) || 0)));
+  const esDerivada = (d) => (d.bases && d.bases.length > 0) || (d.parametros && d.parametros.length > 0);
+  const signo = (n) => (n > 0 ? "+" + n : String(n));
+
+  // ---------------------------------------------------------------- cambios sin guardar
+  let sucio = false;
+  function marcar() {
+    sucio = true;
+    $("estado").textContent = "Cambios sin guardar";
+    $("estado").className = "estado sucio";
+  }
+  window.addEventListener("beforeunload", (e) => {
+    if (!sucio) return;
+    e.preventDefault();
+    e.returnValue = ""; // navegadores antiguos
+  });
+
+  // ---------------------------------------------------------------- resultados (igual que variables::resultado en OpenRoll)
+  function valorDeParametro(id) {
+    const d = defs.parametros.find((x) => x.id === id);
+    if (!d || !("Numero" in d.valor_por_defecto)) return 0;
+    const n = Number(estado.parametros[id]);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function deBase(id) {
+    const b = defs.variables.find((x) => x.id === id && !esDerivada(x));
+    if (!b) return 0;
+    const v = estado.variables[id] ? estado.variables[id].valor : b.neutro;
+    return Math.floor((v - b.neutro) / Math.max(1, b.escala));
+  }
+  function resultado(d) {
+    if (!esDerivada(d)) return deBase(d.id);
+    const v = estado.variables[d.id];
+    let suma = 0;
+    for (const b of d.bases || []) suma += deBase(b);
+    for (const o of d.opcionales || []) if (v.opcionales.has(o)) suma += deBase(o);
+    for (const p of d.parametros || []) suma += valorDeParametro(p);
+    for (const p of d.parametros_opcionales || []) if (v.parametros_marcados.has(p)) suma += valorDeParametro(p);
+    const m = d.multiplicador || 1, div = Math.max(1, d.divisor || 1), c = d.constante || 0;
+    const opciones = d.opciones || [];
+    const o = opciones[v.eleccion] || opciones[0];
+    return Math.floor((suma * m) / div) + c + (o ? o.bonus : 0);
+  }
+  const celdasResultado = [];
+  function refrescarResultados() {
+    for (const { d, td } of celdasResultado) {
+      const r = resultado(d);
+      td.textContent = signo(r);
+      td.className = "resultado" + (r > 0 ? " positivo" : r < 0 ? " negativo" : "");
+    }
+  }
+
+  // ---------------------------------------------------------------- campos de la ficha
+  function campos() {
+    const c = $("campos");
+    const fila = (etiqueta, ...hijos) => { c.append(el("label", { texto: etiqueta }), el("div", { class: "fila" }, ...hijos)); };
+    fila("Nombre", el("input", { type: "text", maxlength: 100, value: estado.nombre, oninput: (e) => { estado.nombre = e.target.value; marcar(); } }));
+    const tipo = el("select", { onchange: (e) => { estado.tipo = e.target.value; marcar(); } });
+    for (const t of ["Jugador", "NPC", "Enemigo", "Objeto"]) tipo.append(el("option", { value: t, texto: t, selected: t === estado.tipo }));
+    fila("Tipo", tipo);
+    const lado = (i) => el("input", { type: "number", min: 1, max: MAX_CUERPO, value: estado.cuerpo[i],
+      oninput: (e) => { estado.cuerpo[i] = acotar(e.target.value, 1, MAX_CUERPO); marcar(); } });
+    fila("Cuerpo", lado(0), el("span", { class: "unidad", texto: "×" }), lado(1), el("span", { class: "unidad", texto: "casillas" }));
+    fila("Visión", el("input", { type: "number", min: 0, max: MAX_VISION, value: estado.vision,
+      oninput: (e) => { estado.vision = acotar(e.target.value, 0, MAX_VISION); marcar(); } }), el("span", { class: "unidad", texto: "m" }));
+
+    for (const d of defs.parametros) {
+      const numero = "Numero" in d.valor_por_defecto;
+      const etiqueta = d.clave + (d.tiene_maximo ? " (máx.)" : "");
+      const entrada = numero
+        ? el("input", { type: "number", min: 0, max: MAX_PARAMETRO, value: estado.parametros[d.id], disabled: !!d.calculo,
+            title: d.calculo ? "Se calcula con las variables de la ficha" : null,
+            oninput: (e) => { estado.parametros[d.id] = acotar(e.target.value, 0, MAX_PARAMETRO); marcar(); refrescarResultados(); } })
+        : el("input", { type: "text", maxlength: 2000, value: estado.parametros[d.id] || "",
+            oninput: (e) => { estado.parametros[d.id] = e.target.value; marcar(); } });
+      fila(etiqueta, entrada, d.unidad ? el("span", { class: "unidad", texto: d.unidad }) : null,
+        d.calculo ? el("span", { class: "unidad", texto: "(se calcula)" }) : null);
+    }
+  }
+
+  // ---------------------------------------------------------------- variables
+  function variables() {
+    const cont = $("variables");
+    if (defs.variables.length === 0) { $("seccion-variables").hidden = true; return; }
+    const etiqueta = (d) => d.abreviatura || d.nombre;
+    for (const g of defs.grupos_variables) {
+      const suyas = defs.variables.filter((d) => d.grupo === g.id);
+      if (suyas.length === 0) continue;
+      const tabla = el("table");
+      const derivadas = g.tipo === "Derivadas";
+      tabla.append(el("tr", null, el("th", { texto: "Nombre" }), el("th", { texto: "Abrev." }),
+        el("th", { texto: derivadas ? "Opciones" : "Valor" }), el("th", { texto: "Resultado" })));
+      for (const d of suyas) {
+        const v = estado.variables[d.id];
+        let medio;
+        if (!esDerivada(d)) {
+          medio = el("input", { type: "number", min: -LIMITE_VARIABLE, max: LIMITE_VARIABLE, value: v.valor,
+            oninput: (e) => { v.valor = acotar(e.target.value, -LIMITE_VARIABLE, LIMITE_VARIABLE); marcar(); refrescarResultados(); } });
+        } else {
+          medio = el("div", { class: "fila" });
+          for (const o of d.opcionales || []) {
+            const b = defs.variables.find((x) => x.id === o);
+            if (!b) continue;
+            medio.append(el("label", { class: "opcional" }, el("input", { type: "checkbox", checked: v.opcionales.has(o),
+              onchange: (e) => { e.target.checked ? v.opcionales.add(o) : v.opcionales.delete(o); marcar(); refrescarResultados(); } }),
+              document.createTextNode("+ " + etiqueta(b))));
+          }
+          for (const p of d.parametros_opcionales || []) {
+            const dp = defs.parametros.find((x) => x.id === p);
+            if (!dp) continue;
+            medio.append(el("label", { class: "opcional" }, el("input", { type: "checkbox", checked: v.parametros_marcados.has(p),
+              onchange: (e) => { e.target.checked ? v.parametros_marcados.add(p) : v.parametros_marcados.delete(p); marcar(); refrescarResultados(); } }),
+              document.createTextNode("+ " + dp.clave)));
+          }
+          if ((d.opciones || []).length > 0) {
+            const sel = el("select", { onchange: (e) => { v.eleccion = Number(e.target.value); marcar(); refrescarResultados(); } });
+            d.opciones.forEach((o, i) => sel.append(el("option", { value: i, texto: o.nombre + " (" + signo(o.bonus) + ")", selected: i === v.eleccion })));
+            medio.append(sel);
+          }
+          if (!medio.childNodes.length) medio.append(el("span", { class: "unidad", texto: "—" }));
+        }
+        const td = el("td", { class: "resultado" });
+        celdasResultado.push({ d, td });
+        tabla.append(el("tr", null, el("td", { class: "nombre", texto: d.nombre }), el("td", { class: "abrev", texto: d.abreviatura || "—" }),
+          el("td", null, medio), td));
+      }
+      cont.append(el("div", { class: "grupo" }, el("h3", { texto: g.nombre }), tabla));
+    }
+    refrescarResultados();
+  }
+
+  // ---------------------------------------------------------------- foto (misma cuenta que la caja de foto de OpenRoll)
+  const LADO = 180, ZOOM_MIN = 100, ZOOM_MAX = 400;
+  let natural = null, img = null, agarre = null;
+  const tamano = (zoom) => {
+    const escala = (Math.max(LADO / natural.ancho, LADO / natural.alto) * zoom) / 100;
+    return { ancho: natural.ancho * escala, alto: natural.alto * escala };
+  };
+  function colocar() {
+    if (!img || !natural || !estado.foto) return;
+    const enc = estado.foto.encuadre, t = tamano(enc.zoom);
+    img.style.width = t.ancho + "px";
+    img.style.height = t.alto + "px";
+    img.style.left = (-(t.ancho - LADO) * enc.x) / 100 + "px";
+    img.style.top = (-(t.alto - LADO) * enc.y) / 100 + "px";
+  }
+  function pintarFoto() {
+    const caja = $("caja");
+    if (img) { img.remove(); img = null; }
+    natural = null;
+    $("sin-foto").hidden = !!estado.foto;
+    caja.classList.toggle("movible", !!estado.foto);
+    $("quitar-foto").hidden = !estado.foto;
+    $("ayuda-foto").hidden = !estado.foto;
+    if (!estado.foto) return;
+    img = el("img", { alt: "" });
+    img.onload = () => { natural = { ancho: img.naturalWidth, alto: img.naturalHeight }; colocar(); };
+    img.src = "data:" + estado.foto.mime + ";base64," + estado.foto.datos;
+    caja.append(img);
+  }
+  const limitar = (n, min = 0, max = 100) => Math.max(min, Math.min(max, Math.round(n)));
+  $("caja").addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !estado.foto || !natural) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    agarre = { x: e.clientX, y: e.clientY, enc: { ...estado.foto.encuadre } };
+  });
+  $("caja").addEventListener("pointermove", (e) => {
+    if (!agarre) return;
+    const t = tamano(estado.foto.encuadre.zoom), sx = t.ancho - LADO, sy = t.alto - LADO;
+    if (sx > 0.5) estado.foto.encuadre.x = limitar(agarre.enc.x - ((e.clientX - agarre.x) / sx) * 100);
+    if (sy > 0.5) estado.foto.encuadre.y = limitar(agarre.enc.y - ((e.clientY - agarre.y) / sy) * 100);
+    colocar(); marcar();
+  });
+  const soltar = () => { agarre = null; };
+  $("caja").addEventListener("pointerup", soltar);
+  $("caja").addEventListener("pointercancel", soltar);
+  $("caja").addEventListener("wheel", (e) => {
+    if (!estado.foto || !natural) return;
+    e.preventDefault();
+    const enc = estado.foto.encuadre;
+    const zoom = limitar(enc.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), ZOOM_MIN, ZOOM_MAX);
+    if (zoom === enc.zoom) return;
+    const r = $("caja").getBoundingClientRect();
+    const p = { x: e.clientX - r.left, y: e.clientY - r.top };
+    const antes = tamano(enc.zoom), despues = tamano(zoom);
+    const u = { x: ((antes.ancho - LADO) * enc.x) / 100 + p.x, y: ((antes.alto - LADO) * enc.y) / 100 + p.y };
+    const nx = (u.x / antes.ancho) * despues.ancho - p.x, ny = (u.y / antes.alto) * despues.alto - p.y;
+    if (despues.ancho - LADO > 0.5) enc.x = limitar((nx / (despues.ancho - LADO)) * 100);
+    if (despues.alto - LADO > 0.5) enc.y = limitar((ny / (despues.alto - LADO)) * 100);
+    enc.zoom = zoom;
+    colocar(); marcar();
+  }, { passive: false });
+
+  function leerComoDataUrl(blob) {
+    return new Promise((ok, mal) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = mal; r.readAsDataURL(blob); });
+  }
+  function cargar(src) {
+    return new Promise((ok, mal) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => mal(new Error("No es una imagen válida")); i.src = src; });
+  }
+  /** La foto tal cual, salvo que pase de los límites de OpenRoll (o no sea un formato que admita): entonces se redibuja lo justo. */
+  async function prepararFoto(blob) {
+    let url = await leerComoDataUrl(blob);
+    const i = await cargar(url);
+    let ancho = i.naturalWidth || 512, alto = i.naturalHeight || 512;
+    const cabe = () => ancho <= MAX_LADO_FOTO && alto <= MAX_LADO_FOTO && ancho * alto <= MAX_PIXELES_FOTO;
+    if (MIME_ADMITIDOS.includes(blob.type) && blob.size <= MAX_BYTES_FOTO && cabe()) return url;
+    let escala = Math.min(1, MAX_LADO_FOTO / ancho, MAX_LADO_FOTO / alto, Math.sqrt(MAX_PIXELES_FOTO / (ancho * alto)));
+    const tipo = blob.type === "image/png" || !MIME_ADMITIDOS.includes(blob.type) ? "image/png" : "image/jpeg";
+    for (let intento = 0; intento < 8; intento++) {
+      const lienzo = document.createElement("canvas");
+      lienzo.width = Math.max(1, Math.floor(ancho * escala));
+      lienzo.height = Math.max(1, Math.floor(alto * escala));
+      lienzo.getContext("2d").drawImage(i, 0, 0, lienzo.width, lienzo.height);
+      url = lienzo.toDataURL(tipo === "image/png" && intento > 1 ? "image/jpeg" : tipo, 0.92);
+      if (url.length * 0.75 <= MAX_BYTES_FOTO) return url;
+      escala *= 0.8;
+    }
+    throw new Error("La imagen es demasiado grande");
+  }
+  async function ponerFoto(archivo) {
+    try {
+      const url = await prepararFoto(archivo);
+      const coma = url.indexOf(",");
+      estado.foto = { mime: url.slice(5, url.indexOf(";")), datos: url.slice(coma + 1), encuadre: { x: 50, y: 50, zoom: 100 } };
+      pintarFoto(); marcar(); error("");
+    } catch (err) {
+      error("No se pudo usar la imagen: " + (err && err.message ? err.message : err));
+    }
+  }
+  $("elegir-foto").addEventListener("click", () => $("archivo-foto").click());
+  $("archivo-foto").addEventListener("change", (e) => { if (e.target.files[0]) ponerFoto(e.target.files[0]); e.target.value = ""; });
+  $("quitar-foto").addEventListener("click", () => { estado.foto = null; pintarFoto(); marcar(); });
+  $("caja").addEventListener("dragover", (e) => { e.preventDefault(); $("caja").classList.add("sobre"); });
+  $("caja").addEventListener("dragleave", () => $("caja").classList.remove("sobre"));
+  $("caja").addEventListener("drop", (e) => {
+    e.preventDefault();
+    $("caja").classList.remove("sobre");
+    const a = e.dataTransfer && e.dataTransfer.files[0];
+    if (a) ponerFoto(a);
+  });
+  // Soltar un archivo fuera de la caja no debe abrirlo en la pestaña (se perderían los cambios)
+  window.addEventListener("dragover", (e) => e.preventDefault());
+  window.addEventListener("drop", (e) => e.preventDefault());
+
+  function error(texto) {
+    $("error").textContent = texto;
+    $("error").hidden = !texto;
+  }
+
+  // ---------------------------------------------------------------- guardar (en este mismo archivo)
+  function datosActuales() {
+    // Una foto que OpenRoll no admite (SVG, AVIF...) se pasa a PNG al guardar
+    return {
+      formato: "openroll-plantilla",
+      version: 1,
+      conjunto: DATOS.conjunto,
+      id_ficha: DATOS.id_ficha,
+      definiciones: defs,
+      ficha: {
+        nombre: estado.nombre.trim(),
+        tipo: estado.tipo,
+        cuerpo: estado.cuerpo,
+        vision: estado.vision,
+        parametros: defs.parametros.map((d) => ({ id: d.id, clave: d.clave, valor: estado.parametros[d.id] })),
+        variables: defs.variables.map((d) => {
+          const v = estado.variables[d.id];
+          const o = (d.opciones || [])[v.eleccion];
+          return { id: d.id, nombre: d.nombre, valor: v.valor, eleccion: v.eleccion, eleccion_nombre: o ? o.nombre : "",
+            opcionales: [...v.opcionales], parametros_marcados: [...v.parametros_marcados] };
+        })
+      },
+      foto: estado.foto
+    };
+  }
+  async function fotoAdmitida() {
+    if (!estado.foto || MIME_ADMITIDOS.includes(estado.foto.mime)) return;
+    const blob = await (await fetch("data:" + estado.foto.mime + ";base64," + estado.foto.datos)).blob();
+    const url = await prepararFoto(new File([blob], "foto", { type: "image/svg+xml" === estado.foto.mime ? "image/svg+xml" : estado.foto.mime }));
+    estado.foto = { ...estado.foto, mime: url.slice(5, url.indexOf(";")), datos: url.slice(url.indexOf(",") + 1) };
+  }
+  function documentoGuardado() {
+    // El mismo archivo, con los datos nuevos y el formulario vacío (se vuelve a pintar al abrirlo)
+    const copia = document.documentElement.cloneNode(true);
+    copia.querySelector("#datos-openroll").textContent = JSON.stringify(datosActuales()).replace(/</g, "\\u003c");
+    copia.querySelector("#campos").replaceChildren();
+    copia.querySelector("#variables").replaceChildren();
+    const caja = copia.querySelector("#caja");
+    caja.querySelectorAll("img").forEach((i) => i.remove());
+    caja.classList.remove("movible", "sobre");
+    const est = copia.querySelector("#estado");
+    est.textContent = "Sin cambios";
+    est.className = "estado";
+    copia.querySelector("#error").hidden = true;
+    return "<!doctype html>\n" + copia.outerHTML;
+  }
+  const nombreArchivo = () => (estado.nombre.trim() || "ficha").replace(/[\\/:*?"<>|]+/g, "_") + ".html";
+  let manejador = null; // Chrome/Edge: el archivo elegido la primera vez, que se sobrescribe después
+  /** Chrome/Edge: se elige el archivo la primera vez (el mismo que se tiene abierto) y después se sobrescribe. `false` si este
+   *  navegador no puede (entonces se descarga una copia). Cancelar el diálogo lanza `AbortError`. */
+  async function guardarEnSuSitio(html) {
+    if (!window.showSaveFilePicker) return false;
+    try {
+      if (!manejador) {
+        manejador = await window.showSaveFilePicker({ suggestedName: nombreArchivo(), types: [{ description: "Ficha de OpenRoll", accept: { "text/html": [".html"] } }] });
+      }
+      const w = await manejador.createWritable();
+      await w.write(html);
+      await w.close();
+      return true;
+    } catch (err) {
+      manejador = null;
+      if (err && err.name === "AbortError") throw err;
+      return false; // sin permiso desde un archivo local, por ejemplo: se descarga
+    }
+  }
+  function descargar(html) {
+    const a = el("a", { href: URL.createObjectURL(new Blob([html], { type: "text/html" })), download: nombreArchivo() });
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+  async function guardar() {
+    try {
+      await fotoAdmitida();
+      const html = documentoGuardado();
+      if (await guardarEnSuSitio(html)) {
+        $("ayuda-guardar").textContent = "Guardado. Arrastra este archivo a OpenRoll cuando quieras.";
+      } else {
+        descargar(html);
+        $("ayuda-guardar").textContent = "Se ha descargado «" + nombreArchivo() + "» (en tu carpeta de descargas): ESE es el archivo que tienes que pasar a OpenRoll, y el que tienes que abrir para seguir editando.";
+      }
+      sucio = false;
+      $("estado").textContent = "Guardado";
+      $("estado").className = "estado ok";
+      error("");
+    } catch (err) {
+      if (err && err.name === "AbortError") return; // canceló el diálogo
+      error("No se pudo guardar: " + (err && err.message ? err.message : err));
+    }
+  }
+  $("guardar").addEventListener("click", guardar);
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); guardar(); }
+  });
+
+  // ---------------------------------------------------------------- arrancar
+  $("conjunto").textContent = DATOS.conjunto ? "· " + DATOS.conjunto : "";
+  document.title = (estado.nombre || "Ficha") + " · OpenRoll";
+  campos();
+  variables();
+  pintarFoto();
+})();
+</script>
+</body>
+</html>

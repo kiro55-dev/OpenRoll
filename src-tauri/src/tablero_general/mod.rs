@@ -15,6 +15,7 @@ pub mod miniaturas;
 pub mod partidas;
 pub mod modelos;
 pub mod papelera;
+pub mod plantilla;
 pub mod partida;
 pub mod rangos;
 pub mod recursos;

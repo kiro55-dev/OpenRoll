@@ -568,6 +568,9 @@ pub struct Entidad {
     /// `EntidadCambiada { PasoValor }` (`poner_paso_valor`): lo que mande el front en `modificar_entidad` se ignora.
     pub pasos_valor: Vec<PasoValor>,
     pub cuerpo: Cuerpo,
+    /// Cuánto ve la ficha, en metros. Es un dato de SERIE de la ficha, como el nombre o el cuerpo: no es un parámetro de la partida y
+    /// no se puede quitar. Por ahora no hace nada (queda para la niebla de guerra y la visión). 0 = sin definir.
+    pub vision: u16,
     pub zona_id: u16,
 
     // Una criatura o NPC puede no tener foto (en JS llegará como string o null)
@@ -609,6 +612,8 @@ struct EntidadGuardada {
     #[serde(default)]
     pasos_valor: Vec<PasoValor>,
     cuerpo: Cuerpo,
+    #[serde(default)]
+    vision: u16,
     zona_id: u16,
     #[serde(default)]
     foto_url: Option<String>,
@@ -661,6 +666,7 @@ impl From<EntidadGuardada> for Entidad {
             variables: g.variables,
             pasos_valor: g.pasos_valor,
             cuerpo: g.cuerpo,
+            vision: g.vision,
             zona_id: g.zona_id,
             foto_url: g.foto_url,
             miniatura_url: g.miniatura_url,
@@ -868,6 +874,7 @@ mod tests {
         let e: Entidad = serde_json::from_str(antigua).unwrap();
         assert_eq!(e.foto_encuadre, EncuadreFoto { x: 50, y: 50, zoom: 100 });
         assert_eq!(e.miniatura_url, None);
+        assert_eq!(e.vision, 0, "una ficha de antes de la visión nace con 0 (sin definir)");
 
         // Con encuadre: se conserva al guardar y releer
         let mut e = e;

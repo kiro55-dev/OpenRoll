@@ -264,7 +264,7 @@ mod tests {
             miniatura_url: None,
             foto_encuadre: Default::default(),
             archivos_adjuntos: vec![],
-            es_unico,
+            es_unico, vision: 0,
             propietarios: vec![],
         }
     }

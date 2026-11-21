@@ -203,7 +203,7 @@ mod tests {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Enemigo,
             parametros: vec![p(ID_VIDA, 20, false), p(ID_ARMADURA, 12, true), p(ID_VELOCIDAD, 6, true), p(ID_RANGO_ARMA, 1, true)],
             variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
-            archivos_adjuntos: vec![Some(format!("archivos/entidad_{id}/notas.txt"))], es_unico: false, propietarios,
+            archivos_adjuntos: vec![Some(format!("archivos/entidad_{id}/notas.txt"))], es_unico: false, vision: 0, propietarios,
         }
     }
 

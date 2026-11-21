@@ -21,6 +21,7 @@ use tablero_general::batalla::{
     renombrar_grupo_batalla, terminar_batalla,
 };
 use tablero_general::dados::{limpiar_chat, tirar_dado};
+use tablero_general::plantilla::{guardar_plantilla, importar_imagen_base64, leer_plantilla};
 use tablero_general::estado;
 use tablero_general::partidas;
 use tablero_general::partida::{
@@ -125,6 +126,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             tirar_dado,
             limpiar_chat,
+            guardar_plantilla,
+            leer_plantilla,
+            importar_imagen_base64,
             empezar_batalla,
             terminar_batalla,
             pasar_turno,

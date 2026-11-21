@@ -19,6 +19,8 @@
   import CajaFoto from "./ventana-ficha/CajaFoto.svelte";
   import CampoNumero from "./ventana-ficha/CampoNumero.svelte";
   import AdjuntosFicha from "./ventana-ficha/AdjuntosFicha.svelte";
+  import { esArchivoPlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
+  import { exportarPlantilla, leerArchivoPlantilla } from "$lib/plantillaIo";
 
   let { entidad }: { entidad: Entidad } = $props();
 
@@ -59,13 +61,72 @@
   }
 
 
+  // ---- Plantilla de ficha (ver $lib/plantillaFicha): soltada en cualquier parte de la ventana ----
+  /** Una plantilla de OTRA ficha esperando confirmación (se sobrescribirían los datos de esta). */
+  let plantillaAjena = $state<PlantillaLeida | null>(null);
+  let exportando = $state(false);
+
+  /** La de esta misma ficha (o sobre una ficha nueva, que no tiene nada que perder) se aplica; la de otra pide confirmar. */
+  function recibirPlantilla(p: PlantillaLeida) {
+    if (editor.esBorrador || p.id_ficha === ficha.id) {
+      plantillaAjena = null;
+      void editor.aplicarPlantilla(p);
+    } else {
+      plantillaAjena = p;
+    }
+  }
+
+  async function soltarPlantilla(origen: string | File): Promise<boolean> {
+    try {
+      recibirPlantilla(await leerArchivoPlantilla(origen));
+      return true;
+    } catch (err) {
+      partida.errorEditor = err instanceof Error ? err.message : String(err);
+      return false;
+    }
+  }
+
+  // Un jugador suelta el archivo desde su navegador (en el host lo hace Tauri con rutas)
+  function alSoltarEnElNavegador(e: DragEvent) {
+    const archivo = e.dataTransfer?.files?.[0];
+    if (!esJugador || !archivo || !esArchivoPlantilla(archivo.name)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    void soltarPlantilla(archivo);
+  }
+
+  async function exportar() {
+    if (exportando) return;
+    exportando = true;
+    try {
+      await exportarPlantilla($state.snapshot(ficha) as Entidad, editor.esBorrador ? null : ficha.id);
+    } catch (err) {
+      partida.errorEditor = `No se pudo exportar la plantilla: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      exportando = false;
+    }
+  }
+
   onMount(() => {
     ventana?.focus(); // para que Enter/Escape funcionen sin tocar la ventana con el ratón
     editor.abrirPestana(0);
 
+    // Abierta desde una plantilla soltada en el banco: se rellena con ella
+    const alAbrir = partida.plantillaAlAbrir;
+    partida.plantillaAlAbrir = null;
+    if (alAbrir) void editor.aplicarPlantilla(alAbrir);
+    const dejarDeImportar = partida.registrarImportador(recibirPlantilla);
+
     // Abrir otra ficha con esta abierta la guarda primero (ver `partida.abrirEditorEntidad`)
     const dejarDeGuardar = partida.registrarEditor(() => editor.guardar());
-    const dejarDeSoltar = alSoltarArchivos((rutas, el) => {
+    const dejarDeSoltar = alSoltarArchivos(async (rutas, el) => {
+      // Una plantilla de ficha soltada en cualquier parte de la ventana; un .html que no lo sea, sobre los adjuntos, se adjunta
+      const html = rutas.find(esArchivoPlantilla);
+      if (html && el?.closest("[data-ventana-ficha]")) {
+        if (await soltarPlantilla(html)) return;
+        if (!el?.closest(".zona-archivos")) return;
+        partida.errorEditor = "";
+      }
       if (el?.closest(".caja-foto")) {
         const imagen = rutas.find((r) => esImagen(r, "ficha"));
         if (imagen) return editor.ponerFoto(imagen);
@@ -76,6 +137,7 @@
     return () => {
       dejarDeGuardar();
       dejarDeSoltar();
+      dejarDeImportar();
     };
   });
 </script>
@@ -86,6 +148,9 @@
   style="left: {pos.x}px; top: {pos.y}px;"
   role="dialog"
   aria-label="Ficha"
+  data-ventana-ficha
+  ondragover={(e) => esJugador && e.preventDefault()}
+  ondrop={alSoltarEnElNavegador}
   tabindex="-1"
   onkeydown={alTeclear}
   bind:this={ventana}
@@ -163,6 +228,11 @@
             <span class="separador-x">×</span>
             <CampoNumero bind:value={editor.cuerpoY} min={1} max={255} estrecho sufijo="m" titulo="Alto en casillas (rueda del ratón para ajustar)" />
           </div>
+        </div>
+
+        <div class="fila">
+          <span class="etiqueta">Visión:</span>
+          <CampoNumero bind:value={ficha.vision} min={0} max={10000} sufijo="m" titulo="Cuánto ve la ficha, en metros (por ahora no hace nada; rueda del ratón para ajustar)" />
         </div>
 
         <div class="fila">
@@ -326,6 +396,31 @@
       {/if}
     </div>
 
+    {#if plantillaAjena}
+      <!-- Los datos son de OTRA ficha: se pide confirmación antes de pisar los de esta -->
+      <div class="aviso-plantilla" role="alert">
+        <span>Los datos a importar no son de la ficha actual. Si procedes se sobrescribirán sus datos y se perderán los anteriores.</span>
+        <div class="botones-aviso">
+          <button type="button" class="btn-cancelar" onclick={() => (plantillaAjena = null)}>Cancelar</button>
+          <button
+            type="button"
+            class="btn-proceder"
+            onclick={() => {
+              const p = plantillaAjena;
+              plantillaAjena = null;
+              if (p) void editor.aplicarPlantilla(p);
+            }}
+          >Proceder</button>
+        </div>
+      </div>
+    {/if}
+
+    {#if editor.avisosPlantilla.length > 0}
+      <div class="avisos-plantilla">
+        {#each editor.avisosPlantilla as a}<p>{a}</p>{/each}
+      </div>
+    {/if}
+
     {#if editor.error}
       <p class="error" role="alert">{editor.error}</p>
     {/if}
@@ -334,6 +429,13 @@
       {#if !editor.esBorrador && !esJugador}
         <button type="button" class="btn-borrar" onclick={() => editor.borrar()} disabled={editor.guardando}>Borrar ficha</button>
       {/if}
+      <button
+        type="button"
+        class="btn-exportar"
+        disabled={exportando}
+        title={ayuda("Guarda una plantilla de esta ficha (un .html con sus datos y su foto) para rellenarla fuera de OpenRoll con cualquier navegador. Después se arrastra a OpenRoll: al banco o a esta ventana")}
+        onclick={exportar}
+      >Exportar plantilla</button>
       <div class="botones-derecha">
         <button type="button" class="btn-cancelar" onclick={() => editor.cancelar()}>Cancelar</button>
         <button type="button" class="btn-guardar" onclick={() => editor.guardar()} disabled={editor.guardando}>Guardar</button>
@@ -440,7 +542,22 @@
 
   .error { margin: 0 0 6px; color: #f87171; font-size: 12px; }
 
-  .pie { display: flex; justify-content: space-between; align-items: center; }
+  .pie { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .btn-exportar {
+    background: transparent; border: 1px solid #3f3f46; color: #d4d4d8; padding: 5px 10px; border-radius: 4px;
+    font-size: 11px; font-weight: 600; cursor: pointer;
+  }
+  .btn-exportar:hover { border-color: #52525b; color: white; }
+  .btn-exportar:disabled { opacity: 0.6; cursor: default; }
+  .aviso-plantilla {
+    display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; padding: 7px 9px; border-radius: 5px;
+    background: rgba(127, 29, 29, 0.35); border: 1px solid #7f1d1d; color: #fca5a5; font-size: 12px; font-weight: 600;
+  }
+  .botones-aviso { display: flex; justify-content: flex-end; gap: 6px; }
+  .btn-proceder { background: #b91c1c; color: white; border: none; padding: 5px 12px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; }
+  .btn-proceder:hover { background: #dc2626; }
+  .avisos-plantilla { margin-bottom: 6px; color: #fbbf24; font-size: 11px; }
+  .avisos-plantilla p { margin: 0; }
   .botones-derecha { display: flex; gap: 6px; margin-left: auto; }
   .btn-cancelar, .btn-guardar, .btn-borrar {
     border: none; padding: 5px 12px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;

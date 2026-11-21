@@ -187,7 +187,7 @@ mod tests {
             let mut est = state.lock();
             let ficha = |id: u16, duenos: Vec<IdJugador>| Entidad {
                 id, nombre: format!("F{id}"), tipo: TipoEntidad::Jugador, parametros: vec![], variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio, zona_id: 1,
-                foto_url: None, miniatura_url: None, foto_encuadre: Default::default(), archivos_adjuntos: vec![], es_unico: false,
+                foto_url: None, miniatura_url: None, foto_encuadre: Default::default(), archivos_adjuntos: vec![], es_unico: false, vision: 0,
                 propietarios: duenos,
             };
             partida::registrar(&mut est, &state.almacen, DeltaPartida::JugadorRegistrado(Jugador { id: 1, nombre: "Ana".into() }));

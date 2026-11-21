@@ -17,6 +17,7 @@ import { ajustesVista } from "$lib/ajustesVista.svelte";
 import { esJugador } from "$lib/modo";
 import { tiradas } from "$lib/tiradas.svelte";
 import { grupoParaEnter, ordenarPorGrupos, tieneElTurno } from "$lib/batalla";
+import type { PlantillaLeida } from "$lib/plantillaFicha";
 
 export interface Zona {
   id: number;
@@ -289,6 +290,8 @@ export interface Entidad {
   /** Lo que suman o restan los botones − / + de cada valor (vida...) de esta ficha; solo los que no son 1. Lo guarda Rust. */
   pasos_valor?: PasoValor[];
   cuerpo: Cuerpo;
+  /** Cuánto ve la ficha, en metros (dato de serie de la ficha, como el cuerpo; 0 = sin definir). Por ahora no hace nada. */
+  vision: number;
   zona_id: number;
   foto_url: string | null;
   /** Miniatura propia de la ficha (la que encuadró el usuario); la pone Rust, nunca el front. Sin ella se usa la automática de la foto. */
@@ -1623,6 +1626,29 @@ class Partida {
   #guardarEditor: (() => Promise<boolean>) | null = null;
 
   /** La ventana de la ficha dice cómo guardarla. Devuelve cómo dejar de hacerlo. */
+  /** La plantilla que hay que aplicar a la ficha que se va a abrir (la recoge la ventana al montarse). */
+  plantillaAlAbrir: PlantillaLeida | null = null;
+  #importador: ((p: PlantillaLeida) => void) | null = null;
+
+  /** La ventana de la ficha dice cómo recibir una plantilla (para cuando ya está abierta la ficha a la que va). */
+  registrarImportador(importar: (p: PlantillaLeida) => void) {
+    this.#importador = importar;
+    return () => {
+      if (this.#importador === importar) this.#importador = null;
+    };
+  }
+
+  /** Abre la ficha (`entidad`) o una nueva (null) con los datos de una plantilla (sin guardar: se guarda con «Guardar»). */
+  async abrirConPlantilla(plantilla: PlantillaLeida, entidad: Entidad | null) {
+    const abierta = this.entidadEnEdicion;
+    if (entidad && abierta && !this.editorEsBorrador && abierta.id === entidad.id) {
+      this.#importador?.(plantilla);
+      return;
+    }
+    this.plantillaAlAbrir = plantilla;
+    if (!(await this.abrirEditorEntidad(entidad))) this.plantillaAlAbrir = null;
+  }
+
   registrarEditor(guardar: () => Promise<boolean>) {
     this.#guardarEditor = guardar;
     return () => {
