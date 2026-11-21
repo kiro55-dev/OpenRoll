@@ -34,7 +34,7 @@
     bind:this={input}
     bind:value={tiradas.comando}
     placeholder="Escribir comando (ej: 2d6 + 3)..."
-    title={ayuda("Comparar una tirada con un objetivo: 1d20 >= 12 (iguala o supera), 1d20 > 12 (supera), 1d100 <= 45 (iguala o baja), 1d100 < 45 (baja) o 1d100 vs acro (igual que <=). El host puede nombrar el resultado en Parámetros > Resultados")}
+    title={ayuda("Variables de la ficha con el foco por su nombre o abreviatura (2d6 + f) y parámetros visuales con @ (1d20 + @velocidad; @vida es el valor actual y @vida.max el máximo).\nComparar una tirada con un objetivo: 1d20 >= 12 (iguala o supera), 1d20 > 12 (supera), 1d100 <= 45 (iguala o baja), 1d100 < 45 (baja) o 1d100 vs acro (igual que <=). El host puede nombrar el resultado en Parámetros > Resultados")}
     onkeydown={alTeclear}
     class="input-chat"
   />

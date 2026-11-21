@@ -173,9 +173,9 @@
       type="text"
       class="input-texto"
       maxlength="120"
-      placeholder="p. ej. 1d20 + Destreza"
+      placeholder="p. ej. 1d20 + Destreza o 1d20 + @velocidad"
       bind:this={campo}
-      title={ayuda("Cada ficha tira con SUS variables, como en cualquier tirada del chat. Se ordenan de mayor a menor; en un empate se respeta el orden que ya tenían. Vacío: no se reordenan")}
+      title={ayuda("Cada ficha tira con SUS variables y parámetros visuales (con @: 1d20 + @velocidad), como en cualquier tirada del chat. Se ordenan de mayor a menor; en un empate se respeta el orden que ya tenían. Vacío: no se reordenan")}
       bind:value={tirada}
     />
     <p class="ayuda">

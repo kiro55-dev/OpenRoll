@@ -4,7 +4,7 @@ use tauri::State;
 use crate::tablero_general::escalas::{self, Operador};
 use crate::tablero_general::estado::{DeltaPartida, EstadoPartida};
 use crate::tablero_general::jugadores::controla_instancia;
-use crate::tablero_general::modelos::{IdJugador, ID_HOST};
+use crate::tablero_general::modelos::{IdJugador, Instancia, ValorParametro, ID_HOST};
 use crate::tablero_general::partida::{procesar_delta, registrar_comando_personal, registrar_tirada, AppState};
 use crate::tablero_general::variables;
 
@@ -21,25 +21,76 @@ pub struct Tirada {
     pub multiplicador: i32,
 }
 
-/// Lo que vale en una tirada la variable que nombra `texto` (por nombre o abreviatura): su abreviatura y su
-/// resultado en la ficha con el foco (`id_instancia`). Un jugador solo puede usar las de sus fichas.
+/// Lo que vale en una tirada la variable que nombra `texto` (por nombre o abreviatura) o el parámetro visual `@nombre`, en la ficha
+/// con el foco (`id_instancia`): su etiqueta para el desglose y su valor. Un jugador solo puede usar las de sus fichas.
 fn resolver_variable(
     est: &EstadoPartida,
     jugador: IdJugador,
     id_instancia: Option<u16>,
     texto: &str,
 ) -> Result<(String, i32), String> {
-    let def = variables::buscar(&est.definiciones_variables, texto)
-        .ok_or_else(|| format!("«{}» no es una variable", texto.trim()))?;
-    let id = id_instancia.ok_or("Elige primero una ficha (púlsala) para usar sus variables")?;
+    // Antes de mirar la ficha, que el nombre exista (así el error dice lo que de verdad falla)
+    if !texto.trim().starts_with('@') && variables::buscar(&est.definiciones_variables, texto).is_none() {
+        return Err(format!("«{}» no es una variable (un parámetro visual se escribe con @: @{})", texto.trim(), texto.trim()));
+    }
+    let id = id_instancia.ok_or("Elige primero una ficha (púlsala) para usar sus variables o parámetros")?;
     let inst = est.instancias_activas.iter().find(|i| i.id_instancia == id).ok_or("Esa ficha ya no está activa")?;
     if !controla_instancia(est, jugador, id) {
-        return Err("Solo puedes usar las variables de tus fichas".into());
+        return Err("Solo puedes usar las variables y los parámetros de tus fichas".into());
     }
-    // En el desglose, la abreviatura que definió el host o, sin ella, el nombre. Una derivada (Acrobacias) suma sus bases y
-    // las opcionales que la ficha tiene marcadas
+    valor_en_ficha(est, inst, texto)
+}
+
+/// Lo que vale en la ficha `inst` un término de una tirada que no es un dado ni un número:
+///  * una VARIABLE (solo letras, por nombre o abreviatura): su resultado (una derivada suma sus bases y sus opcionales marcadas);
+///    en el desglose, su abreviatura o, sin ella, su nombre;
+///  * un PARÁMETRO VISUAL con `@` delante (`@velocidad`, `@rango arma`: el nombre llega hasta el siguiente operador, sin distinguir
+///    mayúsculas): su valor. Con máximo (la vida) cuenta el valor ACTUAL de esta instancia, y `@vida.max` el máximo de la ficha. Uno
+///    de texto no se puede tirar.
+pub(crate) fn valor_en_ficha(est: &EstadoPartida, inst: &Instancia, texto: &str) -> Result<(String, i32), String> {
+    if let Some(nombre) = texto.trim().strip_prefix('@') {
+        return valor_de_parametro(est, inst, nombre);
+    }
+    let def = variables::buscar(&est.definiciones_variables, texto).ok_or_else(|| format!("«{}» no es una variable", texto.trim()))?;
     let nombre = if def.abreviatura.is_empty() { &def.nombre } else { &def.abreviatura };
     Ok((nombre.clone(), variables::resultado(&est.definiciones_variables, &inst.base.parametros, &inst.base.variables, def)))
+}
+
+/// Un nombre de parámetro para compararlo: sin mayúsculas y con los espacios de dentro reducidos a uno.
+fn clave_parametro(texto: &str) -> String {
+    texto.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// El valor del parámetro visual `nombre` (lo que sigue a la `@`) en la ficha `inst`. Ver `valor_en_ficha`.
+fn valor_de_parametro(est: &EstadoPartida, inst: &Instancia, nombre: &str) -> Result<(String, i32), String> {
+    let buscado = clave_parametro(nombre);
+    if buscado.is_empty() {
+        return Err("Falta el nombre del parámetro detrás de la @".into());
+    }
+    let por_nombre = |k: &str| est.definiciones_parametros.iter().find(|d| clave_parametro(&d.clave) == k);
+    // `vida.max` es el máximo; se mira antes el nombre entero, por si algún parámetro se llamara así
+    let (def, maximo) = match por_nombre(&buscado) {
+        Some(d) => (d, false),
+        None => match buscado.strip_suffix(".max").map(str::trim_end).and_then(por_nombre) {
+            Some(d) => (d, true),
+            None => return Err(format!("«@{}» no es un parámetro", nombre.trim())),
+        },
+    };
+    if !matches!(def.valor_por_defecto, ValorParametro::Numero(_)) {
+        return Err(format!("«{}» es un texto: no se puede usar en una tirada", def.clave));
+    }
+    if maximo && !def.tiene_maximo {
+        return Err(format!("«{}» no tiene máximo: usa @{}", def.clave, def.clave));
+    }
+    let de_la_ficha = variables::valor_de_parametro(&inst.base.parametros, def.id);
+    let valor = if def.tiene_maximo && !maximo {
+        inst.valores_actuales.iter().find(|v| v.id_definicion == def.id).map_or(de_la_ficha, |v| i32::from(v.valor))
+    } else {
+        de_la_ficha
+    };
+    // El nombre lo escribe el host: al desglose (HTML) no llega nada que pueda pasar por una etiqueta
+    let limpio: String = def.clave.chars().filter(|c| !matches!(c, '<' | '>' | '&' | '"')).collect();
+    Ok((if maximo { format!("{limpio} máx") } else { limpio }, valor))
 }
 
 // Resalta en negrita si es 1 (pifia) o el valor máximo de caras (crítico)
@@ -55,8 +106,8 @@ fn formatear_num(valor: i32, caras: i32) -> String {
 /// jugador no podrá mandar al host textos enormes que parsear.
 pub const MAX_LONGITUD_COMANDO: usize = 200;
 
-/// Solo acepta tiradas: números, `d`, `+`, `-`, `*` y `adv`/`desv`/`dis`, y variables (un término solo de
-/// letras), que `resolver` convierte en (abreviatura, resultado). Cualquier otro texto es un error, así que nada
+/// Solo acepta tiradas: números, `d`, `+`, `-`, `*` y `adv`/`desv`/`dis`, variables (un término solo de letras) y parámetros
+/// visuales (un término que empieza por `@`), que `resolver` convierte en (etiqueta, valor). Cualquier otro texto es un error, así que nada
 /// de lo escrito llega al desglose (que lo forma `ejecutar_tiradas` con números, palabras fijas y la abreviatura
 /// que definió el host, que solo lleva letras).
 pub(crate) fn parsear_comando(
@@ -96,8 +147,8 @@ pub(crate) fn parsear_comando(
 
     // 2. Parseamos cada término
     for (signo, termino) in terminos {
-        // Una variable de la ficha (`f`, `Fuerza`): un término de dados siempre lleva algún dígito
-        if variables::parece_variable(&termino) {
+        // Una variable de la ficha (`f`, `Fuerza`: un término de dados siempre lleva algún dígito) o un parámetro visual (`@vida`)
+        if variables::parece_variable(&termino) || termino.starts_with('@') {
             let (abreviatura, valor) = resolver(&termino)?;
             tiradas.push(Tirada {
                 signo,
@@ -496,6 +547,59 @@ mod tests {
         e.jugadores = vec![Jugador { id: 3, nombre: "Ana".into() }];
         e.instancias_activas = vec![inst(1, ficha(1, vec![3], 12)), inst(2, ficha(2, vec![], 4))];
         e
+    }
+
+    /// La partida de `partida_con_variables` con los parámetros de serie (Vida con máximo, Armadura, Velocidad, Rango arma) y uno de
+    /// texto («Notas»). La instancia 1 tiene Vida 20 de máximo y 7 de actual, Armadura 15, Velocidad 9 y Rango arma 3.
+    fn partida_con_parametros() -> EstadoPartida {
+        let mut e = partida_con_variables();
+        let mut defs = parametros_por_defecto();
+        defs.push(DefinicionParametro {
+            id: 9, clave: "Notas".into(), valor_por_defecto: ValorParametro::Texto(String::new()), tiene_maximo: false,
+            representar_mapa: None, visibilidad: Visibilidad::Variable, unidad: None, atenuar_si_negativo: false, calculo: None,
+        });
+        e.definiciones_parametros = defs;
+        let num = |id, n| Parametro { id_definicion: id, valor: ValorParametro::Numero(n), publico: true };
+        e.instancias_activas[0].base.parametros = vec![
+            num(ID_VIDA, 20), num(ID_ARMADURA, 15), num(ID_VELOCIDAD, 9), num(ID_RANGO_ARMA, 3),
+            Parametro { id_definicion: 9, valor: ValorParametro::Texto("x".into()), publico: true },
+        ];
+        e.instancias_activas[0].valores_actuales = vec![ValorActual { id_definicion: ID_VIDA, valor: 7 }];
+        e
+    }
+
+    #[test]
+    fn un_parametro_visual_se_tira_con_arroba() {
+        let e = partida_con_parametros();
+        let mut r = |t: &str| resolver_variable(&e, ID_HOST, Some(1), t);
+        let tirar_con = |cmd: &str, r: &mut dyn FnMut(&str) -> Result<(String, i32), String>| ejecutar_tiradas(&super::parsear_comando(cmd, r)?);
+        // Sin distinguir mayúsculas, y un nombre con espacio llega hasta el siguiente operador
+        assert_eq!(tirar_con("@velocidad", &mut r).unwrap(), ("Velocidad (+9)".into(), 9));
+        assert_eq!(tirar_con("@VELOCIDAD + @rango arma + 1", &mut r).unwrap().1, 9 + 3 + 1);
+        assert_eq!(tirar_con("@Rango  Arma", &mut r).unwrap().1, 3, "los espacios de más no cuentan");
+        // Con máximo: el valor ACTUAL de la instancia; `.max`, el de la ficha
+        assert_eq!(tirar_con("@vida", &mut r).unwrap(), ("Vida (+7)".into(), 7));
+        assert_eq!(tirar_con("@vida.max", &mut r).unwrap(), ("Vida máx (+20)".into(), 20));
+        assert!(tirar_con("@armadura.max", &mut r).unwrap_err().contains("no tiene máximo"));
+        // Uno de texto, uno que no existe o una @ sola, no
+        assert!(tirar_con("@notas", &mut r).unwrap_err().contains("texto"));
+        assert!(tirar_con("@inventado", &mut r).unwrap_err().contains("no es un parámetro"));
+        assert!(tirar_con("1d6 + @", &mut r).is_err());
+        // Sin @ un parámetro no es nada (las variables siguen sin @): el error lo dice
+        let e2 = tirar_con("velocidad", &mut r).unwrap_err();
+        assert!(e2.contains("@velocidad"), "{e2}");
+    }
+
+    #[test]
+    fn un_parametro_con_arroba_sigue_las_reglas_de_las_variables() {
+        let e = partida_con_parametros();
+        let tirar_como = |jugador, inst: Option<u16>, cmd: &str| {
+            let mut r = |t: &str| resolver_variable(&e, jugador, inst, t);
+            ejecutar_tiradas(&super::parsear_comando(cmd, &mut r)?)
+        };
+        assert_eq!(tirar_como(3, Some(1), "@armadura").unwrap().1, 15, "su dueña");
+        assert!(tirar_como(3, Some(2), "@armadura").is_err(), "la de otro");
+        assert!(tirar_como(ID_HOST, None, "@armadura").is_err(), "sin foco");
     }
 
     #[test]

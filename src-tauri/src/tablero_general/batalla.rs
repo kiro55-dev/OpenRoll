@@ -2,7 +2,7 @@
 //
 // El modo batalla de un mapa (`Mapa.batalla`): uno o varios GRUPOS, cada uno con su turno y su contador de vueltas.
 //  * Se empieza con el comando de chat `Batalla [tirada]` y se acaba con `Terminar` (solo el host). Con tirada, cada ficha tira con
-//    SUS variables (como cualquier tirada del chat: los parámetros visuales no se tiran) y se reordenan de mayor a menor («Fichas activas»); sin ella no se reordena.
+//    SUS variables y sus parámetros visuales (`@velocidad`), como cualquier tirada del chat, y se reordenan de mayor a menor («Fichas activas»); sin ella no se reordena.
 //  * El orden de los turnos de un grupo es el de `Instancia.orden`: el host puede reordenar a mano y el turno sigue a su instancia.
 //    Al llegar al último se vuelve al primero y la vuelta (`ronda`) sube en uno.
 //  * Pasa el turno el dueño de la ficha que lo tiene (el host, siempre).
@@ -15,7 +15,6 @@ use crate::tablero_general::jugadores::controla_instancia;
 use crate::tablero_general::modelos::{IdJugador, ID_HOST};
 use crate::tablero_general::modelos::{Batalla, GrupoBatalla};
 use crate::tablero_general::partida::{registrar, registrar_tirada_en, AppState};
-use crate::tablero_general::variables;
 use serde::Deserialize;
 
 /// Nombre del grupo único de una batalla empezada con el comando.
@@ -195,14 +194,11 @@ pub fn al_llegar(est: &mut EstadoPartida, id_instancia: u16, antes_visible_aqui:
 // Empezar y terminar
 // ------------------------------------------------------------------
 
-/// Lo que vale en la iniciativa de una ficha un término de letras: una variable SUYA, exactamente como en una tirada del chat
-/// (`resolver_variable`, pero de cada ficha en vez de la que tiene el foco). Un parámetro visual no se tira: si depende de una
-/// variable, se tira esa variable.
+/// Lo que vale en la iniciativa de una ficha un término de letras o un `@parámetro`: exactamente lo mismo que en una tirada del chat
+/// (`dados::valor_en_ficha`), pero de cada ficha en vez de la que tiene el foco.
 fn valor_de_termino(est: &EstadoPartida, id_instancia: u16, texto: &str) -> Result<(String, i32), String> {
     let inst = est.instancias_activas.iter().find(|i| i.id_instancia == id_instancia).ok_or("Esa ficha ya no está activa")?;
-    let def = variables::buscar(&est.definiciones_variables, texto).ok_or_else(|| format!("«{}» no es una variable", texto.trim()))?;
-    let nombre = if def.abreviatura.is_empty() { &def.nombre } else { &def.abreviatura };
-    Ok((nombre.clone(), variables::resultado(&est.definiciones_variables, &inst.base.parametros, &inst.base.variables, def)))
+    crate::tablero_general::dados::valor_en_ficha(est, inst, texto)
 }
 
 /// Los ids de todas las instancias en su orden (el de «Fichas activas»).
@@ -757,12 +753,31 @@ mod tests {
     }
 
     #[test]
-    fn un_parametro_visual_no_se_tira_ni_en_la_iniciativa() {
+    fn en_la_iniciativa_un_parametro_visual_se_escribe_con_arroba_como_en_el_chat() {
         let s = partida("batalla_parametro");
-        s.lock().definiciones_parametros = crate::tablero_general::modelos::parametros_por_defecto();
-        let e = empezar_en(&s, "Batalla Velocidad", "Velocidad").unwrap_err();
-        assert!(e.contains("no es una variable"), "{e}");
+        {
+            let mut est = s.lock();
+            est.definiciones_parametros = crate::tablero_general::modelos::parametros_por_defecto();
+            // Velocidad = 6 + id: la 1 tiene 7, la 2 tiene 8, la 4 tiene 10
+            let defs = est.definiciones_parametros.clone();
+            for i in est.instancias_activas.iter_mut() {
+                let velocidad = 6 + i.id_instancia as i16;
+                i.base.parametros = defs
+                    .iter()
+                    .map(|d| Parametro {
+                        id_definicion: d.id,
+                        valor: if d.id == ID_VELOCIDAD { ValorParametro::Numero(velocidad) } else { d.valor_por_defecto.clone() },
+                        publico: true,
+                    })
+                    .collect();
+            }
+        }
+        // Sin @ no es nada (igual que en el chat)
+        assert!(empezar_en(&s, "Batalla Velocidad", "Velocidad").is_err());
         assert!(s.lock().mapas[0].batalla.is_none());
+        let linea = empezar_en(&s, "Batalla 1d1 + @velocidad", "1d1 + @velocidad").unwrap();
+        assert_eq!(linea, "Batalla 1d1 + @velocidad (F4 11 · F2 9 · F1 8)");
+        assert_eq!(miembros(&s), vec![4, 2, 1]);
     }
 
     #[test]

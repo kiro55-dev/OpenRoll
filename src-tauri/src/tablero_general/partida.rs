@@ -387,6 +387,10 @@ pub(crate) fn validar_definicion(existentes: &[DefinicionParametro], d: &Definic
     if clave.chars().count() > 30 {
         return Err("El nombre del parámetro no puede pasar de 30 caracteres".into());
     }
+    // En el chat se escribe `@nombre` y el nombre llega hasta el siguiente operador: no puede llevar ninguno
+    if clave.contains(['+', '-', '*', '<', '>', '=']) || clave.split_whitespace().any(|p| p.eq_ignore_ascii_case("vs")) {
+        return Err("El nombre del parámetro no puede llevar + - * < > = ni la palabra «vs» (se usan en las tiradas)".into());
+    }
     if existentes.iter().any(|e| e.clave.trim().to_lowercase() == clave.to_lowercase()) {
         return Err(format!("Ya existe un parámetro llamado «{clave}»"));
     }
@@ -1787,6 +1791,12 @@ mod tests_definiciones {
         assert!(validar_definicion(&defs, &nueva("Cordura")).is_ok());
         assert!(validar_definicion(&defs, &nueva("  ")).is_err());
         assert!(validar_definicion(&defs, &nueva(" vida ")).is_err(), "repetido sin mirar mayúsculas ni espacios");
+        // Se escriben en el chat como `@nombre` hasta el siguiente operador: no pueden llevar ninguno
+        for malo in ["Bono+1", "Daño-fuego", "A*B", "X<Y", "Z>1", "Igual=", "Tiro vs magia", "VS"] {
+            assert!(validar_definicion(&defs, &nueva(malo)).is_err(), "{malo}");
+        }
+        assert!(validar_definicion(&defs, &nueva("Rango del arco")).is_ok(), "espacios, sí");
+        assert!(validar_definicion(&defs, &nueva("Versus")).is_ok(), "«vs» solo como palabra suelta");
 
         let texto_con_maximo = DefinicionParametro {
             valor_por_defecto: ValorParametro::Texto("x".into()),
