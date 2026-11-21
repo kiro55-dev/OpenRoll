@@ -111,8 +111,9 @@
     const d = plantillaDeFicha;
     plantillaDeFicha = null;
     if (!d) return;
-    // Una ficha NUEVA con los datos de una plantilla que ya es de otra: no hereda la identidad (no habría dos fichas con la misma)
-    if (destino === "nueva") void partida.abrirConPlantilla({ ...d.plantilla, plantilla_id: null, id_ficha: null }, null);
+    // Una ficha NUEVA con los datos de una plantilla que ya era de otra: el archivo pasa a ser de la nueva y la anterior pierde la
+    // referencia (Rust deja la identidad en una sola ficha al guardar), así lo siguiente que se importe va a la que el usuario espera
+    if (destino === "nueva") void partida.abrirConPlantilla({ ...d.plantilla, id_ficha: null }, null);
     else void partida.abrirConPlantilla(d.plantilla, d.ficha);
   }
 

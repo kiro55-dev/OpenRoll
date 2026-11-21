@@ -1439,7 +1439,19 @@ pub fn crear_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<Entida
 
     reservas.remove(&entidad.id);
     registrar(&mut est, &state.almacen, DeltaPartida::EntidadCreada(entidad.clone()));
+    liberar_plantilla_id(&mut est, &state.almacen, entidad.id, entidad.plantilla_id.as_deref());
     Ok(entidad)
+}
+
+/// La identidad de plantilla (`Entidad.plantilla_id`) es de UNA sola ficha: la última que la recibe (un archivo se importó como ficha
+/// nueva, o sobre otra) se queda con ella y la anterior la pierde. Así el archivo apunta siempre a la ficha que el usuario espera.
+fn liberar_plantilla_id(est: &mut EstadoPartida, almacen: &Almacen, conserva: u16, uuid: Option<&str>) {
+    let Some(uuid) = uuid else { return };
+    let otras: Vec<u16> =
+        est.banco_entidades.iter().filter(|e| e.id != conserva && e.plantilla_id.as_deref() == Some(uuid)).map(|e| e.id).collect();
+    for id in otras {
+        registrar(est, almacen, DeltaPartida::EntidadCambiada { id, cambios: vec![crate::tablero_general::cambios_entidad::CambioEntidad::PlantillaId(None)] });
+    }
 }
 
 /// Guarda los cambios de una ficha. El front manda la ficha entera, pero el delta (`EntidadCambiada`) solo
@@ -1473,6 +1485,7 @@ pub fn modificar_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<()
 
     let Some(delta) = delta_de_cambios(&est, &entidad) else { return Ok(()) };
     registrar(&mut est, &state.almacen, delta);
+    liberar_plantilla_id(&mut est, &state.almacen, entidad.id, entidad.plantilla_id.as_deref());
     Ok(())
 }
 
@@ -1878,6 +1891,29 @@ mod tests_partidas {
             e.aplicar_delta(&d);
             assert_eq!(e.instancias_activas.last().unwrap().id_instancia, i);
         }
+    }
+
+    #[test]
+    fn la_identidad_de_plantilla_es_de_una_sola_ficha() {
+        let state = estado_en_a("plantilla_id");
+        ficha_con_instancias(&state);
+        let uuid = "3f2a9c1e-7b64-4d2a-9a51-0c8e2d7f6b13";
+        let con_uuid = |id: u16| {
+            let mut f = state.lock().banco_entidades.iter().find(|e| e.id == id).unwrap().clone();
+            f.plantilla_id = Some(uuid.into());
+            f
+        };
+        let de = |id: u16| state.lock().banco_entidades.iter().find(|e| e.id == id).unwrap().plantilla_id.clone();
+        modificar_entidad_en(con_uuid(1), &state).unwrap();
+        assert_eq!((de(1).as_deref(), de(2)), (Some(uuid), None));
+        // El archivo se importa como ficha NUEVA (la 2): se queda con la identidad y la 1 la pierde, también en sus instancias
+        modificar_entidad_en(con_uuid(2), &state).unwrap();
+        assert_eq!((de(1), de(2).as_deref()), (None, Some(uuid)));
+        assert!(state.lock().instancias_activas.iter().filter(|i| i.base.id == 1).all(|i| i.base.plantilla_id.is_none()));
+        // Una identidad inválida no entra
+        let mut mala = con_uuid(2);
+        mala.plantilla_id = Some("no vale <script>".into());
+        assert!(modificar_entidad_en(mala, &state).is_err());
     }
 
     #[test]

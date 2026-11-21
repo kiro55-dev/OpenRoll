@@ -78,7 +78,7 @@
     <span class="estado" id="estado">Sin cambios</span>
     <button type="button" class="guardar" id="guardar">Guardar</button>
   </header>
-  <p class="ayuda" id="ayuda-guardar">Rellena la ficha (la rueda del ratón sube y baja los números) y pulsa «Guardar». Después arrastra este archivo a OpenRoll (al banco de fichas, o a la ventana de la ficha).</p>
+  <p class="ayuda" id="ayuda-guardar">Ficha exportada desde OpenRoll, después de guardar puede arrastrarlo a OpenRoll para editar su ficha en el programa. AVISO: si necesita crear otro personaje no copie y pegue este archivo si ya contiene un personaje creado, use el original.</p>
   <p class="error" id="error" hidden></p>
 
   <section>
@@ -597,7 +597,6 @@
     } catch (e) { /* no pasa nada: la próxima vez se abrirá donde el navegador recuerde */ }
   }
   let nombreDelManejador = "";
-  let motivoDescarga = ""; // por qué no se pudo guardar en su sitio (si el navegador lo tiene y falló)
   let manejador = null; // Chrome/Edge: el archivo elegido la primera vez, que se sobrescribe después
   /** Chrome/Edge: se elige el archivo la primera vez (el mismo que se tiene abierto) y después se sobrescribe. `false` si este
    *  navegador no puede (entonces se descarga una copia). Cancelar el diálogo lanza `AbortError`. */
@@ -622,7 +621,6 @@
     } catch (err) {
       manejador = null;
       if (err && err.name === "AbortError") throw err;
-      motivoDescarga = err && err.message ? err.message : String(err);
       return false; // sin permiso desde un archivo local, por ejemplo: se descarga
     }
   }
@@ -646,12 +644,7 @@
       if (!DATOS.plantilla_id) DATOS.plantilla_id = uuid();
       await fotoAdmitida();
       const html = documentoGuardado();
-      if (await guardarEnSuSitio(html)) {
-        $("ayuda-guardar").textContent = "Guardado. Arrastra este archivo a OpenRoll cuando quieras.";
-      } else {
-        descargar(html);
-        $("ayuda-guardar").textContent = "Este navegador no deja guardar sobre el archivo abierto" + (motivoDescarga ? " (" + motivoDescarga + ")" : "") + ", así que se ha descargado «" + nombreArchivo() + "» en tu carpeta de descargas (si ya había uno con ese nombre, el navegador le añade un número): ESE es el archivo que tienes que pasar a OpenRoll, y el que tienes que abrir para seguir editando.";
-      }
+      if (!(await guardarEnSuSitio(html))) descargar(html);
       sucio = false;
       $("estado").textContent = "Guardado";
       $("estado").className = "estado ok";
