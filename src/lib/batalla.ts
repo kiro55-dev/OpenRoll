@@ -56,3 +56,27 @@ export function grupoParaEnter(p: {
   const delFoco = p.enFoco === null ? null : grupoDe(batalla, p.enFoco);
   return (delFoco && pasable(delFoco) ? delFoco : batalla.grupos.find(pasable)) ?? null;
 }
+
+/** Una caja de «Fichas activas» en una batalla: un grupo con sus fichas, o (`grupo` null) las que no participan. */
+export interface SeccionBatalla {
+  grupo: GrupoBatalla | null;
+  fichas: Instancia[];
+}
+
+/** Reparte `instancias` (ya en su orden) en las cajas de la batalla: cada grupo con sus miembros y, al final, las que no participan. */
+export function seccionesDeBatalla(batalla: Batalla, instancias: readonly Instancia[]): SeccionBatalla[] {
+  const secciones: SeccionBatalla[] = batalla.grupos.map((g) => ({ grupo: g, fichas: instancias.filter((i) => g.miembros.includes(i.id_instancia)) }));
+  secciones.push({ grupo: null, fichas: instancias.filter((i) => !grupoDe(batalla, i.id_instancia)) });
+  return secciones;
+}
+
+/** Las mismas instancias en el orden en que se ven con las cajas (grupo a grupo y al final las que no participan). Es el orden de
+ *  la lista que se reordena arrastrando: sus posiciones tienen que coincidir con lo que se ve. */
+export function ordenarPorGrupos(instancias: readonly Instancia[], batalla: Batalla): Instancia[] {
+  return seccionesDeBatalla(batalla, instancias).flatMap((s) => s.fichas);
+}
+
+/** ¿Se dibujan cajas? Con varios grupos, o si alguna ficha a la vista no participa; con un solo grupo que las tiene a todas, la lista normal. */
+export function usaCuadros(batalla: Batalla | null | undefined, instancias: readonly Instancia[]): boolean {
+  return !!batalla && (batalla.grupos.length > 1 || instancias.some((i) => !grupoDe(batalla, i.id_instancia)));
+}

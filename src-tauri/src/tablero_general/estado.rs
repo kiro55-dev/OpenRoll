@@ -116,6 +116,8 @@ pub enum DeltaPartida {
     BatallaTerminada { id_mapa: u16 },
     /// Pasa el turno de un grupo (ya resuelto: la instancia que lo tiene ahora y la vuelta en la que va).
     TurnoPasado { id_mapa: u16, id_grupo: u16, turno: u16, ronda: u32 },
+    /// Los grupos de la batalla del mapa cambian (ya resueltos): una ficha que pasa a otro grupo, un grupo nuevo o fusionado...
+    GruposBatallaCambiados { id_mapa: u16, grupos: Vec<GrupoBatalla>, siguiente_id: u16 },
 }
 
 /// Línea de deltas.jsonl al LEER.
@@ -562,6 +564,12 @@ impl EstadoPartida {
                     m.batalla = None;
                 }
             }
+            DeltaPartida::GruposBatallaCambiados { id_mapa, grupos, siguiente_id } => {
+                if let Some(b) = self.mapas.iter_mut().find(|m| m.id == *id_mapa).and_then(|m| m.batalla.as_mut()) {
+                    b.grupos = grupos.clone();
+                    b.siguiente_id = *siguiente_id;
+                }
+            }
             DeltaPartida::TurnoPasado { id_mapa, id_grupo, turno, ronda } => {
                 let grupo = self
                     .mapas
@@ -572,6 +580,8 @@ impl EstadoPartida {
                 if let Some(g) = grupo {
                     g.turno = Some(*turno);
                     g.ronda = *ronda;
+                    // Si le toca a una instancia oculta, se activa (ver `batalla::sanear`)
+                    batalla::activar(self, &[*turno]);
                 }
             }
         }

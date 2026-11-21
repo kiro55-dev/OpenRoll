@@ -83,6 +83,21 @@ describe("accionAlSoltar", () => {
   });
 });
 
+describe("soltar en otra caja de una batalla", () => {
+  const deActivas = { instancia: instancia(1, 1, { x: 0, y: 0 }), desde: "activas" as const };
+
+  it("soltar en otra caja cambia de grupo (con el foco entero) en vez de reordenar", () => {
+    expect(accionAlSoltar(deActivas, "activas", null, [1, 2, 3], 0, false, { destino: 2, origen: 1, ids: [1, 3] })).toEqual({ tipo: "aGrupo", ids: [1, 3], idGrupo: 2 });
+    // «No participa» es la caja 0
+    expect(accionAlSoltar(deActivas, "activas", null, [1, 2, 3], 0, false, { destino: 0, origen: 1, ids: [1] })).toEqual({ tipo: "aGrupo", ids: [1], idGrupo: 0 });
+  });
+
+  it("soltar en su propia caja (o fuera de cualquiera) sigue reordenando", () => {
+    expect(accionAlSoltar(deActivas, "activas", null, [1, 2, 3], 2, false, { destino: 1, origen: 1, ids: [1] })).toEqual({ tipo: "reordenar", ids: [2, 3, 1] });
+    expect(accionAlSoltar(deActivas, "activas", null, [1, 2, 3], 2, false, { destino: null, origen: 1, ids: [1] })).toEqual({ tipo: "reordenar", ids: [2, 3, 1] });
+  });
+});
+
 describe("reordenar «Fichas activas»", () => {
   it("mover un id a otra posición", () => {
     expect(moverEnLista([1, 2, 3, 4], 1, 2)).toEqual([2, 3, 1, 4]);

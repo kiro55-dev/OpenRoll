@@ -11,6 +11,7 @@
 import { partida, reordenarConOcultas, type Destino, type Entidad, type Instancia } from "$lib/partida.svelte";
 import { ladosInstancia, tamanoCuerpo, type Lados } from "$lib/tablero";
 import { esJugador } from "$lib/modo";
+import { grupoDe } from "$lib/batalla";
 
 /**
  * Lo que se arrastra: una ficha del banco, varias (selección con Ctrl) o una instancia (y de dónde se
@@ -32,7 +33,8 @@ export type AccionArrastre =
   | { tipo: "quitarVariasDelTablero"; ids: number[] }
   | { tipo: "borrar"; idInstancia: number }
   | { tipo: "borrarVarias"; ids: number[] }
-  | { tipo: "reordenar"; ids: number[] };
+  | { tipo: "reordenar"; ids: number[] }
+  | { tipo: "aGrupo"; ids: number[]; idGrupo: number };
 
 /** Las instancias que se arrastran juntas (solo una si no hay grupo). */
 export function instanciasArrastradas(origen: OrigenArrastre): Instancia[] {
@@ -68,7 +70,10 @@ export function accionAlSoltar(
   casilla: Destino | null,
   orden: readonly number[] = [],
   indice: number | null = null,
-  oculto = false
+  oculto = false,
+  /** Solo en una batalla con cajas: la caja bajo el cursor (`destino`; 0 = «No participa»), la de la ficha cogida (`origen`) y las
+   *  que se llevan (`ids`). Soltar en otra caja cambia de grupo en vez de reordenar. */
+  cajas: { destino: number | null; origen: number; ids: number[] } | null = null
 ): AccionArrastre | null {
   if ("entidad" in origen) {
     const idEntidad = origen.entidad.id;
@@ -98,6 +103,7 @@ export function accionAlSoltar(
   if (zona !== "activas") return null;
 
   if (origen.desde === "activas") {
+    if (cajas && cajas.destino !== null && cajas.destino !== cajas.origen) return { tipo: "aGrupo", ids: cajas.ids, idGrupo: cajas.destino };
     if (indice === null) return null;
     const ids = moverEnLista(orden, idInstancia, indice);
     return ids.every((id, i) => id === orden[i]) ? null : { tipo: "reordenar", ids };
@@ -146,6 +152,8 @@ export function ejecutarAccion(accion: AccionArrastre) {
       return partida.borrarInstancias(accion.ids);
     case "reordenar":
       return partida.reordenarInstancias(accion.ids);
+    case "aGrupo":
+      return partida.moverAGrupoBatalla(accion.ids, accion.idGrupo);
   }
 }
 
@@ -166,6 +174,10 @@ export interface ArrastreEnCurso {
   agarre: { x: number; y: number } | null;
   /** Se arrastra con el botón derecho desde el banco (solo el host): lo que se suelte nace oculto. */
   oculto: boolean;
+  /** En una batalla con cajas: la caja bajo el cursor (`data-grupo-batalla`; 0 = «No participa»), o null. */
+  grupoBatalla: number | null;
+  /** Una instancia de «Fichas activas» llevada sobre una caja de grupo de la ventana «Empezar batalla» (`data-caja-conf`), o null. */
+  cajaConf: number | null;
 }
 
 type ResolverCasilla = (clientX: number, clientY: number, lados: Lados, agarre: ArrastreEnCurso["agarre"]) => Destino | null;
@@ -252,7 +264,7 @@ class ArrastreFicha {
   // Pone el arrastre en (x, y) (px de la ventana): qué zona hay debajo y, en «Fichas activas», qué posición
   #actualizar(origen: OrigenArrastre, foto: string | null, lados: Lados, agarre: ArrastreEnCurso["agarre"], x: number, y: number, oculto: boolean) {
     const zona = zonaEn(x, y);
-    this.actual = { origen, foto, lados, x, y, zona, indice: zona === "activas" ? indiceEn(x, y) : null, agarre, oculto };
+    this.actual = { origen, foto, lados, x, y, zona, indice: zona === "activas" ? indiceEn(x, y) : null, agarre, oculto, grupoBatalla: zona === "activas" ? grupoBatallaEn(x, y) : null, cajaConf: "instancia" in origen && origen.desde === "activas" ? cajaConfEn(x, y) : null };
   }
 
   // Termina el arrastre en curso: hace lo que toque donde se soltó
@@ -264,13 +276,29 @@ class ArrastreFicha {
     this.#ignorarClic = true;
     setTimeout(() => (this.#ignorarClic = false), 0);
 
+    // Soltada sobre un grupo de la ventana «Empezar batalla»: se asigna (todas las del foco si la cogida está en él); si ya estaba en
+    // otro grupo, se cambia. La ventana escucha este evento.
+    if (a.cajaConf !== null && "instancia" in origen && !esJugador) {
+      const cogida = origen.instancia.id_instancia;
+      const ids = partida.idsSeleccionados.includes(cogida) ? [...partida.idsSeleccionados] : [cogida];
+      window.dispatchEvent(new CustomEvent("batalla-asignar", { detail: { ids, clave: a.cajaConf } }));
+      return;
+    }
     const casilla = a.zona === "tablero" ? (this.#resolverCasilla?.(a.x, a.y, a.lados, a.agarre) ?? null) : null;
     // `indice` es la posición en la lista que se VE (con el filtro de mapa puede faltar alguna): se reordena
     // ahí y luego se pasa al orden completo, que es el que guarda Rust
     const orden = partida.instanciasVisibles.map((i) => i.id_instancia);
-    const accion = accionAlSoltar(origen, a.zona, casilla, orden, a.indice, oculto);
-    // El orden de «Fichas activas» es de todos: lo cambia el host
-    if (esJugador && accion?.tipo === "reordenar") return;
+    // En una batalla con cajas, soltar en otra caja cambia de grupo: se lleva el foco entero si la ficha cogida está en él
+    let cajas: { destino: number | null; origen: number; ids: number[] } | null = null;
+    if (partida.batallaActual && "instancia" in origen && origen.desde === "activas") {
+      const cogida = origen.instancia.id_instancia;
+      const enFoco = partida.idsSeleccionados.includes(cogida);
+      const ids = enFoco ? partida.instanciasVisibles.filter((i) => partida.idsSeleccionados.includes(i.id_instancia)).map((i) => i.id_instancia) : [cogida];
+      cajas = { destino: a.grupoBatalla, origen: grupoDe(partida.batallaActual, cogida)?.id ?? 0, ids };
+    }
+    const accion = accionAlSoltar(origen, a.zona, casilla, orden, a.indice, oculto, cajas);
+    // El orden de «Fichas activas» y los grupos de la batalla son del host
+    if (esJugador && (accion?.tipo === "reordenar" || accion?.tipo === "aGrupo")) return;
     if (accion?.tipo === "reordenar") {
       accion.ids = reordenarConOcultas(partida.instanciasOrdenadas.map((i) => i.id_instancia), accion.ids);
     }
@@ -306,6 +334,18 @@ function zonaEn(x: number, y: number): ZonaDestino | null {
   const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-destino]");
   const zona = el?.dataset.destino;
   return zona === "tablero" || zona === "activas" || zona === "banco" ? zona : null;
+}
+
+/** La caja de grupo de la ventana «Empezar batalla» bajo el cursor (0 = «No participa»), si la hay. */
+function cajaConfEn(x: number, y: number): number | null {
+  const caja = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-caja-conf]");
+  return caja?.dataset.cajaConf === undefined ? null : Number(caja.dataset.cajaConf);
+}
+
+/** La caja de la batalla bajo el cursor (`data-grupo-batalla`; 0 = «No participa»), si la hay. */
+function grupoBatallaEn(x: number, y: number): number | null {
+  const caja = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-grupo-batalla]");
+  return caja?.dataset.grupoBatalla === undefined ? null : Number(caja.dataset.grupoBatalla);
 }
 
 /** Posición en «Fichas activas» (en la lista que se ve) bajo el cursor: la de la tarjeta que hay debajo, o el final. */

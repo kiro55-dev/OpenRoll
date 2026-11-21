@@ -16,7 +16,7 @@ import { desplazarGrupo, encajar, ladosInstancia, rejillaDe } from "$lib/tablero
 import { ajustesVista } from "$lib/ajustesVista.svelte";
 import { esJugador } from "$lib/modo";
 import { tiradas } from "$lib/tiradas.svelte";
-import { grupoParaEnter, tieneElTurno } from "$lib/batalla";
+import { grupoParaEnter, ordenarPorGrupos, tieneElTurno } from "$lib/batalla";
 
 export interface Zona {
   id: number;
@@ -418,11 +418,13 @@ class Partida {
   instanciasOrdenadas = $derived([...this.instancias].sort((a, b) => a.orden - b.orden || a.id_instancia - b.id_instancia));
   /** Las que enseña «Fichas activas»: todas, o con el filtro «Este mapa» (ver `ajustesVista`) solo las puestas
    *  en el tablero del mapa abierto. En un mapa en batalla el filtro es obligatorio (el botón se bloquea). A un jugador solo le llega lo que puede ver, así que el filtro es el mismo. */
-  instanciasVisibles = $derived.by(() =>
-    ajustesVista.soloMapaActual || this.mapaActual?.batalla
-      ? this.instanciasOrdenadas.filter((i) => estaEnMapa(i, this.mapaActual?.id))
-      : this.instanciasOrdenadas
-  );
+  instanciasVisibles = $derived.by(() => {
+    const batalla = this.mapaActual?.batalla;
+    if (!ajustesVista.soloMapaActual && !batalla) return this.instanciasOrdenadas;
+    const delMapa = this.instanciasOrdenadas.filter((i) => estaEnMapa(i, this.mapaActual?.id));
+    // En batalla, en el orden de las cajas (grupo a grupo): así las posiciones de la lista que se reordena coinciden con lo que se ve
+    return batalla ? ordenarPorGrupos(delMapa, batalla) : delMapa;
+  });
 
   /** Fichas con el foco (varias con Ctrl, como en el banco). Solo se guardan los ids: se actualizan solas al recargar
    *  las instancias y desaparecen si Rust las elimina (p. ej. al borrar su zona). */
@@ -903,6 +905,41 @@ class Partida {
     if (this.mapaActual && actual) this.mapaActual.batalla = actual.batalla ?? null;
   }
 
+  /** Una acción sobre los grupos de la batalla del mapa abierto (solo el host); después se vuelve a leer la batalla. */
+  async #grupoBatalla(cmd: string, args: Record<string, unknown>) {
+    const idMapa = this.mapaActual?.id;
+    if (idMapa === undefined || esJugador) return;
+    try {
+      await invoke(cmd, { idMapa, ...args });
+    } catch (err) {
+      this.avisar(String(err));
+    } finally {
+      await this.recargarBatallas();
+    }
+  }
+
+  /** Pasa estas instancias a un grupo (`0` = «No participa»). */
+  moverAGrupoBatalla(ids: number[], idGrupo: number) {
+    return this.#grupoBatalla("mover_a_grupo_batalla", { ids, idGrupo });
+  }
+
+  /** Mete el grupo `origen` entero en `destino` (que conserva su turno y su contador). */
+  fusionarGruposBatalla(origen: number, destino: number) {
+    return this.#grupoBatalla("fusionar_grupos_batalla", { origen, destino });
+  }
+
+  crearGrupoBatalla() {
+    return this.#grupoBatalla("crear_grupo_batalla", { nombre: null });
+  }
+
+  renombrarGrupoBatalla(idGrupo: number, nombre: string) {
+    return this.#grupoBatalla("renombrar_grupo_batalla", { idGrupo, nombre });
+  }
+
+  borrarGrupoBatalla(idGrupo: number) {
+    return this.#grupoBatalla("borrar_grupo_batalla", { idGrupo });
+  }
+
   /** ¿Tiene esta instancia el turno? */
   tieneElTurno(instancia: Instancia): boolean {
     return tieneElTurno(this.batallaActual, instancia.id_instancia);
@@ -911,7 +948,7 @@ class Partida {
   /** ¿Puede quien mira pasar el turno de este grupo? (el host, siempre; un jugador, si la ficha que lo tiene es suya) */
   puedePasarTurno(grupo: GrupoBatalla): boolean {
     const i = this.instancias.find((x) => x.id_instancia === grupo.turno);
-    return !!i && !i.oculto && this.controla(i);
+    return !!i && (!esJugador || (!i.oculto && this.controla(i)));
   }
 
   /** Pasa el turno del grupo al siguiente (Rust vuelve a comprobar quién puede). */
@@ -933,7 +970,7 @@ class Partida {
       esJugador,
       controla: (id) => {
         const i = this.instancias.find((x) => x.id_instancia === id);
-        return !!i && !i.oculto && this.controla(i);
+        return !!i && (!esJugador || (!i.oculto && this.controla(i)));
       },
       enFoco: this.instanciaSeleccionada?.id_instancia ?? null
     });

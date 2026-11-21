@@ -1,7 +1,7 @@
 // El modo batalla en el front (src/lib/batalla.ts): lo mismo que calcula batalla.rs, para pintar el turno y decidir el Enter.
 import { describe, expect, it } from "vitest";
 import type { Batalla, GrupoBatalla, Instancia } from "$lib/partida.svelte";
-import { esComandoBatalla, grupoDe, grupoParaEnter, ordenDeTurno, siguienteTurno, tieneElTurno } from "$lib/batalla";
+import { esComandoBatalla, grupoDe, grupoParaEnter, ordenarPorGrupos, ordenDeTurno, seccionesDeBatalla, siguienteTurno, tieneElTurno, usaCuadros } from "$lib/batalla";
 
 const inst = (id: number, orden: number) => ({ id_instancia: id, orden }) as unknown as Instancia;
 const grupo = (id: number, miembros: number[], turno: number | null, ronda = 1): GrupoBatalla => ({ id, nombre: `G${id}`, miembros, turno, ronda });
@@ -63,5 +63,23 @@ describe("qué grupo avanza con Enter", () => {
   it("sin batalla o sin grupos pasables no hace nada", () => {
     expect(grupoParaEnter({ batalla: null, esJugador: false, controla: todas, enFoco: null })).toBeNull();
     expect(grupoParaEnter({ batalla: { grupos: [grupo(1, [], null)], siguiente_id: 2 }, esJugador: false, controla: todas, enFoco: null })).toBeNull();
+  });
+});
+
+describe("las cajas de la batalla", () => {
+  const b: Batalla = { grupos: [grupo(1, [3, 1], 3), grupo(2, [4], 4)], siguiente_id: 3 };
+
+  it("cada grupo con sus fichas en su orden y, al final, las que no participan", () => {
+    const secciones = seccionesDeBatalla(b, instancias);
+    expect(secciones.map((s) => [s.grupo?.id ?? 0, s.fichas.map((f) => f.id_instancia)])).toEqual([[1, [1, 3]], [2, [4]], [0, [2]]]);
+    expect(ordenarPorGrupos(instancias, b).map((i) => i.id_instancia)).toEqual([1, 3, 4, 2]);
+  });
+
+  it("solo hay cajas con varios grupos o con fichas que no participan", () => {
+    expect(usaCuadros(b, instancias)).toBe(true);
+    const uno: Batalla = { grupos: [grupo(1, [1, 2, 3, 4], 1)], siguiente_id: 2 };
+    expect(usaCuadros(uno, instancias)).toBe(false);
+    expect(usaCuadros({ grupos: [grupo(1, [1, 2], 1)], siguiente_id: 2 }, instancias)).toBe(true); // la 3 y la 4 no participan
+    expect(usaCuadros(null, instancias)).toBe(false);
   });
 });

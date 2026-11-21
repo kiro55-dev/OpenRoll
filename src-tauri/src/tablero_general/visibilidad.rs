@@ -91,11 +91,28 @@ pub fn mapa_visible(est: &EstadoPartida) -> Option<u16> {
 }
 
 /// Los mapas que recibe `jugador`: el host todos; un jugador los compartidos (la casilla de cada mapa).
-pub fn mapas_para(jugador: IdJugador, mapas: &[Mapa]) -> Vec<Mapa> {
+pub fn mapas_para(jugador: IdJugador, mapas: &[Mapa], instancias: &[Instancia]) -> Vec<Mapa> {
     if jugador == ID_HOST {
         return mapas.to_vec();
     }
-    mapas.iter().filter(|m| m.compartido).cloned().collect()
+    let oculta = |id: u16| instancias.iter().any(|i| i.id_instancia == id && i.oculto);
+    mapas
+        .iter()
+        .filter(|m| m.compartido)
+        .map(|m| {
+            let mut m = m.clone();
+            // Una oculta puede estar en un grupo de la batalla (la mete el host), pero a los jugadores no les llega nada de ella
+            if let Some(b) = m.batalla.as_mut() {
+                for g in b.grupos.iter_mut() {
+                    g.miembros.retain(|id| !oculta(*id));
+                    if g.turno.is_some_and(oculta) {
+                        g.turno = None;
+                    }
+                }
+            }
+            m
+        })
+        .collect()
 }
 
 /// Las zonas que recibe `jugador`: el host todas; un jugador solo las que tienen algún mapa compartido (para
@@ -295,7 +312,7 @@ mod tests {
     #[test]
     fn un_jugador_recibe_los_mapas_compartidos_y_solo_sus_zonas() {
         let mapas = vec![mapa(1, 1, "imagenes/a.png", false), mapa(2, 1, "imagenes/b.png", true), mapa(3, 2, "imagenes/c.png", true)];
-        let ids = |j| mapas_para(j, &mapas).iter().map(|m| m.id).collect::<Vec<_>>();
+        let ids = |j| mapas_para(j, &mapas, &[]).iter().map(|m| m.id).collect::<Vec<_>>();
         assert_eq!(ids(ID_HOST), vec![1, 2, 3]);
         assert_eq!(ids(4), vec![2, 3]);
 

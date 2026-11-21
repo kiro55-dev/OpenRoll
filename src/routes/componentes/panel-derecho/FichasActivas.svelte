@@ -18,6 +18,8 @@
   import { miniaturas } from "$lib/miniaturas.svelte";
   import { visorImagen } from "$lib/visorImagen.svelte";
   import { tiradas } from "$lib/tiradas.svelte";
+  import { grupoDe, seccionesDeBatalla, usaCuadros } from "$lib/batalla";
+  import { arrastreGrupoBatalla } from "$lib/arrastreGrupoBatalla.svelte";
   import MenuContextual from "../comunes/MenuContextual.svelte";
   import VentanaBatalla from "./VentanaBatalla.svelte";
 
@@ -46,6 +48,9 @@
   const visuales = $derived.by(() => {
     const lista = partida.instanciasVisibles;
     if (idArrastrada === null || arrastre.actual?.indice == null) return lista;
+    // En una batalla con cajas, llevarla sobre OTRA caja no la reordena (la cambiará de grupo al soltarla)
+    const caja = arrastre.actual.grupoBatalla;
+    if (partida.batallaActual && caja != null && caja !== (grupoDe(partida.batallaActual, idArrastrada)?.id ?? 0)) return lista;
     const ids = moverEnLista(lista.map((i) => i.id_instancia), idArrastrada, arrastre.actual.indice);
     return ids.map((id) => lista.find((i) => i.id_instancia === id)!);
   });
@@ -55,6 +60,22 @@
   // Batalla: en un mapa en batalla el filtro «Este mapa» es obligatorio, y el host puede empezarla o terminarla desde aquí
   const batalla = $derived(partida.batallaActual);
   let ventanaBatalla = $state(false);
+  // Con varios grupos (o fichas que no participan) la lista se parte en cajas, una por grupo y una última «No participa»
+  const cuadros = $derived(usaCuadros(batalla, visuales));
+  const secciones = $derived(batalla && cuadros ? seccionesDeBatalla(batalla, visuales) : []);
+  /** El grupo que se está renombrando (doble clic en su nombre). */
+  let renombrando = $state<{ id: number; texto: string } | null>(null);
+
+  function confirmarRenombrar() {
+    const r = renombrando;
+    renombrando = null; // antes de esperar: el blur que provoca quitar el campo no vuelve a entrar
+    if (r && r.texto.trim()) void partida.renombrarGrupoBatalla(r.id, r.texto);
+  }
+
+  function enfocar(el: HTMLInputElement) {
+    el.focus();
+    el.select();
+  }
 
   function dondeEsta(i: Instancia): string {
     if (typeof i.coordenadas !== "object" || i.id_mapa === null) return "Sin colocar";
@@ -120,7 +141,17 @@
   </button>
   </div>
 </div>
-{#if batalla}
+{#if batalla && !esJugador}
+  <div class="barra-grupos" data-conserva-foco>
+    <button
+      type="button"
+      class="filtro batalla"
+      title={ayuda("Un grupo nuevo, vacío, con su propio turno y su contador de vueltas. Arrastra fichas (o un grupo entero) a él")}
+      onclick={() => void partida.crearGrupoBatalla()}
+    >+ Grupo</button>
+  </div>
+{/if}
+{#if batalla && !cuadros}
   <!-- Un renglón por grupo: la vuelta en la que va y, si la ficha que tiene el turno es tuya, pasarlo -->
   <div class="franja-batalla" data-conserva-foco>
     {#each batalla.grupos as g (g.id)}
@@ -146,7 +177,7 @@
   role="list"
   onpointerdown={alPulsarFondo}
 >
-  {#each visuales as ficha, i (ficha.id_instancia)}
+  {#snippet tarjeta(ficha: Instancia, i: number)}
     {@const forma = FORMA_TIPO[ficha.base.tipo] ?? "cuadrado"}
     <button
       type="button"
@@ -241,9 +272,68 @@
         </div>
       {/if}
 
-      
-    </button>
-  {/each}
+          </button>
+  {/snippet}
+
+  {#if cuadros}
+    {#each secciones as sec (sec.grupo?.id ?? 0)}
+      {@const g = sec.grupo}
+      {@const id = g?.id ?? 0}
+      <div
+        class="cuadro"
+        class:fuera={!g}
+        class:sobre={arrastre.actual?.grupoBatalla === id || arrastreGrupoBatalla.actual?.sobre === id}
+        class:fantasma={arrastreGrupoBatalla.actual?.id === id}
+        data-grupo-batalla={id}
+      >
+        {#if g}
+          <!-- La cabecera arrastra el grupo entero sobre otro (el host) -->
+          <div class="cab-cuadro" role="presentation" onpointerdown={(e) => arrastreGrupoBatalla.preparar(e, g)}>
+            {#if !esJugador}<span class="asa-cuadro">⋮⋮</span>{/if}
+            {#if renombrando?.id === g.id}
+              <input
+                class="renombrar-cuadro"
+                maxlength="30"
+                aria-label="Nombre del grupo"
+                bind:value={renombrando.texto}
+                use:enfocar
+                onkeydown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") confirmarRenombrar();
+                  else if (e.key === "Escape") renombrando = null;
+                }}
+                onblur={confirmarRenombrar}
+              />
+            {:else}
+              <span
+                class="nombre-cuadro"
+                role="presentation"
+                title={ayuda(esJugador ? undefined : "Doble clic: cambiar el nombre. Arrastra la cabecera sobre otro grupo para meterlo en él")}
+                ondblclick={() => !esJugador && (renombrando = { id: g.id, texto: g.nombre })}
+              >⚔ {g.nombre} · Turno {g.ronda}</span>
+            {/if}
+            {#if partida.puedePasarTurno(g)}
+              <button type="button" class="pasar-turno" title={ayuda("Pasa el turno a la ficha siguiente de este grupo (atajo: Enter sin tener nada en foco)")} onclick={() => void partida.pasarTurno(g.id)}>Pasar turno ›</button>
+            {/if}
+            {#if !esJugador && batalla && batalla.grupos.length > 1}
+              <button type="button" class="quitar-cuadro" aria-label="Borrar el grupo" title={ayuda("Borra el grupo: sus fichas dejan de participar")} onclick={() => void partida.borrarGrupoBatalla(g.id)}>✕</button>
+            {/if}
+          </div>
+        {:else}
+          <div class="cab-cuadro fuera-cab"><span class="nombre-cuadro">No participa</span></div>
+        {/if}
+        {#each sec.fichas as ficha (ficha.id_instancia)}
+          {@render tarjeta(ficha, visuales.indexOf(ficha))}
+        {:else}
+          <span class="vacio-cuadro">{g ? "Arrastra aquí las fichas de este grupo" : "Las fichas que no participan están aquí"}</span>
+        {/each}
+      </div>
+    {/each}
+  {:else}
+    {#each visuales as ficha, i (ficha.id_instancia)}
+      {@render tarjeta(ficha, i)}
+    {/each}
+  {/if}
 
   {#if partida.instancias.length === 0}
     <span class="vacio">Arrastra aquí o al tablero una ficha del banco</span>
@@ -251,6 +341,10 @@
     <span class="vacio">Ninguna ficha puesta en este mapa</span>
   {/if}
 </div>
+
+{#if arrastreGrupoBatalla.actual}
+  <div class="grupo-flotante" style="left: {arrastreGrupoBatalla.actual.x + 12}px; top: {arrastreGrupoBatalla.actual.y + 12}px;">⚔ {arrastreGrupoBatalla.actual.nombre}</div>
+{/if}
 
 {#if ventanaBatalla && !esJugador}
   <VentanaBatalla onCerrar={() => (ventanaBatalla = false)} />
@@ -300,6 +394,31 @@
   }
   .pasar-turno:hover { background: #3b82f6; }
   /* La ficha con el turno: relleno azulado y la barra ancha a su derecha (sin remarcar el borde) */
+  /* Las cajas de la batalla: un recuadro por grupo que engloba a sus fichas y otro, discontinuo, para las que no participan */
+  .barra-grupos { display: flex; justify-content: flex-end; margin-bottom: 3px; }
+  .cuadro {
+    display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;
+    padding: 4px; border-radius: 6px; border: 1px solid #1e3a8a; background: rgba(59, 130, 246, 0.05);
+  }
+  .cuadro.fuera { border-style: dashed; border-color: #3f3f46; background: rgba(255, 255, 255, 0.02); }
+  .cuadro.sobre { border-color: #60a5fa; background: rgba(96, 165, 250, 0.14); }
+  .cuadro.fantasma { opacity: 0.4; }
+  .cab-cuadro { display: flex; align-items: center; gap: 6px; padding: 1px 2px; cursor: grab; }
+  .cab-cuadro.fuera-cab { cursor: default; }
+  .asa-cuadro { color: #52525b; font-size: 11px; }
+  .nombre-cuadro { flex: 1; font-size: 11px; font-weight: bold; color: #93c5fd; user-select: none; }
+  .fuera-cab .nombre-cuadro { color: #71717a; }
+  .renombrar-cuadro {
+    flex: 1; min-width: 0; padding: 1px 4px; border-radius: 3px; font-size: 11px;
+    background: #09090b; border: 1px solid #3b82f6; color: white;
+  }
+  .quitar-cuadro { background: none; border: none; color: #71717a; cursor: pointer; font-size: 11px; padding: 0 2px; }
+  .quitar-cuadro:hover { color: #f87171; }
+  .vacio-cuadro { color: #52525b; font-size: 10px; text-align: center; padding: 6px 0; }
+  .grupo-flotante {
+    position: fixed; z-index: 9999; pointer-events: none; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;
+    background: #1e3a8a; color: #dbeafe; border: 1px solid #3b82f6; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.6);
+  }
   .tarjeta.turno { background: rgba(59, 130, 246, 0.14); box-shadow: inset -4px 0 0 #3b82f6; }
   .filtro.activo { background: #27272a; color: #ffffff; border-color: #3f3f46; font-weight: bold; }
   .scroll-fichas {

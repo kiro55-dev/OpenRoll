@@ -16,6 +16,7 @@ use crate::tablero_general::modelos::{IdJugador, ID_HOST};
 use crate::tablero_general::modelos::{Batalla, GrupoBatalla};
 use crate::tablero_general::partida::{registrar, registrar_tirada_en, AppState};
 use crate::tablero_general::variables;
+use serde::Deserialize;
 
 /// Nombre del grupo único de una batalla empezada con el comando.
 pub const NOMBRE_GRUPO_UNICO: &str = "Batalla";
@@ -112,13 +113,16 @@ pub fn pasar_turno_en(state: &AppState, jugador: IdJugador, id_mapa: u16, id_gru
 // Saneado (se aplica dentro de `aplicar_delta`, así el log siempre da lo mismo)
 // ------------------------------------------------------------------
 
-/// Deja cada batalla coherente con las instancias: un miembro que ya no existe, ya no está en ese mapa o está oculto sale; si tenía
-/// el turno, pasa al siguiente (sin sumar vuelta). Un grupo sin miembros se queda sin turno.
+/// Deja cada batalla coherente con las instancias: un miembro que ya no existe o ya no está en ese mapa sale; si tenía el turno, pasa
+/// al siguiente (sin sumar vuelta). Un grupo sin miembros se queda sin turno. Una instancia OCULTA no entra sola en la batalla, pero
+/// el host puede meterla en un grupo y seguirá en él; cuando le llegue el turno (o se lo encuentre por quedarse el grupo sin
+/// titular) se activa: deja de estar oculta.
 pub fn sanear(est: &mut EstadoPartida) {
+    let mut reveladas: Vec<u16> = Vec::new();
     for m in 0..est.mapas.len() {
         let Some(batalla) = est.mapas[m].batalla.clone() else { continue };
         let id_mapa = est.mapas[m].id;
-        let vale = |est: &EstadoPartida, id: u16| est.instancias_activas.iter().any(|i| i.id_instancia == id && i.id_mapa == Some(id_mapa) && !i.oculto);
+        let vale = |est: &EstadoPartida, id: u16| est.instancias_activas.iter().any(|i| i.id_instancia == id && i.id_mapa == Some(id_mapa));
         let mut ya_en_un_grupo: Vec<u16> = Vec::new();
         let mut nueva = batalla.clone();
         for g in nueva.grupos.iter_mut() {
@@ -148,10 +152,21 @@ pub fn sanear(est: &mut EstadoPartida) {
             if g.turno.is_none() {
                 g.turno = orden_de_turno(est, g).first().copied();
             }
+            if g.turno != antes.turno {
+                reveladas.extend(g.turno); // el turno llegó a alguien nuevo: si estaba oculto, se activa
+            }
         }
         if nueva != batalla {
             est.mapas[m].batalla = Some(nueva);
         }
+    }
+    activar(est, &reveladas);
+}
+
+/// Las instancias que ya tienen el turno dejan de estar ocultas (aparecen para los jugadores).
+pub fn activar(est: &mut EstadoPartida, ids: &[u16]) {
+    for i in est.instancias_activas.iter_mut().filter(|i| i.oculto && ids.contains(&i.id_instancia)) {
+        i.oculto = false;
     }
 }
 
@@ -190,46 +205,115 @@ fn valor_de_termino(est: &EstadoPartida, id_instancia: u16, texto: &str) -> Resu
     Ok((nombre.clone(), variables::resultado(&est.definiciones_variables, &inst.base.parametros, &inst.base.variables, def)))
 }
 
-/// Los ids de todas las instancias en su orden, con los `participantes` repartidos por los mismos huecos pero ordenados como
-/// `nuevo_orden` (el resto no se mueve de sitio).
-fn orden_completo(est: &EstadoPartida, participantes: &[u16], nuevo_orden: &[u16]) -> Vec<u16> {
+/// Los ids de todas las instancias en su orden (el de «Fichas activas»).
+fn ids_en_orden(est: &EstadoPartida) -> Vec<u16> {
     let mut todas: Vec<(u16, u16)> = est.instancias_activas.iter().map(|i| (i.orden, i.id_instancia)).collect();
     todas.sort_unstable();
-    let mut ids: Vec<u16> = todas.into_iter().map(|(_, id)| id).collect();
+    todas.into_iter().map(|(_, id)| id).collect()
+}
+
+/// Reparte los huecos que ocupaban los `miembros` en `ids` entre esos mismos miembros, ya en el orden `nuevo_orden` (el resto de
+/// las instancias no se mueve de sitio).
+fn recolocar(ids: &mut [u16], miembros: &[u16], nuevo_orden: &[u16]) {
     let mut nuevos = nuevo_orden.iter();
     for id in ids.iter_mut() {
-        if participantes.contains(id) {
+        if miembros.contains(id) {
             if let Some(n) = nuevos.next() {
                 *id = *n;
             }
         }
     }
-    ids
 }
 
-/// `Batalla [tirada]` en el mapa que tiene abierto el host. `comando` es lo escrito (para el historial) y `tirada` lo que sigue a
-/// la palabra. Devuelve la línea que se ve en el chat.
+/// Un grupo que pide la ventana de «Empezar batalla» (solo ahí se organizan los grupos: nunca por el chat).
+#[derive(Debug, Clone, Deserialize)]
+pub struct GrupoInicial {
+    pub nombre: String,
+    pub miembros: Vec<u16>,
+}
+
+pub const MAX_GRUPOS_BATALLA: usize = 10;
+pub const MAX_NOMBRE_GRUPO_BATALLA: usize = 30;
+
+/// Un nombre de grupo: 1-30 caracteres sin control ni invisibles, y distinto (sin mirar mayúsculas) de los `otros`.
+pub fn validar_nombre_grupo(nombre: &str, otros: &[String]) -> Result<String, String> {
+    let n = nombre.split_whitespace().collect::<Vec<_>>().join(" ");
+    if n.is_empty() {
+        return Err("El grupo necesita un nombre".into());
+    }
+    if n.chars().count() > MAX_NOMBRE_GRUPO_BATALLA {
+        return Err(format!("El nombre del grupo no puede pasar de {MAX_NOMBRE_GRUPO_BATALLA} caracteres"));
+    }
+    if n.chars().any(|c| c.is_control() || crate::tablero_general::jugadores::caracter_enganoso(c)) {
+        return Err("El nombre del grupo tiene caracteres no permitidos".into());
+    }
+    if otros.iter().any(|o| o.trim().to_lowercase() == n.to_lowercase()) {
+        return Err(format!("Ya hay un grupo que se llama «{n}»"));
+    }
+    Ok(n)
+}
+
+/// `Batalla [tirada]` en el mapa que tiene abierto el host (un solo grupo con todos). `comando` es lo escrito (para el historial) y
+/// `tirada` lo que sigue a la palabra. Devuelve la línea que se ve en el chat.
 pub fn empezar_en(state: &AppState, comando: &str, tirada: &str) -> Result<String, String> {
+    empezar_con_grupos(state, comando, tirada, None)
+}
+
+/// Como `empezar_en`, y con `grupos` (de la ventana) la batalla se reparte en ellos: cada uno con su turno y su contador, y cada
+/// uno se ordena por su cuenta con la tirada. Las fichas que no estén en ningún grupo no participan. El chat solo recibe la orden.
+pub fn empezar_con_grupos(state: &AppState, comando: &str, tirada: &str, grupos: Option<Vec<GrupoInicial>>) -> Result<String, String> {
     let mut est = state.lock();
     let id_mapa = est.mapa_del_host.abierto.ok_or("Abre primero el mapa donde será la batalla")?;
     if est.mapas.iter().find(|m| m.id == id_mapa).ok_or("Ese mapa no existe")?.batalla.is_some() {
         return Err("Ese mapa ya está en batalla: termínala antes con «Terminar»".into());
     }
-    // Participan las instancias del mapa que no están ocultas, en su orden
-    let mut participantes: Vec<(u16, u16)> = est
-        .instancias_activas
+    // Las que pueden participar: las del mapa que no están ocultas, en su orden
+    let en_orden = ids_en_orden(&est);
+    let a_la_vista: Vec<u16> = en_orden
         .iter()
-        .filter(|i| i.id_mapa == Some(id_mapa) && !i.oculto)
-        .map(|i| (i.orden, i.id_instancia))
+        .copied()
+        .filter(|id| est.instancias_activas.iter().any(|i| i.id_instancia == *id && i.id_mapa == Some(id_mapa) && !i.oculto))
         .collect();
-    participantes.sort_unstable();
-    let participantes: Vec<u16> = participantes.into_iter().map(|(_, id)| id).collect();
+    // Los grupos pedidos (o uno solo con todas)
+    let pedidos: Vec<(String, Vec<u16>)> = match grupos {
+        None => vec![(NOMBRE_GRUPO_UNICO.to_string(), a_la_vista.clone())],
+        Some(gs) => {
+            if gs.is_empty() || gs.len() > MAX_GRUPOS_BATALLA {
+                return Err(format!("Una batalla lleva de 1 a {MAX_GRUPOS_BATALLA} grupos"));
+            }
+            let mut nombres: Vec<String> = Vec::new();
+            let mut vistos: Vec<u16> = Vec::new();
+            let mut out = Vec::new();
+            for g in gs {
+                let nombre = validar_nombre_grupo(&g.nombre, &nombres)?;
+                nombres.push(nombre.clone());
+                for id in &g.miembros {
+                    if !a_la_vista.contains(id) {
+                        return Err("Una de las fichas del grupo ya no está a la vista en este mapa".into());
+                    }
+                    if vistos.contains(id) {
+                        return Err("Una ficha no puede estar en dos grupos".into());
+                    }
+                    vistos.push(*id);
+                }
+                // Dentro de cada grupo, en el orden de «Fichas activas»
+                let mut miembros = g.miembros;
+                miembros.sort_by_key(|id| en_orden.iter().position(|x| x == id));
+                out.push((nombre, miembros));
+            }
+            out
+        }
+    };
+    let participantes: Vec<u16> = pedidos.iter().flat_map(|(_, m)| m.iter().copied()).collect();
     if participantes.is_empty() {
         return Err("No hay fichas a la vista en este mapa".into());
     }
 
-    let mut orden = participantes.clone();
-    let mut resumen = String::new();
+    // La tirada de cada ficha (si la hay) y, con ella, el orden de cada grupo: de mayor a menor, en un empate como estaban
+    let nombre_de = |est: &EstadoPartida, id: u16| est.instancias_activas.iter().find(|i| i.id_instancia == id).map(|i| i.base.nombre.clone()).unwrap_or_default();
+    let mut grupos_ordenados: Vec<(String, Vec<u16>)> = pedidos.clone();
+    let mut resumen: Vec<String> = Vec::new();
+    let mut ids_nuevo_orden = en_orden.clone();
     if !tirada.trim().is_empty() {
         if dividir_comparacion(tirada)?.1.is_some() {
             return Err("La tirada de iniciativa no admite comparaciones".into());
@@ -239,41 +323,143 @@ pub fn empezar_en(state: &AppState, comando: &str, tirada: &str) -> Result<Strin
             let mut resolver = |texto: &str| valor_de_termino(&est, id, texto);
             totales.push((id, tirar_lado(&parsear_comando(tirada, &mut resolver)?)?.total));
         }
-        // De mayor a menor; en un empate se respeta el orden en que ya estaban (el sort es estable)
-        totales.sort_by(|a, b| b.1.cmp(&a.1));
-        orden = totales.iter().map(|(id, _)| *id).collect();
-        let nombre = |id: u16| est.instancias_activas.iter().find(|i| i.id_instancia == id).map(|i| i.base.nombre.clone()).unwrap_or_default();
-        resumen = totales.iter().map(|(id, t)| format!("{} {}", nombre(*id), t)).collect::<Vec<_>>().join(" · ");
+        let total_de = |id: u16| totales.iter().find(|(i, _)| *i == id).map_or(0, |(_, t)| *t);
+        for (_, miembros) in grupos_ordenados.iter_mut() {
+            let antes = miembros.clone();
+            miembros.sort_by(|a, b| total_de(*b).cmp(&total_de(*a))); // estable: el empate respeta el orden anterior
+            recolocar(&mut ids_nuevo_orden, &antes, miembros);
+            resumen.extend(miembros.iter().map(|id| format!("{} {}", nombre_de(&est, *id), total_de(*id))));
+        }
+    } else {
+        resumen = participantes.iter().map(|id| nombre_de(&est, *id)).collect();
     }
 
-    let completo = orden_completo(&est, &participantes, &orden);
     let batalla = Batalla {
-        grupos: vec![GrupoBatalla {
-            id: 1,
-            nombre: NOMBRE_GRUPO_UNICO.into(),
-            miembros: orden.clone(),
-            turno: orden.first().copied(),
-            ronda: 1,
-        }],
-        siguiente_id: 2,
+        siguiente_id: grupos_ordenados.len() as u16 + 1,
+        grupos: grupos_ordenados
+            .into_iter()
+            .enumerate()
+            .map(|(i, (nombre, miembros))| GrupoBatalla { id: i as u16 + 1, nombre, turno: miembros.first().copied(), miembros, ronda: 1 })
+            .collect(),
     };
     if !tirada.trim().is_empty() {
-        registrar(&mut est, &state.almacen, DeltaPartida::InstanciasReordenadas(completo));
+        registrar(&mut est, &state.almacen, DeltaPartida::InstanciasReordenadas(ids_nuevo_orden));
     }
     registrar(&mut est, &state.almacen, DeltaPartida::BatallaIniciada { id_mapa, batalla });
     // En el chat sale el comando equivalente tal cual (`Batalla 1d20 + velocidad`) y, entre paréntesis, el resultado: las fichas (con su tirada si la hubo)
-    if resumen.is_empty() {
-        resumen = participantes
-            .iter()
-            .map(|id| est.instancias_activas.iter().find(|i| i.id_instancia == *id).map(|i| i.base.nombre.clone()).unwrap_or_default())
-            .collect::<Vec<_>>()
-            .join(" · ");
-    }
-    let linea = format!("{comando} ({resumen})");
+    let linea = format!("{comando} ({})", resumen.join(" · "));
     registrar_tirada_en(&mut est, &state.almacen, ID_HOST, &linea, participantes.len() as i32, true, None, true);
     drop(est);
     state.almacen.anadir_historial(comando);
     Ok(linea)
+}
+
+// ------------------------------------------------------------------
+// Grupos (solo el host, desde «Fichas activas»; nunca por el chat)
+// ------------------------------------------------------------------
+
+/// Cambia los grupos de la batalla del mapa con `cambio` (que recibe una copia) y lo registra entero. `cambio` devuelve error si lo
+/// pedido no vale.
+fn cambiar_grupos(state: &AppState, id_mapa: u16, cambio: impl FnOnce(&EstadoPartida, &mut Batalla) -> Result<(), String>) -> Result<(), String> {
+    let mut est = state.lock();
+    let mut batalla = batalla_de(&est, id_mapa)?.clone();
+    cambio(&est, &mut batalla)?;
+    if batalla == *batalla_de(&est, id_mapa)? {
+        return Ok(());
+    }
+    registrar(&mut est, &state.almacen, DeltaPartida::GruposBatallaCambiados { id_mapa, grupos: batalla.grupos, siguiente_id: batalla.siguiente_id });
+    Ok(())
+}
+
+/// Un grupo nuevo, vacío. Sin nombre (`None`) es «Grupo N».
+pub fn crear_grupo_en(state: &AppState, id_mapa: u16, nombre: Option<String>) -> Result<(), String> {
+    cambiar_grupos(state, id_mapa, |_, b| {
+        if b.grupos.len() >= MAX_GRUPOS_BATALLA {
+            return Err(format!("No puede haber más de {MAX_GRUPOS_BATALLA} grupos"));
+        }
+        let nombres: Vec<String> = b.grupos.iter().map(|g| g.nombre.clone()).collect();
+        let nombre = match nombre.filter(|n| !n.trim().is_empty()) {
+            Some(n) => validar_nombre_grupo(&n, &nombres)?,
+            None => {
+                let mut n = b.grupos.len() + 1;
+                while nombres.iter().any(|x| x.to_lowercase() == format!("grupo {n}")) {
+                    n += 1;
+                }
+                format!("Grupo {n}")
+            }
+        };
+        let id = b.siguiente_id.max(b.grupos.iter().map(|g| g.id).max().unwrap_or(0) + 1);
+        b.grupos.push(GrupoBatalla { id, nombre, miembros: vec![], turno: None, ronda: 1 });
+        b.siguiente_id = id + 1;
+        Ok(())
+    })
+}
+
+pub fn renombrar_grupo_en(state: &AppState, id_mapa: u16, id_grupo: u16, nombre: &str) -> Result<(), String> {
+    cambiar_grupos(state, id_mapa, |_, b| {
+        let otros: Vec<String> = b.grupos.iter().filter(|g| g.id != id_grupo).map(|g| g.nombre.clone()).collect();
+        let g = b.grupos.iter_mut().find(|g| g.id == id_grupo).ok_or("Ese grupo ya no existe")?;
+        g.nombre = validar_nombre_grupo(nombre, &otros)?;
+        Ok(())
+    })
+}
+
+/// Borra un grupo: sus fichas dejan de participar. La batalla se queda siempre con al menos un grupo (para acabarla está «Terminar»).
+pub fn borrar_grupo_en(state: &AppState, id_mapa: u16, id_grupo: u16) -> Result<(), String> {
+    cambiar_grupos(state, id_mapa, |_, b| {
+        if b.grupos.len() <= 1 {
+            return Err("La batalla necesita al menos un grupo".into());
+        }
+        let antes = b.grupos.len();
+        b.grupos.retain(|g| g.id != id_grupo);
+        if b.grupos.len() == antes {
+            return Err("Ese grupo ya no existe".into());
+        }
+        Ok(())
+    })
+}
+
+/// Pasa instancias a un grupo (`id_grupo` 0 = «No participa»). Solo valen las que están en el mapa de la batalla (también las ocultas). El grupo
+/// que las recibe conserva SU turno; si el que tenía el turno se va, pasa al siguiente (lo hace `sanear`).
+pub fn mover_a_grupo_en(state: &AppState, id_mapa: u16, ids: &[u16], id_grupo: u16) -> Result<(), String> {
+    if ids.len() > 200 {
+        return Err("Demasiadas fichas a la vez".into());
+    }
+    cambiar_grupos(state, id_mapa, |est, b| {
+        if (1..ids.len()).any(|i| ids[..i].contains(&ids[i])) {
+            return Err("Una ficha no puede ir dos veces".into());
+        }
+        for id in ids {
+            // Una oculta sí puede ir a un grupo (el host la arrastra): se activará cuando le toque el turno
+            if !est.instancias_activas.iter().any(|i| i.id_instancia == *id && i.id_mapa == Some(id_mapa)) {
+                return Err("Una de las fichas no está en este mapa".into());
+            }
+        }
+        if id_grupo != 0 && !b.grupos.iter().any(|g| g.id == id_grupo) {
+            return Err("Ese grupo ya no existe".into());
+        }
+        for g in b.grupos.iter_mut() {
+            g.miembros.retain(|m| !ids.contains(m));
+        }
+        if let Some(g) = b.grupos.iter_mut().find(|g| g.id == id_grupo) {
+            g.miembros.extend(ids.iter().copied());
+        }
+        Ok(())
+    })
+}
+
+/// Mete el grupo `origen` entero en `destino`: sus fichas pasan a él (que conserva su turno y su contador) y `origen` desaparece.
+pub fn fusionar_grupos_en(state: &AppState, id_mapa: u16, origen: u16, destino: u16) -> Result<(), String> {
+    cambiar_grupos(state, id_mapa, |_, b| {
+        if origen == destino {
+            return Ok(());
+        }
+        let desde = b.grupos.iter().find(|g| g.id == origen).ok_or("Ese grupo ya no existe")?.miembros.clone();
+        let a = b.grupos.iter_mut().find(|g| g.id == destino).ok_or("Ese grupo ya no existe")?;
+        a.miembros.extend(desde);
+        b.grupos.retain(|g| g.id != origen);
+        Ok(())
+    })
 }
 
 /// `Terminar`: acaba la batalla del mapa abierto (todos sus grupos) y se vuelve al modo normal.
@@ -302,12 +488,39 @@ pub fn ejecutar_comando(state: &AppState, jugador: IdJugador, comando: &str, ord
     }
 }
 
+/// Empieza la batalla desde la ventana: el comando equivalente (`Batalla 1d20 + des`) y, si se organizó por grupos, el reparto (que
+/// no pasa por el chat).
 #[tauri::command]
-pub fn empezar_batalla(comando: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+pub fn empezar_batalla(comando: String, grupos: Option<Vec<GrupoInicial>>, state: tauri::State<'_, AppState>) -> Result<String, String> {
     match interpretar_comando(&comando) {
-        Some(o @ ComandoBatalla::Empezar(_)) => ejecutar_comando(&state, ID_HOST, &comando, o),
+        Some(ComandoBatalla::Empezar(tirada)) => empezar_con_grupos(&state, comando.trim(), &tirada, grupos),
         _ => Err("No es la orden de empezar una batalla".into()),
     }
+}
+
+#[tauri::command]
+pub fn crear_grupo_batalla(id_mapa: u16, nombre: Option<String>, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    crear_grupo_en(&state, id_mapa, nombre)
+}
+
+#[tauri::command]
+pub fn renombrar_grupo_batalla(id_mapa: u16, id_grupo: u16, nombre: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    renombrar_grupo_en(&state, id_mapa, id_grupo, &nombre)
+}
+
+#[tauri::command]
+pub fn borrar_grupo_batalla(id_mapa: u16, id_grupo: u16, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    borrar_grupo_en(&state, id_mapa, id_grupo)
+}
+
+#[tauri::command]
+pub fn mover_a_grupo_batalla(id_mapa: u16, ids: Vec<u16>, id_grupo: u16, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    mover_a_grupo_en(&state, id_mapa, &ids, id_grupo)
+}
+
+#[tauri::command]
+pub fn fusionar_grupos_batalla(id_mapa: u16, origen: u16, destino: u16, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    fusionar_grupos_en(&state, id_mapa, origen, destino)
 }
 
 #[tauri::command]
@@ -414,14 +627,16 @@ mod tests {
         e.aplicar_delta(&DeltaPartida::InstanciaModificada(i2));
         assert_eq!(grupo(&e).miembros, vec![1, 3]);
         assert_eq!((grupo(&e).turno, grupo(&e).ronda), (Some(3), 1));
-        // La 3 se oculta: se queda la 1 (la siguiente en la lista da la vuelta)
+        // Una oculta SE QUEDA en el grupo (el host puede meterla); solo se activa cuando le llega el turno
         let mut i3 = e.instancias_activas[2].clone();
         i3.oculto = true;
         e.aplicar_delta(&DeltaPartida::InstanciaModificada(i3));
-        assert_eq!(grupo(&e).miembros, vec![1]);
-        assert_eq!(grupo(&e).turno, Some(1));
-        // La 1 se borra: el grupo se queda sin nadie ni turno
+        assert_eq!(grupo(&e).miembros, vec![1, 3]);
+        // La 1 se borra: el turno (que era de la 3, oculta) se queda donde estaba
         e.aplicar_delta(&DeltaPartida::InstanciaBorrada(1));
+        assert_eq!(grupo(&e).miembros, vec![3]);
+        // La 3 se borra: el grupo se queda sin nadie ni turno
+        e.aplicar_delta(&DeltaPartida::InstanciaBorrada(3));
         assert!(grupo(&e).miembros.is_empty());
         assert_eq!(grupo(&e).turno, None);
     }
@@ -467,11 +682,13 @@ mod tests {
     }
 
     #[test]
-    fn el_orden_completo_reparte_los_huecos_de_los_participantes() {
-        let e = estado(&[], None);
+    fn recolocar_reparte_los_huecos_de_los_miembros() {
         // Participan 1, 3 y 4 (la 2 no): salen 4, 1, 3 por los huecos de 1, 3 y 4
-        assert_eq!(orden_completo(&e, &[1, 3, 4], &[4, 1, 3]), vec![4, 2, 1, 3]);
+        let mut ids = vec![1u16, 2, 3, 4];
+        recolocar(&mut ids, &[1, 3, 4], &[4, 1, 3]);
+        assert_eq!(ids, vec![4, 2, 1, 3]);
     }
+
     // ---- Empezar y terminar con un estado de verdad ----
 
     use crate::tablero_general::almacen::{pruebas::dir_temporal, Almacen};
@@ -580,5 +797,142 @@ mod tests {
         assert_eq!(linea, "Terminar (Batalla terminada en 2 turnos)");
         assert!(s.lock().mapas[0].batalla.is_none());
         assert!(ejecutar_comando(&s, ID_HOST, "Terminar ya", ComandoBatalla::Terminar("ya".into())).is_err());
+    }
+    // ---- Grupos (fase 2) ----
+
+    fn gi(nombre: &str, miembros: &[u16]) -> GrupoInicial {
+        GrupoInicial { nombre: nombre.into(), miembros: miembros.to_vec() }
+    }
+
+    fn grupos_de(state: &AppState) -> Vec<(u16, Vec<u16>, Option<u16>, u32)> {
+        state.lock().mapas[0].batalla.as_ref().unwrap().grupos.iter().map(|g| (g.id, g.miembros.clone(), g.turno, g.ronda)).collect()
+    }
+
+    #[test]
+    fn empezar_por_grupos_cada_uno_con_su_turno_y_lo_que_no_esta_en_ninguno_no_participa() {
+        let s = partida("batalla_grupos");
+        // Participan la 1 y la 2 (Héroes) y la 4 (Orcos); no hay quien se quede fuera salvo la oculta y la de otro mapa
+        let linea = empezar_con_grupos(&s, "Batalla", "", Some(vec![gi("Héroes", &[2, 1]), gi("Orcos", &[4])])).unwrap();
+        assert_eq!(linea, "Batalla (F1 · F2 · F4)", "los grupos no salen en el chat");
+        assert_eq!(grupos_de(&s), vec![(1, vec![1, 2], Some(1), 1), (2, vec![4], Some(4), 1)]);
+        // Una ficha que no entra en ningún grupo no participa
+        let s = partida("batalla_grupos_fuera");
+        empezar_con_grupos(&s, "Batalla", "", Some(vec![gi("Solo", &[2])])).unwrap();
+        assert_eq!(grupos_de(&s), vec![(1, vec![2], Some(2), 1)]);
+    }
+
+    #[test]
+    fn cada_grupo_se_ordena_por_su_cuenta_con_la_tirada() {
+        use crate::tablero_general::variables::pruebas::var;
+        let s = partida("batalla_grupos_tirada");
+        {
+            let mut est = s.lock();
+            est.definiciones_variables = vec![var(1, "Destreza", "des", 0, 1)];
+            for i in est.instancias_activas.iter_mut() {
+                i.base.variables = vec![ValorVariable { id_definicion: 1, valor: 10 - i.id_instancia as i16, opcionales: vec![], eleccion: 0, parametros_marcados: vec![] }];
+            }
+        }
+        // Des = 10 - id: la 1 tiene 9, la 2 tiene 8, la 4 tiene 6. En «A» (1, 4) y en «B» (2): A queda 1, 4 y B queda 2
+        let linea = empezar_con_grupos(&s, "Batalla 1d1 + des", "1d1 + des", Some(vec![gi("A", &[4, 1]), gi("B", &[2])])).unwrap();
+        assert_eq!(linea, "Batalla 1d1 + des (F1 10 · F4 7 · F2 9)");
+        assert_eq!(grupos_de(&s), vec![(1, vec![1, 4], Some(1), 1), (2, vec![2], Some(2), 1)]);
+    }
+
+    #[test]
+    fn los_grupos_pedidos_se_validan() {
+        let s = partida("batalla_grupos_validar");
+        assert!(empezar_con_grupos(&s, "Batalla", "", Some(vec![])).is_err());
+        assert!(empezar_con_grupos(&s, "Batalla", "", Some(vec![gi("A", &[1]), gi("a", &[2])])).is_err(), "nombre repetido");
+        assert!(empezar_con_grupos(&s, "Batalla", "", Some(vec![gi("A", &[1]), gi("B", &[1])])).is_err(), "en dos grupos");
+        assert!(empezar_con_grupos(&s, "Batalla", "", Some(vec![gi("A", &[3])])).is_err(), "una oculta no participa");
+        assert!(empezar_con_grupos(&s, "Batalla", "", Some(vec![gi("A", &[5])])).is_err(), "una de otro mapa");
+        assert!(empezar_con_grupos(&s, "Batalla", "", Some(vec![gi("A", &[])])).is_err(), "sin nadie");
+        assert!(empezar_con_grupos(&s, "Batalla", "", Some(vec![gi("  ", &[1])])).is_err(), "sin nombre");
+        assert!(s.lock().mapas[0].batalla.is_none(), "un error no deja nada a medias");
+    }
+
+    #[test]
+    fn mover_entre_grupos_y_hacia_no_participa() {
+        let s = partida("batalla_mover");
+        empezar_en(&s, "Batalla", "").unwrap(); // un grupo con 1, 2 y 4; turno de la 1
+        assert!(crear_grupo_en(&s, 1, Some("Batalla".into())).is_err(), "nombre repetido");
+        crear_grupo_en(&s, 1, None).unwrap();
+        assert_eq!(s.lock().mapas[0].batalla.as_ref().unwrap().grupos[1].nombre, "Grupo 2");
+        // La 4 pasa al grupo nuevo: tiene su propio turno (ella) y el primero sigue como estaba
+        mover_a_grupo_en(&s, 1, &[4], 2).unwrap();
+        assert_eq!(grupos_de(&s), vec![(1, vec![1, 2], Some(1), 1), (2, vec![4], Some(4), 1)]);
+        // La que tiene el turno en el primero deja de participar: el turno pasa a la siguiente, misma vuelta
+        mover_a_grupo_en(&s, 1, &[1], 0).unwrap();
+        assert_eq!(grupos_de(&s), vec![(1, vec![2], Some(2), 1), (2, vec![4], Some(4), 1)]);
+        // Una de otro mapa o un grupo que no existe, no (una oculta sí vale: se activa cuando le toca)
+        assert!(mover_a_grupo_en(&s, 1, &[5], 1).is_err(), "una de otro mapa");
+        assert!(mover_a_grupo_en(&s, 1, &[2], 9).is_err());
+        assert!(mover_a_grupo_en(&s, 1, &[2, 2], 2).is_err());
+        // Volver a participar: entra con la que tenía el turno intacto
+        mover_a_grupo_en(&s, 1, &[1], 1).unwrap();
+        assert_eq!(grupos_de(&s)[0], (1, vec![2, 1], Some(2), 1));
+    }
+
+    #[test]
+    fn fusionar_conserva_el_turno_y_la_vuelta_del_destino() {
+        let s = partida("batalla_fusionar");
+        empezar_con_grupos(&s, "Batalla", "", Some(vec![gi("A", &[1, 2]), gi("B", &[4])])).unwrap();
+        pasar_turno_en(&s, ID_HOST, 1, 1).unwrap(); // A: turno de la 2
+        pasar_turno_en(&s, ID_HOST, 1, 1).unwrap(); // A: vuelta 2, turno de la 1
+        pasar_turno_en(&s, ID_HOST, 1, 1).unwrap(); // A: turno de la 2
+        assert_eq!(grupos_de(&s)[0], (1, vec![1, 2], Some(2), 2));
+        // B entra en A: A sigue con su turno y su vuelta, no el de la recién llegada
+        fusionar_grupos_en(&s, 1, 2, 1).unwrap();
+        assert_eq!(grupos_de(&s), vec![(1, vec![1, 2, 4], Some(2), 2)]);
+        assert!(fusionar_grupos_en(&s, 1, 2, 1).is_err(), "ya no existe");
+        // Cada grupo lleva su contador aparte: pasar el turno de uno no toca al otro
+        let s = partida("batalla_contadores");
+        empezar_con_grupos(&s, "Batalla", "", Some(vec![gi("A", &[1]), gi("B", &[2, 4])])).unwrap();
+        pasar_turno_en(&s, ID_HOST, 1, 1).unwrap();
+        assert_eq!(grupos_de(&s), vec![(1, vec![1], Some(1), 2), (2, vec![2, 4], Some(2), 1)]);
+    }
+
+    #[test]
+    fn borrar_un_grupo_deja_a_sus_fichas_sin_participar_y_no_se_borra_el_ultimo() {
+        let s = partida("batalla_borrar_grupo");
+        empezar_con_grupos(&s, "Batalla", "", Some(vec![gi("A", &[1]), gi("B", &[2])])).unwrap();
+        borrar_grupo_en(&s, 1, 2).unwrap();
+        assert_eq!(grupos_de(&s), vec![(1, vec![1], Some(1), 1)]);
+        assert!(borrar_grupo_en(&s, 1, 1).is_err(), "el último, no");
+        assert!(borrar_grupo_en(&s, 1, 7).is_err());
+        renombrar_grupo_en(&s, 1, 1, "  Los   buenos ").unwrap();
+        assert_eq!(s.lock().mapas[0].batalla.as_ref().unwrap().grupos[0].nombre, "Los buenos");
+        assert!(renombrar_grupo_en(&s, 1, 1, "").is_err());
+    }
+    #[test]
+    fn una_oculta_metida_en_un_grupo_se_activa_cuando_le_toca() {
+        let s = partida("batalla_oculta");
+        empezar_en(&s, "Batalla", "").unwrap(); // participan la 1, la 2 y la 4; la 3 está oculta y no entra
+        assert_eq!(miembros(&s), vec![1, 2, 4]);
+        // El host la mete en el grupo: se queda oculta mientras no le toque
+        mover_a_grupo_en(&s, 1, &[3], 1).unwrap();
+        assert_eq!(miembros(&s), vec![1, 2, 4, 3]);
+        assert!(s.lock().instancias_activas.iter().find(|i| i.id_instancia == 3).unwrap().oculto);
+        // Se pasa el turno hasta ella (el orden de turnos es el de «Fichas activas»: 1, 2, 3, 4)
+        pasar_turno_en(&s, ID_HOST, 1, 1).unwrap(); // 2
+        assert!(s.lock().instancias_activas.iter().find(|i| i.id_instancia == 3).unwrap().oculto);
+        pasar_turno_en(&s, ID_HOST, 1, 1).unwrap(); // 3: se activa
+        let est = s.lock();
+        assert_eq!(est.mapas[0].batalla.as_ref().unwrap().grupos[0].turno, Some(3));
+        assert!(!est.instancias_activas.iter().find(|i| i.id_instancia == 3).unwrap().oculto, "ya no está oculta");
+    }
+
+    #[test]
+    fn un_jugador_no_recibe_las_ocultas_de_la_batalla() {
+        use crate::tablero_general::visibilidad::mapas_para;
+        let mut e = estado(&[1, 2, 3], Some(3));
+        e.instancias_activas[2].oculto = true; // la 3, que además tiene el turno
+        e.mapas[0].compartido = true;
+        let vista = mapas_para(7, &e.mapas, &e.instancias_activas);
+        let g = &vista[0].batalla.as_ref().unwrap().grupos[0];
+        assert_eq!(g.miembros, vec![1, 2]);
+        assert_eq!(g.turno, None);
+        // El host lo ve todo
+        assert_eq!(mapas_para(ID_HOST, &e.mapas, &e.instancias_activas)[0].batalla.as_ref().unwrap().grupos[0].miembros, vec![1, 2, 3]);
     }
 }

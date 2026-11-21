@@ -90,7 +90,7 @@ impl Cambios {
 
 /// La vista de `jugador` con la partida tal como está.
 pub fn vista_para(jugador: IdJugador, est: &EstadoPartida) -> VistaJugador {
-    let mapas = visibilidad::mapas_para(jugador, &est.mapas);
+    let mapas = visibilidad::mapas_para(jugador, &est.mapas, &est.instancias_activas);
     let zonas = visibilidad::zonas_para(jugador, &est.zonas, &est.mapas);
     let compartidos: Vec<u16> = mapas.iter().map(|m| m.id).collect();
     let instancias = visibilidad::instancias_para(jugador, &est.instancias_activas, &compartidos, &est.definiciones_parametros);
