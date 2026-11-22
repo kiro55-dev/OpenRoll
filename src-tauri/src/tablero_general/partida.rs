@@ -1498,8 +1498,16 @@ pub fn modificar_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<()
     variables::recalcular_parametros(&est.definiciones_parametros, &est.definiciones_variables, &mut entidad);
     // Los pasos de − / + son de Rust (los cambia `poner_paso_valor`): se conservan los guardados
     entidad.pasos_valor = est.banco_entidades.iter().find(|e| e.id == entidad.id).map(|e| e.pasos_valor.clone()).unwrap_or_default();
-    // Una ficha única: los valores actuales que no manda el front (acaba de hacerse única) son los de su instancia, si la tiene
-    let de_instancia = est.instancias_activas.iter().find(|i| i.base.id == entidad.id).map(|i| i.valores_actuales.clone()).unwrap_or_default();
+    // Una ficha única: los valores actuales que NO manda el front se conservan como están ahora: los de su instancia, si la tiene, o los
+    // guardados en la ficha. La ventana de la ficha solo manda los que el usuario cambió en ella, así guardar nunca devuelve la vida a lo
+    // que había cuando se abrió (la pudo cambiar la rueda, una tirada arrastrada o el dueño mientras tanto). Si acaba de hacerse única,
+    // sin instancia, empiezan en el máximo.
+    let de_instancia = est
+        .instancias_activas
+        .iter()
+        .find(|i| i.base.id == entidad.id)
+        .map(|i| i.valores_actuales.clone())
+        .unwrap_or_else(|| guardada.actuales.clone());
     instancias::normalizar_actuales(&est.definiciones_parametros, &mut entidad, &de_instancia);
     validar_entidad(&est, &state.almacen.dir(), &entidad)?;
 
@@ -1936,6 +1944,38 @@ mod tests_partidas {
         assert!(archivos::guardar_texto(&dir, adj.clone(), &"é".repeat(archivos::MAX_CARACTERES_TEXTO)).is_ok());
         let e = archivos::guardar_texto(&dir, adj, &"é".repeat(archivos::MAX_CARACTERES_TEXTO + 1)).unwrap_err();
         assert!(e.contains("100000"), "{e}");
+    }
+
+    #[test]
+    fn guardar_una_ficha_unica_sin_mandar_sus_valores_actuales_no_los_devuelve_atras() {
+        let state = estado_en_a("actuales_no_se_pisan");
+        ficha_con_instancias(&state);
+        let mut f = state.lock().banco_entidades.iter().find(|e| e.id == 2).unwrap().clone();
+        f.es_unico = true;
+        f.actuales = vec![];
+        modificar_entidad_en(f, &state).unwrap();
+        let id_instancia = state.lock().instancias_activas.iter().find(|i| i.base.id == 2).unwrap().id_instancia;
+        let vida = |s: &AppState| s.lock().instancias_activas.iter().find(|i| i.id_instancia == id_instancia).unwrap().valores_actuales[0].valor;
+        // La ventana se abre con la vida a 10; mientras está abierta, la rueda la baja a 4
+        let mut ventana = state.lock().banco_entidades.iter().find(|e| e.id == 2).unwrap().clone();
+        modificar_valor_actual_en(id_instancia, ID_VIDA, -6, &state).unwrap();
+        // Se guarda la ventana cambiando solo el nombre: como la vida no se tocó en ella, no la manda y se queda en 4
+        ventana.nombre = "Otro nombre".into();
+        ventana.actuales = vec![];
+        modificar_entidad_en(ventana.clone(), &state).unwrap();
+        assert_eq!(vida(&state), 4);
+        let en_ficha = |s: &AppState| s.lock().banco_entidades.iter().find(|e| e.id == 2).unwrap().actuales[0].valor;
+        assert_eq!(en_ficha(&state), 4);
+        // Si se cambia en la ventana, sí se manda y llega a la instancia
+        ventana.actuales = vec![ValorActual { id_definicion: ID_VIDA, valor: 7 }];
+        modificar_entidad_en(ventana.clone(), &state).unwrap();
+        assert_eq!(vida(&state), 7);
+        // Sin instancia también se conserva lo guardado en la ficha (no vuelve al máximo)
+        borrar_instancia_en(id_instancia, &state).unwrap();
+        ventana.actuales = vec![];
+        ventana.nombre = "Tercer nombre".into();
+        modificar_entidad_en(ventana, &state).unwrap();
+        assert_eq!(en_ficha(&state), 7);
     }
 
     #[test]

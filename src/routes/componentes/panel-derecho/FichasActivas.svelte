@@ -310,7 +310,7 @@
                 role="presentation"
                 title={ayuda(esJugador ? undefined : "Doble clic: cambiar el nombre. Arrastra la cabecera sobre otro grupo para meterlo en él")}
                 ondblclick={() => !esJugador && (renombrando = { id: g.id, texto: g.nombre })}
-              >⚔ {g.nombre} · Turno {g.ronda}</span>
+              >{g.nombre} · Turno {g.ronda}</span>
             {/if}
             {#if partida.puedePasarTurno(g)}
               <button type="button" class="pasar-turno" title={ayuda("Pasa el turno a la ficha siguiente de este grupo (atajo: Enter sin tener nada en foco)")} onclick={() => void partida.pasarTurno(g.id)}>Pasar turno ›</button>

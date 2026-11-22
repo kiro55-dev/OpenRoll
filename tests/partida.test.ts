@@ -956,6 +956,17 @@ describe("fichas: selección y vida", () => {
     expect(partida.listasRangos).toEqual([]);
   });
 
+  it("fichaActual: la ficha del banco y, si es única y tiene instancia, con los valores actuales de esa instancia", async () => {
+    const partida = await nuevoStore();
+    backend.banco[0] = { ...backend.banco[0], es_unico: true, actuales: [{ id_definicion: 1, valor: 18 }] } as any;
+    await partida.recargarEntidades();
+    // La instancia 1 (de la ficha 1) tiene la vida a 10: eso es lo que vale ahora, no lo que guardaba la ficha del banco
+    expect(partida.fichaActual(1)?.actuales).toEqual([{ id_definicion: 1, valor: 10 }]);
+    // Una ficha que no es única se devuelve tal cual, y una que no existe da null
+    expect(partida.fichaActual(2)?.nombre).toBe("Lobo");
+    expect(partida.fichaActual(99)).toBeNull();
+  });
+
   it("instanciar oculto manda `oculto` a Rust, y ocultar o mostrar una instancia se ve al momento y se confirma al releer", async () => {
     const partida = await nuevoStore();
     await partida.instanciar(1, { id_mapa: 1, casilla: { x: 3, y: 4 } }, true);

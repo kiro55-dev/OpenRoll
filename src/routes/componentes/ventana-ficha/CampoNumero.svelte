@@ -1,5 +1,6 @@
 <!-- src/routes/componentes/ventana-ficha/CampoNumero.svelte -->
-<!-- Campo numérico que también se ajusta con la rueda del ratón al pasar por encima. -->
+<!-- Campo numérico que también se ajusta con la rueda del ratón, pero SOLO cuando tiene el foco (has hecho clic dentro): así, hacer scroll por
+     la ventana pasando por encima de los campos no cambia ningún valor sin querer. -->
 <script lang="ts">
   import { ayuda } from "$lib/ajustesVista.svelte";
   let {
@@ -11,7 +12,7 @@
     estrecho = false,
     ancho = 0,
     soloLectura = false,
-    titulo = "Rueda del ratón para subir/bajar"
+    titulo = "Haz clic en el campo y usa la rueda del ratón para subir/bajar"
   }: {
     value: number;
     etiqueta?: string;
@@ -28,6 +29,8 @@
   } = $props();
 
   function alRueda(e: WheelEvent) {
+    // Sin el foco, la rueda hace scroll como en el resto de la ventana
+    if (document.activeElement !== e.currentTarget) return;
     e.preventDefault();
     if (soloLectura) return;
     const paso = e.deltaY < 0 ? 1 : -1;

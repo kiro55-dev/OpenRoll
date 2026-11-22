@@ -51,6 +51,10 @@ async function nuevoEditor(e = entidad(), esBorrador = false) {
     definiciones: structuredClone(DEFINICIONES),
     conjuntos: { activo: 0, guardados: [] },
     instancias: [] as any[],
+    /** Lo que hay «fuera» de la ventana (en Rust): `fichaActual` lo devuelve. */
+    fuera: null as any,
+    fichaActual: vi.fn((id: number) => (partidaFalsa.fuera?.id === id ? structuredClone(partidaFalsa.fuera) : null)),
+    guardarValoresPendientes: vi.fn(async () => {}),
     entidadEnEdicion: e,
     avisar: vi.fn(),
     guardarEntidad: vi.fn(async () => true),
@@ -189,6 +193,41 @@ describe("guardar, cancelar y borrar", () => {
     await ed.borrar();
     expect(partidaFalsa.borrarEntidad).toHaveBeenCalledOnce();
     expect(llamadasA("descartar_archivos_borrador")).toEqual([{ rutas: [DIR + "Documento_1.txt"] }]);
+  });
+});
+
+describe("cambios de fuera con la ventana abierta", () => {
+  it("lo que cambia fuera llega a la ventana sin pisar lo que el usuario ha tocado, y al guardar solo se manda la vida tocada", async () => {
+    const ed = await nuevoEditor(entidad({ es_unico: true, actuales: [{ id_definicion: 1, valor: 18 }] }));
+    // Fuera (en Rust): la rueda le baja la vida a 9 y alguien le cambia el cuerpo
+    partidaFalsa.fuera = { ...structuredClone(ed.entidad), actuales: [{ id_definicion: 1, valor: 9 }], cuerpo: { Grande: [2, 2] } };
+    ed.entidad.nombre = "Orco jefe"; // lo que toca el usuario
+    ed.sincronizar(partidaFalsa.fuera);
+    expect(ed.entidad.nombre).toBe("Orco jefe");
+    expect(ed.entidad.actuales).toEqual([{ id_definicion: 1, valor: 9 }]);
+    expect(ed.cuerpoX).toBe(2);
+
+    // Guardar: antes se recoge lo último de fuera; la vida no se tocó aquí, así que no se manda (Rust conserva la de la instancia)
+    partidaFalsa.fuera = { ...partidaFalsa.fuera, actuales: [{ id_definicion: 1, valor: 7 }] };
+    expect(await ed.guardar()).toBe(true);
+    expect(partidaFalsa.guardarValoresPendientes).toHaveBeenCalled();
+    const enviada = partidaFalsa.guardarEntidad.mock.calls[0][0];
+    expect(enviada.nombre).toBe("Orco jefe");
+    expect(enviada.cuerpo).toEqual({ Grande: [2, 2] });
+    expect(enviada.actuales).toEqual([]);
+  });
+
+  it("si el usuario cambia la vida en la ventana, esa sí se manda", async () => {
+    const ed = await nuevoEditor(entidad({ es_unico: true, actuales: [{ id_definicion: 1, valor: 18 }] }));
+    ed.ponerActual(1, 5);
+    expect(await ed.guardar()).toBe(true);
+    expect(partidaFalsa.guardarEntidad.mock.calls[0][0].actuales).toEqual([{ id_definicion: 1, valor: 5 }]);
+  });
+
+  it("una ficha nueva (borrador) no se sincroniza con nada", async () => {
+    const ed = await nuevoEditor(entidad({ nombre: "Nueva" }), true);
+    ed.sincronizar({ ...structuredClone(ed.entidad), nombre: "Otra" });
+    expect(ed.entidad.nombre).toBe("Nueva");
   });
 });
 

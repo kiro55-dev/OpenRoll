@@ -1774,6 +1774,18 @@ class Partida {
     this.errorEditor = "";
   }
 
+  /**
+   * La ficha `id` tal como está ahora fuera de la ventana (lo último leído de Rust): la del banco y, si es única y tiene instancia, con
+   * los valores actuales de esa instancia (los que cambian la rueda, − / + y las tiradas arrastradas; Rust los mantiene iguales).
+   */
+  fichaActual(id: number): Entidad | null {
+    const ficha = this.banco.find((e) => e.id === id);
+    if (!ficha) return null;
+    const instancia = ficha.es_unico ? this.instancias.find((i) => i.base.id === id) : undefined;
+    if (!instancia) return ficha;
+    return { ...ficha, actuales: instancia.valores_actuales.map((v) => ({ id_definicion: v.id_definicion, valor: v.valor })) };
+  }
+
   /** Guarda la ficha. Devuelve true si Rust la aceptó; si no, deja el motivo en `errorEditor`. */
   async guardarEntidad(entidad: Entidad): Promise<boolean> {
     this.errorEditor = "";

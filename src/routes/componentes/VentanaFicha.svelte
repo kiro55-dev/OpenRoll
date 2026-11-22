@@ -8,7 +8,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { partida, type Entidad } from "$lib/partida.svelte";
   import { EditorFicha } from "$lib/editorFicha.svelte";
   import { esImagen } from "$lib/imagenes";
@@ -127,6 +127,13 @@
     }
   }
 
+  // Lo que cambie FUERA de la ventana mientras está abierta (la vida con la rueda, el jugador dueño que edita su ficha...) llega a ella:
+  // lo que el usuario no ha tocado aquí sigue a lo de fuera, y al guardar no se pisa nada ajeno (ver `EditorFicha.sincronizar`)
+  $effect(() => {
+    const fuera = partida.fichaActual(editor.entidad.id);
+    if (fuera) untrack(() => editor.sincronizar(fuera));
+  });
+
   onMount(() => {
     ventana?.focus(); // para que Enter/Escape funcionen sin tocar la ventana con el ratón
     editor.abrirPestana(0);
@@ -204,14 +211,14 @@
 
       <span class="et">Cuerpo</span>
       <div class="celda ancha">
-        <CampoNumero bind:value={editor.cuerpoX} min={1} max={255} ancho={36} titulo="Ancho en casillas (rueda del ratón para ajustar)" />
+        <CampoNumero bind:value={editor.cuerpoX} min={1} max={255} ancho={36} titulo="Ancho en casillas (clic en el campo y rueda del ratón para ajustar)" />
         <span class="separador-x">×</span>
-        <CampoNumero bind:value={editor.cuerpoY} min={1} max={255} ancho={36} sufijo="casillas" titulo="Alto en casillas (rueda del ratón para ajustar)" />
+        <CampoNumero bind:value={editor.cuerpoY} min={1} max={255} ancho={36} sufijo="casillas" titulo="Alto en casillas (clic en el campo y rueda del ratón para ajustar)" />
       </div>
 
       <span class="et">Visión nocturna</span>
       <div class="celda ancha">
-        <CampoNumero bind:value={ficha.vision} min={0} max={10000} ancho={45} sufijo="m" titulo="Cuánto ve la ficha en la oscuridad, en metros (por ahora no hace nada; rueda del ratón para ajustar)" />
+        <CampoNumero bind:value={ficha.vision} min={0} max={10000} ancho={45} sufijo="m" titulo="Cuánto ve la ficha en la oscuridad, en metros (por ahora no hace nada; clic en el campo y rueda del ratón para ajustar)" />
       </div>
 
       <!-- Los parámetros de la partida, uno por fila y en su orden -->
@@ -225,7 +232,7 @@
                 ancho={45}
                 min={-16000}
                 max={16000}
-                titulo="Valor actual (puede pasar del máximo: vida extra; rueda del ratón para subir/bajar)"
+                titulo="Valor actual (puede pasar del máximo: vida extra; clic en el campo y rueda del ratón para subir/bajar)"
                 bind:value={() => editor.actual(d.id), (v) => editor.ponerActual(d.id, v)}
               />
               <span class="separador-x" title={ayuda("actual / máximo")}>/</span>
@@ -234,7 +241,7 @@
               ancho={45}
               sufijo={d.unidad ?? ""}
               soloLectura={editor.esCalculado(d.id)}
-              titulo={editor.descripcionCalculo(d.id) ?? "Rueda del ratón para subir/bajar"}
+              titulo={editor.descripcionCalculo(d.id) ?? "Haz clic en el campo y usa la rueda del ratón para subir/bajar"}
               bind:value={() => editor.numero(d.id), (v) => editor.ponerNumero(d.id, v)}
             />
             {#if d.visibilidad === "Variable"}
@@ -314,7 +321,7 @@
                         <CampoNumero
                           min={-LIMITE_VALOR_VARIABLE}
                           max={LIMITE_VALOR_VARIABLE}
-                          titulo="Neutro {d.neutro}, escala {d.escala} (rueda del ratón para ajustar)"
+                          titulo="Neutro {d.neutro}, escala {d.escala} (clic en el campo y rueda del ratón para ajustar)"
                           bind:value={() => editor.valorVariable(d.id), (v) => editor.ponerValorVariable(d.id, v)}
                         />
                       </td>

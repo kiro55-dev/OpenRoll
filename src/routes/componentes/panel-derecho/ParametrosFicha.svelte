@@ -54,20 +54,25 @@
     <div class="caja-parametros">
       {#each parametros as p (p.id)}
         {#if p.tieneMaximo}
-          <!-- La rueda también lo cambia; se manda a Rust agrupado (ver partida.cambiarValorActual) -->
+          <!-- La rueda también lo cambia, pero SOLO sobre el número y los botones (no sobre toda la fila): así hacer scroll por la caja
+               no cambia la vida sin querer. Se manda a Rust agrupado (ver partida.cambiarValorActual) -->
           <div
             class="param ancho"
             class:destino-tirada={arrastreTirada.esDestino(ficha.id_instancia, p.id)}
             data-valor="{ficha.id_instancia}:{p.id}"
             role="group"
-            title={ayuda(partida.controla(ficha) ? "Rueda o − / + para cambiarlo" : undefined)}
-            onwheel={(e) => {
-              e.preventDefault();
-              partida.cambiarValorActual(ficha.id_instancia, p.id, e.deltaY < 0 ? 1 : -1);
-            }}
           >
             <span class="label">{p.clave}</span>
-            <div class="control">
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class="control"
+              title={ayuda(partida.controla(ficha) ? "Rueda (con el ratón sobre el número o los botones) o − / + para cambiarlo" : undefined)}
+              onwheel={(e) => {
+                if (!partida.controla(ficha)) return; // sin control, la rueda hace scroll como siempre
+                e.preventDefault();
+                partida.cambiarValorActual(ficha.id_instancia, p.id, e.deltaY < 0 ? 1 : -1);
+              }}
+            >
               {#if editandoPaso?.id === p.id}
                 <!-- Clic derecho en − o +: cuánto suman o restan (se recuerda en este equipo, por parámetro) -->
                 <label class="editar-paso">

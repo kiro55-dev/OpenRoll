@@ -8,6 +8,7 @@
 // renombrado...). Al cancelar se descartan; al guardar se descarta lo que al final no se usó.
 // Rust nunca borra lo que la partida guardada referencia, así que pasarle de más no es peligroso.
 import { invoke } from "$lib/backend";
+import { actualesTocados, fusionarFicha, iguales as fusionIgual } from "$lib/fusionFicha";
 import { LIMITE_VALOR_ACTUAL, partida, type DefinicionParametro, type DefinicionVariable, type Entidad, type GrupoVariables, type Parametro } from "$lib/partida.svelte";
 import { esJugador } from "$lib/modo";
 import {
@@ -136,6 +137,33 @@ export class EditorFicha {
     if (variables.length > 0) entidad.variables = normalizarVariables(variables, entidad.variables);
     // La foto con la que nace un borrador (ficha creada arrastrando una imagen) es de esta sesión
     if (esBorrador && entidad.foto_url) this.#sesion.push(entidad.foto_url);
+    this.#original = structuredClone($state.snapshot(entidad) as Entidad);
+  }
+
+  /**
+   * Cómo estaba la ficha la última vez que la ventana la vio (al abrirla o al recibir un cambio de fuera). Lo que difiera de esto es lo
+   * que ha tocado el usuario en la ventana; lo demás sigue a lo que haya fuera (ver `sincronizar`).
+   */
+  #original: Entidad;
+
+  /**
+   * Lleva a la ventana lo que ha cambiado FUERA de ella mientras está abierta (la vida con la rueda, el jugador dueño que edita su ficha...):
+   * lo que el usuario no ha tocado aquí pasa a valer lo de fuera, y lo que sí ha tocado se queda. Así, al guardar, la ventana nunca pisa un
+   * cambio ajeno con lo que vio al abrirla. Un borrador (ficha nueva) no tiene nada fuera.
+   */
+  sincronizar(externa: Entidad) {
+    if (this.esBorrador || this.guardando || externa.id !== this.entidad.id) return;
+    const fuera = structuredClone($state.snapshot(externa) as Entidad);
+    fuera.foto_encuadre ??= encuadreCentrado();
+    if (this.definiciones.length > 0) fuera.parametros = normalizarParametros(this.definiciones, fuera.parametros ?? []);
+    fuera.variables ??= [];
+    if (this.variables.length > 0) fuera.variables = normalizarVariables(this.variables, fuera.variables);
+    const fusion = fusionarFicha(this.#original, $state.snapshot(this.entidad) as Entidad, fuera) as unknown as Record<string, unknown>;
+    const destino = this.entidad as unknown as Record<string, unknown>;
+    for (const k of Object.keys(fusion)) {
+      if (!fusionIgual(destino[k], fusion[k])) destino[k] = fusion[k];
+    }
+    this.#original = fuera;
   }
 
   // ------------------------------------------------------------------
@@ -711,6 +739,14 @@ export class EditorFicha {
     this.guardando = true;
     this.#error = "";
     try {
+      // Antes de nada, lo último de fuera: los pasos de rueda pendientes se mandan y la ventana recoge lo que haya cambiado
+      if (!this.esBorrador) {
+        await partida.guardarValoresPendientes();
+        const fuera = partida.fichaActual(this.entidad.id);
+        this.guardando = false;
+        if (fuera) this.sincronizar(fuera);
+        this.guardando = true;
+      }
       this.#validar();
 
       for (const ruta of this.#modificados) {
@@ -721,7 +757,11 @@ export class EditorFicha {
         this.#modificados.delete(ruta);
       }
 
-      if (!(await partida.guardarEntidad(this.entidad))) return false;
+      // De una ficha única solo se mandan los valores actuales que se han cambiado AQUÍ: los demás los pone Rust con los de su
+      // instancia (los últimos, aunque alguien los haya cambiado hace un instante), así guardar nunca devuelve la vida a un valor viejo
+      const enviar = $state.snapshot(this.entidad) as Entidad;
+      if (!this.esBorrador) enviar.actuales = actualesTocados(this.#original, enviar);
+      if (!(await partida.guardarEntidad(enviar))) return false;
       await this.#guardarMiniatura();
       // Fotos/archivos de la sesión que al final no se usaron (cambió de foto, quitó un adjunto...)
       await this.#descartarSesion();
