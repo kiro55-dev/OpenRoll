@@ -190,6 +190,7 @@
   style:width={pestana === "variables" || pestana === "resultados" || pestana === "txt" ? "560px" : null}
   style:max-height="min(66.667vh, calc(100vh - {pos.y}px - 12px))"
   role="dialog"
+  data-ventana-parametros
   aria-label="Parámetros de la partida"
   tabindex="-1"
   onkeydown={alTeclear}

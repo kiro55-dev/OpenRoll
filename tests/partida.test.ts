@@ -111,12 +111,11 @@ function crearBackend() {
           return id;
         }
         case "importar_conjunto": {
-          if (String(args.ruta).endsWith("roto.json")) throw "El archivo no es un conjunto de parámetros de OpenRoll";
+          if (String(args.ruta).endsWith("roto.html")) throw "Ese archivo no es una plantilla de ficha de OpenRoll";
           const id = Math.max(...b.conjuntos.guardados.map((c: any) => c.id)) + 1;
           b.conjuntos.guardados.push({ id, nombre: "Importado", descripcion: "", origen: null, parametros: 2, variables: 0, grupos: 1 });
           return id;
         }
-        case "exportar_conjunto": return;
         case "renombrar_conjunto": b.conjuntos.guardados.find((c: any) => c.id === args.id)!.nombre = args.nombre; return;
         case "borrar_conjunto": {
           if (args.id === b.conjuntos.activo) throw "No puedes borrar el conjunto que estás usando";
@@ -847,15 +846,13 @@ describe("fichas: selección y vida", () => {
     expect(partida.conjuntos.de_serie[0].ya_anadido).toBe(true);
     expect(await partida.anadirConjuntoDeSerie("dnd")).toBe(3); // la segunda vez devuelve el mismo
 
-    // Importar: el motivo de Rust llega tal cual, y no cambia lo que hay
-    await expect(partida.importarConjunto("C:/x/roto.json")).rejects.toBe("El archivo no es un conjunto de parámetros de OpenRoll");
+    // Importar (de una plantilla de ficha): el motivo de Rust llega tal cual, y no cambia lo que hay
+    await expect(partida.importarConjunto("C:/x/roto.html")).rejects.toBe("Ese archivo no es una plantilla de ficha de OpenRoll");
     expect(partida.conjuntos.guardados).toHaveLength(3);
-    const nuevo = await partida.importarConjunto("C:/x/bueno.json");
+    const nuevo = await partida.importarConjunto("C:/x/bueno.html");
     expect(partida.conjuntos.guardados.map((c) => c.id)).toEqual([1, 2, 3, nuevo]);
     expect(partida.conjuntos.activo).toBe(1);
 
-    await partida.exportarConjunto(2, "C:/x/mio.json");
-    expect(llamadas("exportar_conjunto")[0].args).toEqual({ id: 2, ruta: "C:/x/mio.json" });
     await partida.renombrarConjunto(2, "Mío");
     expect(partida.conjuntos.guardados[1].nombre).toBe("Mío");
     await expect(partida.borrarConjunto(1)).rejects.toBe("No puedes borrar el conjunto que estás usando");

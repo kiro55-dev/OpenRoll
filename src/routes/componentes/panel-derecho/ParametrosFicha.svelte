@@ -123,7 +123,7 @@
         <span class="valor">{textoCuerpo(ficha.base.cuerpo)}</span>
       </div>
       <div class="param">
-        <span class="label">Visión</span>
+        <span class="label">Visión nocturna</span>
         <span class="valor">{ficha.base.vision ? `${ficha.base.vision} m` : "—"}</span>
       </div>
     </div>

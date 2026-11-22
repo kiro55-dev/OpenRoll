@@ -1,14 +1,18 @@
 <!-- src/routes/componentes/ventana-parametros/ConjuntosParametros.svelte -->
 <!-- El conjunto de parámetros que usa la partida (parámetros visuales + variables), arriba de la ventana de parámetros: un
-     selector para cambiar de conjunto y «Gestionar…» para importar, exportar, renombrar y borrar los que guarda. Un conjunto
+     selector para cambiar de conjunto y «Gestionar…» para importar (desde una plantilla de ficha, también arrastrándola a la ventana),
+     exportar la plantilla, renombrar y borrar los que guarda. Un conjunto
      define el rol que se juega (D&D…): la partida guarda varios y usa uno. Cada conjunto guarda lo que tenían las fichas cuando lo
      dejaste y lo recupera al volver; nada se comparte de uno a otro. Como no se pierde nada, cambiar de conjunto no pide confirmar:
      debajo del selector hay un texto informativo. -->
 <script lang="ts">
-  import { open, save } from "@tauri-apps/plugin-dialog";
+  import { onMount } from "svelte";
+  import { open } from "@tauri-apps/plugin-dialog";
   import { ayuda } from "$lib/ajustesVista.svelte";
   import { partida, type ResumenBiblioteca, type ResumenConjunto } from "$lib/partida.svelte";
+  import { esArchivoPlantilla } from "$lib/plantillaFicha";
   import { exportarPlantilla } from "$lib/plantillaIo";
+  import { alSoltarArchivos } from "$lib/soltarArchivos";
   import { edicionVariables } from "$lib/edicionVariables.svelte";
 
   let { onError, alCambiar }: { onError: (mensaje: string) => void; alCambiar: () => void } = $props();
@@ -57,11 +61,10 @@
     }
   }
 
-  // ---- Importar y exportar ----
-  async function importar() {
+  // ---- Importar (desde una plantilla de ficha) y exportar (la plantilla) ----
+  /** Importa el conjunto que lleva la plantilla `ruta` (rellena o no: de ella solo se lee el conjunto). */
+  async function importarDe(ruta: string) {
     if (ocupado) return;
-    const ruta = await open({ multiple: false, directory: false, filters: [{ name: "Conjunto de parámetros", extensions: ["json"] }] });
-    if (typeof ruta !== "string") return;
     ocupado = true;
     aviso = "";
     try {
@@ -69,11 +72,26 @@
       onError("");
       aviso = `Importado «${partida.conjuntos.guardados.find((c) => c.id === id)?.nombre ?? "conjunto"}». Todavía no lo usas: elígelo arriba cuando quieras.`;
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err)); // el motivo concreto: no es un conjunto, es de otra versión, algo no vale...
+      onError(err instanceof Error ? err.message : String(err)); // el motivo concreto: no es una plantilla, no lleva conjunto, algo no vale...
     } finally {
       ocupado = false;
     }
   }
+
+  async function importar() {
+    if (ocupado) return;
+    const ruta = await open({ multiple: false, directory: false, filters: [{ name: "Plantilla de ficha de OpenRoll", extensions: ["html", "htm"] }] });
+    if (typeof ruta === "string") await importarDe(ruta);
+  }
+
+  // Arrastrar la plantilla a cualquier parte de la ventana de parámetros hace lo mismo que el botón
+  onMount(() =>
+    alSoltarArchivos(async (rutas, el) => {
+      if (!el?.closest("[data-ventana-parametros]")) return;
+      const html = rutas.find(esArchivoPlantilla);
+      if (html) await importarDe(html);
+    })
+  );
 
   async function exportarPlantillaEnBlanco() {
     if (ocupado) return;
@@ -82,28 +100,6 @@
     try {
       if (await exportarPlantilla(null)) aviso = "Plantilla exportada.";
       onError("");
-    } catch (err) {
-      onError(err instanceof Error ? err.message : String(err));
-    } finally {
-      ocupado = false;
-    }
-  }
-
-  const nombreDeArchivo = (nombre: string) => nombre.replace(/[\\/:*?"<>|]+/g, "_").trim() || "conjunto";
-
-  async function exportar(c: ResumenConjunto) {
-    if (ocupado) return;
-    const ruta = await save({
-      defaultPath: `${nombreDeArchivo(c.nombre)}.openroll.json`,
-      filters: [{ name: "Conjunto de parámetros", extensions: ["json"] }]
-    });
-    if (typeof ruta !== "string") return;
-    ocupado = true;
-    aviso = "";
-    try {
-      await partida.exportarConjunto(c.id, ruta);
-      onError("");
-      aviso = `Exportado «${c.nombre}».`;
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -262,16 +258,16 @@
         class="importar"
         disabled={ocupado}
         onclick={exportarPlantillaEnBlanco}
-        title={ayuda("Guarda una plantilla de ficha en blanco (un .html) con los parámetros y variables del conjunto en uso. Se rellena con cualquier navegador, sin OpenRoll, y después se arrastra al banco de fichas")}
+        title={ayuda("Guarda una plantilla de ficha en blanco (un .html) con todo el conjunto en uso. Se rellena con cualquier navegador, sin OpenRoll, y después se arrastra al banco de fichas; la misma plantilla sirve para llevar el conjunto a otra partida")}
       >
         Exportar plantilla de los parámetros actuales
       </button>
     </div>
     <div class="fila-importar">
-      <button type="button" class="importar" disabled={ocupado} onclick={importar} title={ayuda("Trae un conjunto de otro archivo. No sustituye lo que tienes: se añade a la lista")}>
-        Importar desde archivo…
+      <button type="button" class="importar" disabled={ocupado} onclick={importar} title={ayuda("Trae el conjunto que lleva dentro una plantilla de ficha (rellena o en blanco: del personaje no se coge nada). No sustituye lo que tienes: se añade a la lista")}>
+        Importar desde plantilla…
       </button>
-      <span class="nota">Se añade a la lista; no borra nada.</span>
+      <span class="nota">O arrastra la plantilla a esta ventana. Se añade a la lista; no borra nada.</span>
     </div>
 
     <div class="lista">
@@ -309,7 +305,6 @@
               <button type="button" onclick={() => pedirCambio(String(c.id))}>Usar</button>
             {/if}
             <button type="button" disabled={ocupado} onclick={() => aBiblioteca(c)} title={ayuda("Lo guarda en tu biblioteca para usarlo en cualquier partida. Si ya hay uno con ese nombre, lo actualiza")}>A mi biblioteca</button>
-            <button type="button" disabled={ocupado} onclick={() => exportar(c)}>Exportar</button>
             {#if !enUso}
               {#if borrandoId === c.id}
                 <button type="button" class="peligro" onclick={() => borrar(c.id)}>¿Borrar?</button>

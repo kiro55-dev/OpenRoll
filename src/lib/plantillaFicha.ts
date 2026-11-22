@@ -110,6 +110,13 @@ export interface DatosPlantilla {
    *  plantilla en blanco recién exportada). La ficha que se crea con él lo guarda, así se reconoce si vuelve a importarse. */
   plantilla_id: string | null;
   definiciones: { parametros: DefinicionParametro[]; grupos_variables: GrupoVariables[]; variables: DefinicionVariable[] };
+  /**
+   * El conjunto de parámetros COMPLETO con el que se hizo (nombre, descripción, parámetros, variables y sus grupos, listas de rangos,
+   * escala de resultados y .txt por defecto: un `ConjuntoParametros` de Rust), aparte de los datos de la ficha. Es lo que se importa
+   * desde la plantilla (en Rust, `conjuntos::de_plantilla`): da igual que la plantilla tenga un personaje. `null` si la exportó un
+   * jugador (no conoce el conjunto entero) o es de antes de este apartado.
+   */
+  definicion_conjunto: Record<string, unknown> | null;
   ficha: FichaPlantilla | null;
   foto: FotoPlantilla | null;
   /** Los archivos de texto de la ficha. Una plantilla de antes de este apartado no lo trae: en ese caso no se tocan los de la ficha. */
@@ -146,6 +153,7 @@ export function datosDePlantilla(p: {
   idFicha?: number | null;
   foto?: FotoPlantilla | null;
   archivos?: ArchivoPlantilla[];
+  definicionConjunto?: Record<string, unknown> | null;
 }): DatosPlantilla {
   const e = p.entidad ?? null;
   return {
@@ -156,6 +164,7 @@ export function datosDePlantilla(p: {
     // Desde una ficha que ya tiene identidad, la lleva; en blanco no: la plantilla se la pone al guardarse por primera vez
     plantilla_id: e?.plantilla_id ?? null,
     definiciones: { parametros: p.definiciones, grupos_variables: p.grupos, variables: p.variables },
+    definicion_conjunto: p.definicionConjunto ?? null,
     ficha: e
       ? {
           nombre: e.nombre,

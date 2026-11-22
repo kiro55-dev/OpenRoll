@@ -7,7 +7,10 @@
 //
 //  * De serie (`integrados`): definidos en código, independientes de la partida. Elegir uno COPIA su contenido a la partida, que
 //    lo edita sin tocar el original; el archivo de la partida nunca depende de este código al reproducir el log.
-//  * Exportar / importar: un archivo JSON (`Archivo`) con un conjunto. Lo que se importa es entrada no confiable: se valida entero
+//  * Importar: la plantilla de ficha (.html) que exporta OpenRoll lleva dentro el conjunto completo (`definicion_conjunto`), aparte de
+//    los datos de la ficha: se importa de CUALQUIER plantilla, rellena o no, y solo se lee ese bloque (nunca el personaje ni sus .txt).
+//    Exportar es exportar esa plantilla en blanco (plantilla.rs / el front). El archivo JSON (`Archivo`) queda solo como formato interno
+//    de la biblioteca. Lo que se importa es entrada no confiable: se valida entero
 //    (`validar`) con las mismas reglas que al crear a mano cada parámetro, variable y grupo.
 //  * Cambiar de conjunto reinicia los valores de las fichas (`EstadoPartida::reiniciar_valores_de_fichas`): el aviso es de la UI.
 //
@@ -656,38 +659,67 @@ pub fn borrar_conjunto_en(id: u16, state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
-/// Escribe el conjunto `id` en `ruta` (la que eligió el host en el diálogo «Guardar como»), de forma atómica.
+/// El conjunto completo (con el nombre y la descripción que tiene guardados) que está en uso: lo que lleva dentro una plantilla de ficha
+/// exportada, para que se pueda importar desde ella.
 #[tauri::command]
-pub fn exportar_conjunto(id: u16, ruta: String, state: State<'_, AppState>) -> Result<(), String> {
-    exportar_conjunto_en(id, &ruta, &state)
+pub fn obtener_conjunto_activo(state: State<'_, AppState>) -> ConjuntoParametros {
+    let est = state.lock();
+    est.contenido_de(est.conjunto_activo).unwrap_or_else(|| est.contenido_vivo())
 }
 
-pub fn exportar_conjunto_en(id: u16, ruta: &str, state: &AppState) -> Result<(), String> {
-    let texto = {
-        let est = state.lock();
-        a_archivo(&est.contenido_de(id).ok_or("Ese conjunto ya no existe")?)?
-    };
-    let destino = Path::new(ruta);
-    if !destino.is_absolute() {
-        return Err("La ruta de destino no es válida".into());
+/// El conjunto que lleva una plantilla de ficha (el texto del .html): se busca el bloque de datos `<script id="datos-openroll">`, se
+/// comprueba que es una plantilla de OpenRoll y se valida el conjunto entero (`validar`). Es entrada NO fiable: no se ejecuta nada y lo
+/// demás de la plantilla (la ficha, su UUID, sus .txt) ni se mira. Una plantilla sin el bloque (de antes, o exportada por un jugador, que
+/// no conoce el conjunto entero) se rechaza con su motivo.
+pub fn de_plantilla(html: &str) -> Result<ConjuntoParametros, String> {
+    const NO_ES: &str = "Ese archivo no es una plantilla de ficha de OpenRoll";
+    let datos = bloque_de_datos(html).ok_or(NO_ES)?;
+    let json: serde_json::Value = serde_json::from_str(datos).map_err(|_| "La plantilla está dañada".to_string())?;
+    if json.get("formato").and_then(|f| f.as_str()) != Some("openroll-plantilla") {
+        return Err(NO_ES.into());
     }
-    let destino = if destino.extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) { destino.to_path_buf() } else { destino.with_extension("json") };
-    let tmp = destino.with_extension("json.tmp");
-    std::fs::write(&tmp, texto).map_err(|e| format!("No se pudo escribir el archivo: {e}"))?;
-    std::fs::rename(&tmp, &destino).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("No se pudo escribir el archivo: {e}")
-    })
+    match json.get("version").and_then(|v| v.as_u64()) {
+        Some(v) if v > VERSION_PLANTILLA => return Err("La plantilla es de una versión más nueva de OpenRoll: actualiza la aplicación".into()),
+        Some(v) if v >= 1 => {}
+        _ => return Err("La plantilla está dañada (versión)".into()),
+    }
+    let conjunto = json.get("definicion_conjunto").filter(|c| !c.is_null()).ok_or(
+        "Esta plantilla no lleva el conjunto de parámetros (es de una versión anterior, o la exportó un jugador): vuelve a exportarla desde OpenRoll",
+    )?;
+    let conjunto: ConjuntoParametros =
+        serde_json::from_value(conjunto.clone()).map_err(|e| format!("El conjunto de la plantilla está mal formado: {e}"))?;
+    validar(conjunto)
 }
 
-/// Lee el archivo, lo valida entero y lo añade a la partida (sin activarlo). Devuelve el id del conjunto nuevo.
+/// Versión del formato de la plantilla que sabe leer esta app (`VERSION_PLANTILLA` en el front).
+const VERSION_PLANTILLA: u64 = 1;
+
+/// El contenido del `<script ... id="datos-openroll">` de un HTML (sin ejecutar nada): el primer script cuya etiqueta lleva ese id.
+fn bloque_de_datos(html: &str) -> Option<&str> {
+    let mut resto = html;
+    while let Some(i) = resto.find("<script") {
+        let tras = &resto[i..];
+        let fin_etiqueta = tras.find('>')?;
+        let etiqueta = &tras[..fin_etiqueta];
+        let contenido = &tras[fin_etiqueta + 1..];
+        let cierre = contenido.find("</script>")?;
+        if etiqueta.contains("id=\"datos-openroll\"") || etiqueta.contains("id='datos-openroll'") {
+            return Some(&contenido[..cierre]);
+        }
+        resto = &contenido[cierre + "</script>".len()..];
+    }
+    None
+}
+
+/// Lee la plantilla (.html, con el tamaño comprobado ANTES de leerla), saca su conjunto, lo valida entero y lo añade a la partida (sin
+/// activarlo). Devuelve el id del conjunto nuevo.
 #[tauri::command]
 pub fn importar_conjunto(ruta: String, state: State<'_, AppState>) -> Result<u16, String> {
     importar_conjunto_en(&ruta, &state)
 }
 
 pub fn importar_conjunto_en(ruta: &str, state: &AppState) -> Result<u16, String> {
-    let contenido = leer_archivo(Path::new(ruta))?;
+    let contenido = de_plantilla(&crate::tablero_general::plantilla::leer_plantilla_en(ruta)?)?;
     let mut est = state.lock();
     Ok(anadir(&mut est, state, None, contenido)?.id)
 }
@@ -1236,15 +1268,15 @@ mod tests {
     }
 
     #[test]
-    fn cada_conjunto_de_serie_se_exporta_e_importa_con_sus_rangos_calculos_y_escala_y_se_puede_usar() {
+    fn cada_conjunto_de_serie_se_importa_de_una_plantilla_con_sus_rangos_calculos_y_escala_y_se_puede_usar() {
         let state = estado_en_a("series_ida_y_vuelta");
         for clave in ["dnd5e", "pathfinder2e", "cthulhu7e"] {
             let id = anadir_conjunto_de_serie_en(clave, &state).unwrap();
             let original = state.lock().contenido_de(id).unwrap();
             assert_eq!(original, integrado(clave).unwrap().contenido, "{clave}: la copia es igual al original");
-            // Exportar y volver a importar da lo mismo (con la escala, los rangos y los cálculos de parámetros)
-            let archivo = state.raiz.join(format!("{clave}.json"));
-            exportar_conjunto_en(id, archivo.to_str().unwrap(), &state).unwrap();
+            // Llevarlo en una plantilla y volver a importarla da lo mismo (con la escala, los rangos y los cálculos de parámetros)
+            let archivo = state.raiz.join(format!("{clave}.html"));
+            std::fs::write(&archivo, plantilla_con(&original)).unwrap();
             let copia = importar_conjunto_en(archivo.to_str().unwrap(), &state).unwrap();
             let importado = state.lock().contenido_de(copia).unwrap();
             assert_eq!(importado.escala_resultado, original.escala_resultado, "{clave}");
@@ -1485,17 +1517,47 @@ mod tests {
         assert_eq!(migrado.variables[2].opciones.len(), 2);
     }
 
+    /// Una plantilla de ficha mínima con el conjunto dentro (como la que exporta OpenRoll, más el personaje que se quiera).
+    fn plantilla_con(c: &ConjuntoParametros) -> String {
+        plantilla_con_ficha(c, serde_json::Value::Null)
+    }
+    fn plantilla_con_ficha(c: &ConjuntoParametros, ficha: serde_json::Value) -> String {
+        let datos = serde_json::json!({
+            "formato": "openroll-plantilla", "version": 1, "conjunto": c.nombre, "id_ficha": 7, "plantilla_id": "3f2a9c1e-7b64-4d2a-9a51-0c8e2d7f6b13",
+            "definicion_conjunto": c, "ficha": ficha,
+            "archivos": [{ "original": "Notas.txt", "nombre": "Notas.txt", "contenido": "NO ES UN TEXTO POR DEFECTO" }]
+        });
+        // `<` escrito como en las plantillas de verdad, y el id del script como lo busca el lector
+        let json = serde_json::to_string(&datos).unwrap().replace('<', "\\u003c");
+        format!("<!doctype html><html><head><!-- bloque «datos-openroll» --><script>var x = 1;</script><script type=\"application/json\" id=\"datos-openroll\">{json}</script></head></html>")
+    }
+
     #[test]
-    fn exportar_e_importar_por_archivo_y_cambiar_de_conjunto_desde_los_comandos() {
+    fn el_conjunto_se_lee_de_la_plantilla_de_verdad_aunque_el_texto_nombre_el_bloque_en_otros_sitios() {
+        // El HTML real de la plantilla nombra «datos-openroll» en un comentario y en su JavaScript: solo cuenta el <script> con ese id
+        let html = include_str!("../../../src/lib/plantilla/plantilla.html");
+        assert!(html.matches("datos-openroll").count() >= 3);
+        let c = conjunto_dnd();
+        let datos = serde_json::json!({ "formato": "openroll-plantilla", "version": 1, "definicion_conjunto": c, "ficha": null });
+        let json = serde_json::to_string(&datos).unwrap().replace('<', "\\u003c");
+        let completa = html.replace("__DATOS_OPENROLL__", &json);
+        assert_eq!(de_plantilla(&completa).unwrap(), validar(c).unwrap());
+        // La plantilla sin datos (el marcador sin sustituir) no vale
+        assert!(de_plantilla(html).is_err());
+    }
+
+    #[test]
+    fn importar_una_plantilla_y_cambiar_de_conjunto_desde_los_comandos() {
         let state = estado_en_a("conjuntos_comandos");
-        // Se edita el conjunto activo (vive en las definiciones) y se exporta
+        // Se edita el conjunto activo (vive en las definiciones) y se lleva en una plantilla
         crate::tablero_general::partida::procesar_delta(&state, DeltaPartida::ParametroBorrado(ID_ARMADURA));
-        let archivo = state.raiz.join("mio");
-        exportar_conjunto_en(1, archivo.to_str().unwrap(), &state).unwrap();
-        let archivo = state.raiz.join("mio.json"); // sin extensión se le pone .json
-        assert!(archivo.is_file() && !state.raiz.join("mio.json.tmp").exists());
-        assert!(exportar_conjunto_en(99, archivo.to_str().unwrap(), &state).is_err());
-        assert!(exportar_conjunto_en(1, "relativa.json", &state).is_err(), "solo rutas absolutas");
+        let activo = {
+            let est = state.lock();
+            est.contenido_de(est.conjunto_activo).unwrap()
+        };
+        assert_eq!(activo.parametros.len(), 3);
+        let archivo = state.raiz.join("mio.html");
+        std::fs::write(&archivo, plantilla_con(&activo)).unwrap();
 
         // Importarlo no toca lo que hay y el nombre repetido se renombra: Genérico → Genérico (2)
         let id = importar_conjunto_en(archivo.to_str().unwrap(), &state).unwrap();
@@ -1507,14 +1569,45 @@ mod tests {
         assert_eq!(importar_conjunto_en(archivo.to_str().unwrap(), &state).unwrap(), 3);
         assert_eq!(state.lock().contenido_de(3).unwrap().nombre, "Genérico (3)");
 
-        // Lo que no es un conjunto, no existe o pesa demasiado: error y nada cambia
-        let basura = state.raiz.join("basura.json");
-        std::fs::write(&basura, "esto no es json").unwrap();
-        assert!(importar_conjunto_en(basura.to_str().unwrap(), &state).unwrap_err().contains("no es un conjunto"));
-        std::fs::write(&basura, vec![b' '; MAX_BYTES_ARCHIVO as usize + 1]).unwrap();
-        assert!(importar_conjunto_en(basura.to_str().unwrap(), &state).unwrap_err().contains("demasiado grande"));
-        assert!(importar_conjunto_en(state.raiz.join("no_existe.json").to_str().unwrap(), &state).is_err());
-        assert_eq!(state.lock().conjuntos_parametros.len(), 3);
+        // Da igual que la plantilla traiga un personaje, su UUID o .txt cambiados: solo se lee el conjunto, y nunca los textos de la ficha
+        let con_personaje = state.raiz.join("rellena.html");
+        std::fs::write(&con_personaje, plantilla_con_ficha(&activo, serde_json::json!({ "nombre": "Orco", "tipo": "Enemigo", "parametros": [], "variables": [] }))).unwrap();
+        let rellena = importar_conjunto_en(con_personaje.to_str().unwrap(), &state).unwrap();
+        assert!(state.lock().contenido_de(rellena).unwrap().archivos_texto.is_empty(), "los .txt de la ficha no son los de por defecto");
+        let tras = state.lock().conjuntos_parametros.len();
+
+        // Lo que no es una plantilla, no lleva el conjunto, no existe o pesa demasiado: error y nada cambia
+        let mala = state.raiz.join("mala.html");
+        for (texto, motivo) in [
+            ("esto no es una plantilla", "no es una plantilla"),
+            ("<script id=\"datos-openroll\">{no es json</script>", "dañada"),
+            ("<script id=\"datos-openroll\">{\"formato\":\"otra-cosa\",\"version\":1}</script>", "no es una plantilla"),
+            ("<script id=\"datos-openroll\">{\"formato\":\"openroll-plantilla\",\"version\":99,\"definicion_conjunto\":{}}</script>", "más nueva"),
+            ("<script id=\"datos-openroll\">{\"formato\":\"openroll-plantilla\",\"version\":1,\"definicion_conjunto\":null}</script>", "vuelve a exportarla"),
+            ("<script id=\"datos-openroll\">{\"formato\":\"openroll-plantilla\",\"version\":1}</script>", "vuelve a exportarla"),
+            ("<script id=\"datos-openroll\">{\"formato\":\"openroll-plantilla\",\"version\":1,\"definicion_conjunto\":{\"nombre\":5}}</script>", "mal formado"),
+        ] {
+            std::fs::write(&mala, texto).unwrap();
+            let e = importar_conjunto_en(mala.to_str().unwrap(), &state).unwrap_err();
+            assert!(e.contains(motivo), "{texto}: {e}");
+        }
+        // Un conjunto inválido (aunque esté bien formado) se rechaza entero con las reglas de siempre
+        let mut roto = activo.clone();
+        roto.nombre = String::new();
+        std::fs::write(&mala, plantilla_con(&roto)).unwrap();
+        assert!(importar_conjunto_en(mala.to_str().unwrap(), &state).is_err());
+        let mut con_txt_malo = activo.clone();
+        con_txt_malo.archivos_texto = vec![ArchivoTextoDefecto { id: 0, nombre: "a.b".into(), contenido: String::new() }];
+        std::fs::write(&mala, plantilla_con(&con_txt_malo)).unwrap();
+        assert!(importar_conjunto_en(mala.to_str().unwrap(), &state).is_err());
+        let json = state.raiz.join("conjunto.json");
+        std::fs::write(&json, "{}").unwrap();
+        assert!(importar_conjunto_en(json.to_str().unwrap(), &state).is_err(), "ya no se importan archivos .json");
+        std::fs::write(&mala, vec![b' '; 17 * 1024 * 1024]).unwrap();
+        assert!(importar_conjunto_en(mala.to_str().unwrap(), &state).unwrap_err().contains("MB"));
+        assert!(importar_conjunto_en(state.raiz.join("no_existe.html").to_str().unwrap(), &state).is_err());
+        assert_eq!(state.lock().conjuntos_parametros.len(), tras);
+        borrar_conjunto_en(rellena, &state).unwrap(); // el resto de la prueba cuenta con tres
 
         // De serie: se copia una sola vez y no se activa
         assert!(anadir_conjunto_de_serie_en("no_existe", &state).is_err());

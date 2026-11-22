@@ -209,9 +209,9 @@
         <CampoNumero bind:value={editor.cuerpoY} min={1} max={255} ancho={36} sufijo="casillas" titulo="Alto en casillas (rueda del ratón para ajustar)" />
       </div>
 
-      <span class="et">Visión</span>
+      <span class="et">Visión nocturna</span>
       <div class="celda ancha">
-        <CampoNumero bind:value={ficha.vision} min={0} max={10000} ancho={45} sufijo="m" titulo="Cuánto ve la ficha, en metros (por ahora no hace nada; rueda del ratón para ajustar)" />
+        <CampoNumero bind:value={ficha.vision} min={0} max={10000} ancho={45} sufijo="m" titulo="Cuánto ve la ficha en la oscuridad, en metros (por ahora no hace nada; rueda del ratón para ajustar)" />
       </div>
 
       <!-- Los parámetros de la partida, uno por fila y en su orden -->

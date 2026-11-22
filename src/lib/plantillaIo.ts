@@ -61,6 +61,8 @@ export async function exportarPlantilla(entidad: Entidad | null, idFicha: number
     entidad,
     idFicha,
     foto: entidad ? await fotoDe(entidad) : null,
+    // El conjunto entero va dentro (para importarlo desde la plantilla); un jugador no lo conoce
+    definicionConjunto: esJugador ? null : await invoke<Record<string, unknown>>("obtener_conjunto_activo"),
     // En blanco, la plantilla trae los .txt con los que nace toda ficha del conjunto; de una ficha, los suyos
     archivos: entidad ? archivos : partida.archivosTextoDefecto.map((a) => ({ original: null, nombre: `${a.nombre}.txt`, contenido: a.contenido }))
   });

@@ -297,7 +297,7 @@ export interface Entidad {
   /** Lo que suman o restan los botones − / + de cada valor (vida...) de esta ficha; solo los que no son 1. Lo guarda Rust. */
   pasos_valor?: PasoValor[];
   cuerpo: Cuerpo;
-  /** Cuánto ve la ficha, en metros (dato de serie de la ficha, como el cuerpo; 0 = sin definir). Por ahora no hace nada. */
+  /** Visión nocturna: cuánto ve la ficha en la oscuridad, en metros (dato de serie de la ficha, como el cuerpo; 0 = sin definir). Por ahora no hace nada. */
   vision: number;
   zona_id: number;
   foto_url: string | null;
@@ -864,16 +864,14 @@ class Partida {
     return id;
   }
 
-  /** Importa el archivo `ruta` (sin usarlo) y devuelve el id del conjunto nuevo. Rust lo valida entero y da el motivo si falla. */
+  /**
+   * Importa el conjunto que lleva dentro la plantilla de ficha `ruta` (un .html exportado por OpenRoll, rellena o no: solo se lee el
+   * conjunto) sin usarlo, y devuelve su id. Rust lo valida entero y da el motivo si falla.
+   */
   async importarConjunto(ruta: string): Promise<number> {
     let id = 0;
     await this.#cambiarDefiniciones("importar_conjunto", { ruta }, (r) => (id = r as number));
     return id;
-  }
-
-  /** Escribe el conjunto en `ruta` (la del diálogo «Guardar como»). */
-  exportarConjunto(id: number, ruta: string) {
-    return invoke("exportar_conjunto", { id, ruta });
   }
 
   /** Los conjuntos de la biblioteca del host (compartida entre todas sus partidas). */

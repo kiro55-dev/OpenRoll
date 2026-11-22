@@ -332,3 +332,25 @@ describe("ficha única y valor actual", () => {
     expect(aplicarAFicha(unica(), vieja, ctx).entidad.es_unico).toBe(true);
   });
 });
+
+describe("el conjunto dentro de la plantilla", () => {
+  const conjunto = { nombre: "D&D 5e", descripcion: "", parametros: [], grupos_variables: [], variables: [], listas_rangos: [], escala_resultado: null, archivos_texto: [{ id: 1, nombre: "Equipo", contenido: "x" }] };
+  const exportarConConjunto = (entidad: Entidad | null) =>
+    generarPlantilla(datosDePlantilla({ definiciones: PARAMETROS, grupos: GRUPOS, variables: VARIABLES, conjunto: "D&D 5e", entidad, idFicha: entidad?.id ?? null, definicionConjunto: conjunto }));
+  const bloque = (html: string) => JSON.parse(/<script[^>]*id="datos-openroll"[^>]*>([\s\S]*?)<\/script>/.exec(html)![1]);
+
+  it("una plantilla (en blanco o de una ficha) lleva el conjunto entero aparte de la ficha, y un jugador no lo pone", () => {
+    for (const e of [null, ficha()]) expect(bloque(exportarConConjunto(e)).definicion_conjunto).toEqual(conjunto);
+    expect(bloque(exportar(ficha())).definicion_conjunto).toBeNull();
+  });
+
+  it("el JavaScript de la plantilla conserva el bloque al guardar (lo copia tal cual en los datos)", () => {
+    expect(plantillaHtml).toContain("definicion_conjunto: DATOS.definicion_conjunto || null");
+  });
+
+  it("al leerla para rellenar una ficha el conjunto no se mezcla con sus datos", () => {
+    const leida = leerPlantilla(exportarConConjunto(ficha()));
+    expect(Object.keys(leida)).not.toContain("definicion_conjunto");
+    expect(leida.archivos).toEqual([]);
+  });
+});

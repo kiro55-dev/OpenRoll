@@ -28,6 +28,68 @@
 
   const desplazar = (dx: number) => barra?.scrollBy({ left: dx, behavior: "smooth" });
 
+  /**
+   * La barra de pestañas se desplaza en horizontal con la rueda del ratón y arrastrándola con el botón izquierdo (de izquierda a
+   * derecha y al revés). Un arrastre no abre la pestaña sobre la que se soltó ni empieza a renombrar; desde un campo de texto o el
+   * botón de quitar no se arrastra.
+   */
+  function desplazable(nodo: HTMLElement) {
+    let origen: { x: number; scroll: number; id: number } | null = null;
+    let arrastrado = false;
+
+    const rueda = (e: WheelEvent) => {
+      if (nodo.scrollWidth <= nodo.clientWidth) return; // cabe todo: la rueda sigue siendo de la ventana
+      e.preventDefault();
+      nodo.scrollLeft += e.deltaY !== 0 ? e.deltaY : e.deltaX;
+    };
+    const abajo = (e: PointerEvent) => {
+      if (e.button !== 0 || (e.target as HTMLElement).closest("input, .btn-quitar")) return;
+      origen = { x: e.clientX, scroll: nodo.scrollLeft, id: e.pointerId };
+      arrastrado = false;
+    };
+    const mover = (e: PointerEvent) => {
+      if (!origen || e.pointerId !== origen.id) return;
+      const dx = e.clientX - origen.x;
+      if (!arrastrado && Math.abs(dx) < 4) return;
+      if (!arrastrado) {
+        arrastrado = true;
+        nodo.setPointerCapture(e.pointerId); // seguir al ratón aunque salga de la barra
+        nodo.classList.add("arrastrando");
+      }
+      nodo.scrollLeft = origen.scroll - dx;
+    };
+    const arriba = (e: PointerEvent) => {
+      if (!origen || e.pointerId !== origen.id) return;
+      origen = null;
+      nodo.classList.remove("arrastrando");
+      if (nodo.hasPointerCapture(e.pointerId)) nodo.releasePointerCapture(e.pointerId);
+    };
+    // Tras un arrastre, el clic que sigue al soltar no abre ni renombra nada
+    const clic = (e: MouseEvent) => {
+      if (!arrastrado) return;
+      arrastrado = false;
+      e.stopPropagation();
+      e.preventDefault();
+    };
+
+    nodo.addEventListener("wheel", rueda, { passive: false });
+    nodo.addEventListener("pointerdown", abajo);
+    nodo.addEventListener("pointermove", mover);
+    nodo.addEventListener("pointerup", arriba);
+    nodo.addEventListener("pointercancel", arriba);
+    nodo.addEventListener("click", clic, true);
+    return {
+      destroy() {
+        nodo.removeEventListener("wheel", rueda);
+        nodo.removeEventListener("pointerdown", abajo);
+        nodo.removeEventListener("pointermove", mover);
+        nodo.removeEventListener("pointerup", arriba);
+        nodo.removeEventListener("pointercancel", arriba);
+        nodo.removeEventListener("click", clic, true);
+      }
+    };
+  }
+
   // Cambia el tamaño de la barra -> recalcular las flechas
   $effect(() => {
     if (!barra) return;
@@ -78,7 +140,7 @@
       <button type="button" class="btn-flecha" onclick={() => desplazar(-100)} title={ayuda("Desplazar a la izquierda")}>◀</button>
     {/if}
 
-    <div class="pestanas" role="tablist" bind:this={barra} onscroll={comprobarScroll}>
+    <div class="pestanas" role="tablist" bind:this={barra} onscroll={comprobarScroll} use:desplazable>
       {#each editor.adjuntos as archivo, i}
         {#if archivo}
           <div
@@ -177,13 +239,14 @@
     display: flex; align-items: center; height: 28px;
     background: #1f1f23; border-bottom: 1px solid #27272a;
   }
-  .pestanas { display: flex; flex: 1; height: 100%; overflow-x: auto; scrollbar-width: none; }
+  .pestanas { display: flex; flex: 1; height: 100%; overflow-x: auto; scrollbar-width: none; cursor: grab; user-select: none; }
+  .pestanas:global(.arrastrando) { cursor: grabbing; }
   .pestanas::-webkit-scrollbar { display: none; }
 
   .pestana {
     display: flex; align-items: center; gap: 5px; flex-shrink: 0; height: 100%;
     padding: 0 8px; border-right: 1px solid #27272a;
-    color: #a1a1aa; font-size: 10px; white-space: nowrap; cursor: pointer;
+    color: #a1a1aa; font-size: 10px; white-space: nowrap; cursor: inherit;
   }
   .pestana.activa { background: #111113; color: white; font-weight: bold; }
 

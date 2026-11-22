@@ -8,6 +8,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Ficha · OpenRoll</title>
 <style>
+  /* Se reserva siempre el sitio de la barra de desplazamiento: si no, al pasar de un grupo largo a uno corto aparece o desaparece y todo se mueve de lado */
+  html { scrollbar-gutter: stable; overflow-y: scroll; }
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; background: #0f0f11; color: #f4f4f5; font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -60,8 +62,16 @@
   td.resultado { font-weight: 700; text-align: right; width: 60px; }
   .positivo { color: #4ade80; } .negativo { color: #f87171; }
   .opcional { display: inline-flex; align-items: center; gap: 3px; margin-right: 8px; color: #d4d4d8; font-size: 12px; }
-  .grupo + .grupo { margin-top: 10px; }
-  .grupo h3 { margin: 0 0 4px; font-size: 12px; color: #e4e4e7; }
+  /* El nombre de cada grupo de variables: en mayúsculas, algo más grande y con aire por encima para separar un grupo del anterior */
+  .grupo { margin-top: 22px; }
+  .grupo.primero { margin-top: 8px; }
+  .grupo[hidden] { display: none; }
+  .pestanas-grupos { display: flex; flex-wrap: wrap; gap: 4px; }
+  .pestana-grupo { background: #111113; border: 1px solid #27272a; color: #a1a1aa; padding: 3px 10px; font-size: 12px; font-weight: 600; }
+  .pestana-grupo:hover { color: #f4f4f5; border-color: #3f3f46; }
+  .pestana-grupo.activa { color: white; border-color: #3b82f6; background: rgba(59, 130, 246, 0.12); }
+  .pestana-grupo .marca { color: #60a5fa; font-style: italic; font-size: 10px; margin-left: 3px; }
+  .grupo h3 { margin: 0 0 6px; font-size: 14px; color: #e4e4e7; text-transform: uppercase; letter-spacing: .05em; }
   .aviso { color: #a1a1aa; font-size: 12px; }
   .pestanas-txt { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; align-items: center; }
   .pestana-txt { background: #111113; border: 1px solid #27272a; color: #a1a1aa; padding: 3px 10px; font-size: 12px; font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -144,7 +154,9 @@
     tipo: f.tipo || "Jugador",
     cuerpo: Array.isArray(f.cuerpo) ? [f.cuerpo[0] || 1, f.cuerpo[1] || 1] : [1, 1],
     vision: Number(f.vision) || 0,
-    unico: !!f.unico,
+    // «Ficha única» viene marcada por defecto: lo más común es un jugador, que es único. Una plantilla en blanco la lleva marcada; la de
+    // una ficha, como esté la ficha (una plantilla de antes que no lo dice no se toca)
+    unico: DATOS.ficha ? !!f.unico : true,
     parametros: {},
     actuales: {}, // el valor actual de una ficha única (null = el mismo que el máximo)
     publicos: {},
@@ -258,13 +270,13 @@
         estado.unico = e.target.checked;
         c.classList.toggle("unica", estado.unico);
         marcar();
-      } }), document.createTextNode("Único"));
+      } }), document.createTextNode("Ficha única"));
     c.classList.toggle("unica", estado.unico);
     fila("Tipo", tipo, unico);
     const lado = (i) => el("input", { type: "number", min: 1, max: MAX_CUERPO, value: estado.cuerpo[i],
       oninput: (e) => { estado.cuerpo[i] = acotar(e.target.value, 1, MAX_CUERPO); marcar(); } });
     fila("Cuerpo", lado(0), el("span", { class: "unidad", texto: "×" }), lado(1), el("span", { class: "unidad", texto: "casillas" }));
-    fila("Visión", el("input", { type: "number", min: 0, max: MAX_VISION, value: estado.vision,
+    fila("Visión nocturna", el("input", { type: "number", min: 0, max: MAX_VISION, value: estado.vision,
       oninput: (e) => { estado.vision = acotar(e.target.value, 0, MAX_VISION); marcar(); } }), el("span", { class: "unidad", texto: "m" }));
 
     for (const d of defs.parametros) {
@@ -304,6 +316,7 @@
     const cont = $("variables");
     if (defs.variables.length === 0) { $("seccion-variables").hidden = true; return; }
     const etiqueta = (d) => d.abreviatura || d.nombre;
+    const grupos = []; // { g, div, titulo }: lo que se pinta de cada grupo, para enseñarlos todos o solo uno
     for (const g of defs.grupos_variables) {
       const suyas = defs.variables.filter((d) => d.grupo === g.id);
       if (suyas.length === 0) continue;
@@ -353,8 +366,36 @@
         tabla.append(el("tr", null, celdaNombre, el("td", { class: "abrev", texto: d.abreviatura || "—" }),
           el("td", null, medio), td));
       }
-      cont.append(el("div", { class: "grupo" }, el("h3", { texto: g.nombre }), tabla));
+      const titulo = el("h3", { texto: g.nombre });
+      const div = el("div", { class: "grupo" }, titulo, tabla);
+      grupos.push({ g, div, titulo });
+      cont.append(div);
     }
+    // Arriba, como en OpenRoll: «Todos» (por defecto: un grupo tras otro, cada uno con su título) y un cuadrito por grupo que enseña solo ese
+    const botones = [];
+    function mostrar(idGrupo) {
+      grupos.forEach(({ g, div, titulo }) => {
+        div.hidden = idGrupo !== null && g.id !== idGrupo;
+        titulo.hidden = idGrupo !== null; // el grupo elegido ya se sabe cuál es por su cuadrito
+        div.classList.remove("primero");
+      });
+      const primero = grupos.find(({ div }) => !div.hidden);
+      if (primero) primero.div.classList.add("primero");
+      botones.forEach(({ b, id }) => b.classList.toggle("activa", id === idGrupo));
+    }
+    if (grupos.length > 1) {
+      const barra = el("div", { class: "pestanas-grupos", role: "tablist", "aria-label": "Grupos de variables" });
+      const nuevo = (id, texto, derivadas) => {
+        const b = el("button", { type: "button", role: "tab", class: "pestana-grupo", texto, onclick: () => mostrar(id) });
+        if (derivadas) b.append(el("span", { class: "marca", texto: "ƒ" }));
+        botones.push({ b, id });
+        barra.append(b);
+      };
+      nuevo(null, "Todos", false);
+      for (const { g } of grupos) nuevo(g.id, g.nombre, g.tipo === "Derivadas");
+      cont.prepend(barra);
+    }
+    mostrar(null);
     refrescarResultados();
   }
 
@@ -557,6 +598,7 @@
       id_ficha: DATOS.id_ficha,
       plantilla_id: DATOS.plantilla_id || null,
       definiciones: defs,
+      definicion_conjunto: DATOS.definicion_conjunto || null, // el conjunto entero, tal cual (OpenRoll lo importa de aquí)
       ficha: {
         nombre: estado.nombre.trim(),
         tipo: estado.tipo,
