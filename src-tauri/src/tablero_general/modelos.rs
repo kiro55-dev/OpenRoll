@@ -462,6 +462,9 @@ pub struct ValoresFicha {
     pub parametros: Vec<Parametro>,
     pub variables: Vec<ValorVariable>,
     pub pasos_valor: Vec<PasoValor>,
+    /// Los valores actuales de una ficha única (`Entidad.actuales`).
+    #[serde(default)]
+    pub actuales: Vec<ValorActual>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -609,6 +612,13 @@ pub struct Entidad {
 
     pub es_unico: bool,
 
+    /// Solo en una ficha ÚNICA: el valor actual de cada parámetro con máximo (la vida actual...). Una única solo tiene una instancia
+    /// y su valor actual se muestra y se escribe junto al máximo en la ficha. Se mantiene al día con el de su instancia (si cambia la
+    /// vida en el tablero, cambia aquí) y sobrevive a que se borre la instancia: la siguiente nace con estos valores. En las fichas no
+    /// únicas está vacío (`instancias::normalizar_actuales`).
+    #[serde(default)]
+    pub actuales: Vec<ValorActual>,
+
     /// Jugadores que controlan la ficha (la ven entera, la editan, mueven sus instancias...), sin el host,
     /// que siempre puede todo. Vacío = solo el host. Ver `jugadores.rs` y `visibilidad.rs`.
     pub propietarios: Vec<IdJugador>,
@@ -645,6 +655,8 @@ struct EntidadGuardada {
     archivos_adjuntos: Vec<Option<String>>,
     #[serde(default)]
     es_unico: bool,
+    #[serde(default)]
+    actuales: Vec<ValorActual>,
     #[serde(default)]
     propietarios: Vec<IdJugador>,
 
@@ -693,6 +705,7 @@ impl From<EntidadGuardada> for Entidad {
             foto_encuadre: g.foto_encuadre,
             archivos_adjuntos: g.archivos_adjuntos,
             es_unico: g.es_unico,
+            actuales: g.actuales,
             propietarios: g.propietarios,
         }
     }

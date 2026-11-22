@@ -1309,7 +1309,7 @@ pub fn iniciar_borrador_entidad_en(zona_id: u16, foto_url: Option<String>, state
         miniatura_url: None,
         foto_encuadre: Default::default(),
         archivos_adjuntos: adjuntos,
-        es_unico: false, vision: 0, plantilla_id: None,
+        es_unico: false, vision: 0, plantilla_id: None, actuales: vec![],
         propietarios: vec![],
     };
     // Los parámetros calculados nacen ya con el valor que dan las variables de por defecto
@@ -1450,6 +1450,7 @@ pub fn crear_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<Entida
     normalizar_variables(&est.definiciones_variables, &mut entidad.variables);
     variables::recalcular_parametros(&est.definiciones_parametros, &est.definiciones_variables, &mut entidad);
     entidad.pasos_valor.clear(); // solo los cambia `poner_paso_valor`
+    instancias::normalizar_actuales(&est.definiciones_parametros, &mut entidad, &[]);
     validar_entidad(&est, &state.almacen.dir(), &entidad)?;
     entidad.miniatura_url = None; // solo la pone `guardar_miniatura_ficha`
 
@@ -1497,6 +1498,9 @@ pub fn modificar_entidad_en(mut entidad: Entidad, state: &AppState) -> Result<()
     variables::recalcular_parametros(&est.definiciones_parametros, &est.definiciones_variables, &mut entidad);
     // Los pasos de − / + son de Rust (los cambia `poner_paso_valor`): se conservan los guardados
     entidad.pasos_valor = est.banco_entidades.iter().find(|e| e.id == entidad.id).map(|e| e.pasos_valor.clone()).unwrap_or_default();
+    // Una ficha única: los valores actuales que no manda el front (acaba de hacerse única) son los de su instancia, si la tiene
+    let de_instancia = est.instancias_activas.iter().find(|i| i.base.id == entidad.id).map(|i| i.valores_actuales.clone()).unwrap_or_default();
+    instancias::normalizar_actuales(&est.definiciones_parametros, &mut entidad, &de_instancia);
     validar_entidad(&est, &state.almacen.dir(), &entidad)?;
 
     let Some(delta) = delta_de_cambios(&est, &entidad) else { return Ok(()) };
@@ -1748,7 +1752,7 @@ mod tests {
             miniatura_url: None,
             foto_encuadre: Default::default(),
             archivos_adjuntos: vec![],
-            es_unico: false, vision: 0, plantilla_id: None,
+            es_unico: false, vision: 0, plantilla_id: None, actuales: vec![],
             propietarios,
         }
     }
@@ -1898,7 +1902,7 @@ mod tests_partidas {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Enemigo,
             parametros: parametros_por_defecto().iter().map(|d| Parametro { id_definicion: d.id, valor: d.valor_por_defecto.clone(), publico: true }).collect(),
             variables: vec![], pasos_valor: vec![], cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None,
-            foto_encuadre: Default::default(), archivos_adjuntos: vec![], es_unico: false, vision: 0, plantilla_id: None, propietarios: vec![],
+            foto_encuadre: Default::default(), archivos_adjuntos: vec![], es_unico: false, vision: 0, plantilla_id: None, actuales: vec![], propietarios: vec![],
         };
         e.aplicar_delta(&DeltaPartida::EntidadCreada(ficha(1)));
         e.aplicar_delta(&DeltaPartida::EntidadCreada(ficha(2)));
@@ -1932,6 +1936,63 @@ mod tests_partidas {
         assert!(archivos::guardar_texto(&dir, adj.clone(), &"é".repeat(archivos::MAX_CARACTERES_TEXTO)).is_ok());
         let e = archivos::guardar_texto(&dir, adj, &"é".repeat(archivos::MAX_CARACTERES_TEXTO + 1)).unwrap_err();
         assert!(e.contains("100000"), "{e}");
+    }
+
+    #[test]
+    fn una_ficha_unica_guarda_su_valor_actual_en_la_ficha_y_lo_sincroniza_con_su_instancia() {
+        let state = estado_en_a("actuales_unica");
+        ficha_con_instancias(&state);
+        let actual = |state: &AppState, id: u16| state.lock().banco_entidades.iter().find(|e| e.id == id).unwrap().actuales.clone();
+        let vida = |v: i16| vec![ValorActual { id_definicion: ID_VIDA, valor: v }];
+        let mut f = state.lock().banco_entidades.iter().find(|e| e.id == 2).unwrap().clone();
+
+        // Una ficha que no es única no guarda valores actuales (aunque el front los mande)
+        f.actuales = vida(3);
+        modificar_entidad_en(f.clone(), &state).unwrap();
+        assert!(actual(&state, 2).is_empty());
+
+        // Al hacerla única nacen en el máximo (la 2 solo tiene una instancia: la 3, que tiene la vida llena)
+        f.es_unico = true;
+        f.actuales = vec![];
+        modificar_entidad_en(f.clone(), &state).unwrap();
+        assert_eq!(actual(&state, 2), vida(10));
+
+        // Lo que se escribe en la ficha llega a su instancia (aunque pase del máximo: vida extra)
+        f.actuales = vida(14);
+        modificar_entidad_en(f.clone(), &state).unwrap();
+        let en_instancia = |state: &AppState| {
+            state.lock().instancias_activas.iter().find(|i| i.base.id == 2).unwrap().valores_actuales.iter().find(|v| v.id_definicion == ID_VIDA).unwrap().valor
+        };
+        assert_eq!(en_instancia(&state), 14);
+        assert_eq!(state.lock().instancias_activas.iter().find(|i| i.base.id == 2).unwrap().base.actuales, vida(14), "y a su copia de la ficha");
+
+        // Lo que cambia en el tablero llega a la ficha
+        let id_instancia = state.lock().instancias_activas.iter().find(|i| i.base.id == 2).unwrap().id_instancia;
+        modificar_valor_actual_en(id_instancia, ID_VIDA, -9, &state).unwrap();
+        assert_eq!((en_instancia(&state), actual(&state, 2)), (5, vida(5)));
+
+        // Borrar su instancia no pierde la vida: la siguiente nace con ella
+        borrar_instancia_en(id_instancia, &state).unwrap();
+        assert_eq!(actual(&state, 2), vida(5));
+        let nueva = instanciar_entidad_en(2, None, false, &state).unwrap();
+        assert_eq!(nueva.valores_actuales.iter().find(|v| v.id_definicion == ID_VIDA).unwrap().valor, 5);
+
+        // Una ficha con varias instancias que se hace única conserva la vida que tenía la suya (no vuelve al máximo)
+        let con_dos = state.lock().instancias_activas.iter().find(|i| i.base.id == 1).unwrap().id_instancia;
+        modificar_valor_actual_en(con_dos, ID_VIDA, -4, &state).unwrap();
+        let mut uno = state.lock().banco_entidades.iter().find(|e| e.id == 1).unwrap().clone();
+        uno.es_unico = true;
+        modificar_entidad_en(uno.clone(), &state).unwrap();
+        assert_eq!(actual(&state, 1), vida(6));
+
+        // Dejar de ser única la vacía
+        uno.es_unico = false;
+        modificar_entidad_en(uno, &state).unwrap();
+        assert!(actual(&state, 1).is_empty());
+
+        // Los jugadores que no son dueños no ven nada de esto
+        let vista = visibilidad::vista_jugador(&state.lock().instancias_activas.iter().find(|i| i.base.id == 2).unwrap().clone(), &parametros_por_defecto());
+        assert!(vista.base.actuales.is_empty());
     }
 
     #[test]
@@ -2082,7 +2143,7 @@ mod tests_partidas {
         cambiar_de_partida(&state, "B").unwrap();
         assert_eq!(nombre_partida_actual(&state), "B");
         assert!(zonas(&state).is_empty(), "B está vacía");
-        assert_eq!(state.lock().definiciones_parametros.len(), 4, "B nace con los parámetros de serie");
+        assert_eq!(state.lock().definiciones_parametros, crate::tablero_general::conjuntos_serie::dnd5e().parametros, "B nace con los de D&D");
         let dir_a = partidas::ruta_partida(&state.raiz, "A");
         assert!(dir_a.join("partida.json").is_file(), "A se guardó antes de cambiar");
         assert_eq!(std::fs::read_to_string(dir_a.join("deltas.jsonl")).unwrap(), "", "y su log quedó vacío");
@@ -2186,7 +2247,7 @@ mod tests_partidas {
         assert_eq!(partidas::listar(&state.raiz), ["Partida 1"]);
         assert_eq!(nombre_partida_actual(&state), "Partida 1");
         assert!(zonas(&state).is_empty());
-        assert_eq!(state.lock().definiciones_parametros.len(), 4);
+        assert_eq!(state.lock().definiciones_parametros, crate::tablero_general::conjuntos_serie::dnd5e().parametros);
 
         // Y si la única se llamaba «Partida 1», la nueva usa otro nombre (no hay choque con la que se va)
         borrar_partida_en(&state, "partida 1").unwrap();
@@ -2257,7 +2318,7 @@ mod tests_partidas {
         // Sus parámetros ya están en su partida.json, no solo en memoria
         let guardado = std::fs::read_to_string(partidas::ruta_partida(&state.raiz, "Tercera").join("partida.json")).unwrap();
         assert!(guardado.contains("Rango arma"));
-        assert_eq!(state.lock().definiciones_parametros.len(), 4);
+        assert_eq!(state.lock().definiciones_parametros, crate::tablero_general::conjuntos_serie::dnd5e().parametros);
         assert!(partidas::crear(&state.raiz, "tercera").is_err(), "repetida");
     }
 }

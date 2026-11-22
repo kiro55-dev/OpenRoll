@@ -705,7 +705,7 @@ pub mod pruebas {
         let mut f = Entidad {
             id: 1, nombre: "A".into(), tipo: TipoEntidad::Jugador, parametros: ps, variables: vec![valor(1, 60), valor(2, 55)], pasos_valor: vec![],
             cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
-            archivos_adjuntos: vec![], es_unico: false, vision: 0, plantilla_id: None, propietarios: vec![],
+            archivos_adjuntos: vec![], es_unico: false, vision: 0, plantilla_id: None, actuales: vec![], propietarios: vec![],
         };
         recalcular_parametros(&defs, &vars, &mut f);
         assert_eq!(f.parametros[0].valor, ValorParametro::Numero(11), "(60 + 55) / 10");

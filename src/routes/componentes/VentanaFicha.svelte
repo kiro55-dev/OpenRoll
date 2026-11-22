@@ -119,7 +119,7 @@
     if (exportando) return;
     exportando = true;
     try {
-      await exportarPlantilla($state.snapshot(ficha) as Entidad, editor.esBorrador ? null : ficha.id, await editor.archivosParaPlantilla());
+      await exportarPlantilla(editor.entidadParaPlantilla(), editor.esBorrador ? null : ficha.id, await editor.archivosParaPlantilla());
     } catch (err) {
       partida.errorEditor = `No se pudo exportar la plantilla: ${err instanceof Error ? err.message : String(err)}`;
     } finally {
@@ -217,8 +217,19 @@
       <!-- Los parámetros de la partida, uno por fila y en su orden -->
       {#each editor.definiciones as d (d.id)}
         {#if "Numero" in d.valor_por_defecto}
-          <label class="et" for="f-param-{d.id}">{d.clave}{d.tiene_maximo ? " (máx.)" : ""}</label>
+          <label class="et" for="f-param-{d.id}">{d.clave}{d.tiene_maximo && !editor.muestraActual(d) ? " (máx.)" : ""}</label>
           <div class="celda">
+            <!-- Una ficha única solo tiene una instancia: su valor actual se escribe aquí, junto al máximo («actual / máx.») -->
+            {#if editor.muestraActual(d)}
+              <CampoNumero
+                ancho={45}
+                min={-16000}
+                max={16000}
+                titulo="Valor actual (puede pasar del máximo: vida extra; rueda del ratón para subir/bajar)"
+                bind:value={() => editor.actual(d.id), (v) => editor.ponerActual(d.id, v)}
+              />
+              <span class="separador-x" title={ayuda("actual / máximo")}>/</span>
+            {/if}
             <CampoNumero
               ancho={45}
               sufijo={d.unidad ?? ""}

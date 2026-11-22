@@ -8,7 +8,8 @@
 // renombrado...). Al cancelar se descartan; al guardar se descarta lo que al final no se usó.
 // Rust nunca borra lo que la partida guardada referencia, así que pasarle de más no es peligroso.
 import { invoke } from "$lib/backend";
-import { partida, type DefinicionParametro, type DefinicionVariable, type Entidad, type GrupoVariables, type Parametro } from "$lib/partida.svelte";
+import { LIMITE_VALOR_ACTUAL, partida, type DefinicionParametro, type DefinicionVariable, type Entidad, type GrupoVariables, type Parametro } from "$lib/partida.svelte";
+import { esJugador } from "$lib/modo";
 import {
   LIMITE_VALOR_VARIABLE,
   calcularParametro,
@@ -178,6 +179,28 @@ export class EditorFicha {
   ponerNumero(id: number, n: number) {
     const p = this.#parametro(id);
     if (p) p.valor = { Numero: n };
+  }
+
+  /**
+   * ¿Se enseñan el valor actual Y el máximo? Solo en una ficha única y en los parámetros numéricos con máximo: una ficha que no es
+   * única tiene varias instancias, cada una con su valor actual, y aquí solo se escribe el máximo.
+   */
+  muestraActual(d: DefinicionParametro): boolean {
+    return !!this.entidad.es_unico && d.tiene_maximo && esNumerico(d);
+  }
+  /** El valor actual de una ficha única: el escrito y, si aún no hay, el de su instancia (si la tiene) o el máximo. */
+  actual(id: number): number {
+    const escrito = this.entidad.actuales?.find((a) => a.id_definicion === id);
+    if (escrito) return escrito.valor;
+    const deInstancia = partida.instancias.find((i) => i.base.id === this.entidad.id)?.valores_actuales.find((v) => v.id_definicion === id);
+    return deInstancia ? deInstancia.valor : this.numero(id);
+  }
+  /** Guarda lo que haya en el campo tal cual (aunque esté vacío): `guardar` lo valida. */
+  ponerActual(id: number, n: number) {
+    this.entidad.actuales ??= [];
+    const a = this.entidad.actuales.find((x) => x.id_definicion === id);
+    if (a) a.valor = n;
+    else this.entidad.actuales.push({ id_definicion: id, valor: n });
   }
 
   texto(id: number): string {
@@ -455,13 +478,16 @@ export class EditorFicha {
     const { entidad, avisos } = aplicarAFicha($state.snapshot(this.entidad) as Entidad, plantilla, {
       definiciones: this.definiciones,
       variables: this.variables,
-      conjunto: conjuntoActual()
+      conjunto: conjuntoActual(),
+      puedeUnico: !esJugador // si una ficha es única lo decide el host: un jugador no lo cambia con una plantilla
     });
     const e = this.entidad;
     e.nombre = entidad.nombre;
     e.tipo = entidad.tipo;
     e.cuerpo = entidad.cuerpo;
     e.vision = entidad.vision;
+    e.es_unico = entidad.es_unico;
+    e.actuales = entidad.actuales ?? [];
     e.plantilla_id = entidad.plantilla_id ?? null;
     e.parametros = entidad.parametros;
     e.variables = entidad.variables;
@@ -484,6 +510,15 @@ export class EditorFicha {
     this.datosImportados = true;
     if (this.#relojImportado) clearTimeout(this.#relojImportado);
     this.#relojImportado = setTimeout(() => (this.datosImportados = false), 4000);
+  }
+
+  /** La ficha tal como la ve la ventana, para exportarla: una única lleva su valor actual (el escrito o el de su instancia). */
+  entidadParaPlantilla(): Entidad {
+    const e = $state.snapshot(this.entidad) as Entidad;
+    e.actuales = e.es_unico
+      ? this.definiciones.filter((d) => this.muestraActual(d)).map((d) => ({ id_definicion: d.id, valor: this.actual(d.id) }))
+      : [];
+    return e;
   }
 
   /** Las rutas de los .txt adjuntos (los demás tipos de archivo no cuentan). */
@@ -635,6 +670,12 @@ export class EditorFicha {
     }
     this.#ponerCuerpo(this.cuerpoX, this.cuerpoY);
     this.entidad.vision = acotar(this.entidad.vision ?? 0, 0, MAX_VISION);
+    // Los valores actuales solo los tiene una ficha única, y de los parámetros con máximo; uno vacío o roto se quita (Rust lo rellena)
+    this.entidad.actuales = !this.entidad.es_unico
+      ? []
+      : (this.entidad.actuales ?? [])
+          .filter((a) => this.definiciones.some((d) => d.id === a.id_definicion && this.muestraActual(d)) && Number.isFinite(a.valor))
+          .map((a) => ({ id_definicion: a.id_definicion, valor: acotar(a.valor, -LIMITE_VALOR_ACTUAL, LIMITE_VALOR_ACTUAL) }));
   }
 
   async #descartarSesion() {

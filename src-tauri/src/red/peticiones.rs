@@ -345,6 +345,8 @@ fn entidad_modificable(est: &EstadoPartida, jugador: IdJugador, e: &Entidad, sub
     crate::tablero_general::variables::normalizar_variables(&est.definiciones_variables, &mut nueva.variables);
     crate::tablero_general::variables::recalcular_parametros(&est.definiciones_parametros, &est.definiciones_variables, &mut nueva);
     nueva.pasos_valor = guardada.pasos_valor.clone(); // los cambia `poner_paso_valor`, no el guardado de la ficha
+    let de_instancia = est.instancias_activas.iter().find(|i| i.base.id == e.id).map(|i| i.valores_actuales.clone()).unwrap_or_default();
+    crate::tablero_general::instancias::normalizar_actuales(&est.definiciones_parametros, &mut nueva, &de_instancia);
     for c in cambios_entidad::entre(guardada, &nueva) {
         if !cambio_permitido(jugador, &c) {
             return Err("Eso de tu ficha solo lo puede cambiar el host".into());
@@ -522,7 +524,7 @@ mod tests {
             miniatura_url: None,
             foto_encuadre: Default::default(),
             archivos_adjuntos: vec![Some(format!("archivos/entidad_{id}/notas.txt"))],
-            es_unico: false, vision: 0, plantilla_id: None,
+            es_unico: false, vision: 0, plantilla_id: None, actuales: vec![],
             propietarios,
         }
     }

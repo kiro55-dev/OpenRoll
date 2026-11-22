@@ -281,13 +281,23 @@ impl EstadoPartida {
             }
             DeltaPartida::HistorialTiradasLimpiado => self.historial_tiradas.clear(),
             DeltaPartida::ValorActualModificado { id_instancia, id_definicion, delta } => {
-                if let Some(v) = self
-                    .instancias_activas
-                    .iter_mut()
-                    .find(|i| i.id_instancia == *id_instancia)
-                    .and_then(|i| i.valores_actuales.iter_mut().find(|v| v.id_definicion == *id_definicion))
-                {
-                    v.valor = v.valor.saturating_add(*delta);
+                let mut unica = None;
+                if let Some(inst) = self.instancias_activas.iter_mut().find(|i| i.id_instancia == *id_instancia) {
+                    if let Some(v) = inst.valores_actuales.iter_mut().find(|v| v.id_definicion == *id_definicion) {
+                        v.valor = v.valor.saturating_add(*delta);
+                        if inst.base.es_unico {
+                            unica = Some((inst.base.id, v.valor));
+                        }
+                    }
+                }
+                // Una ficha ÚNICA recuerda su valor actual aunque se borre su instancia (la ficha y la copia de cada instancia suya)
+                if let Some((id_ficha, valor)) = unica {
+                    let bases = self.banco_entidades.iter_mut().chain(self.instancias_activas.iter_mut().map(|i| &mut i.base));
+                    for base in bases.filter(|b| b.id == id_ficha) {
+                        if let Some(a) = base.actuales.iter_mut().find(|a| a.id_definicion == *id_definicion) {
+                            a.valor = valor;
+                        }
+                    }
                 }
             }
             DeltaPartida::ZonaCreada(zona) => {
@@ -410,6 +420,16 @@ impl EstadoPartida {
                     .chain(self.instancias_activas.iter_mut().map(|i| &mut i.base));
                 for base in bases.filter(|b| b.id == *id) {
                     cambios_entidad::aplicar(base, cambios);
+                }
+                // Los valores actuales de una ficha única que se escriben en la ficha llegan a su instancia
+                if let Some(CambioEntidad::Actuales(nuevos)) = cambios.iter().rev().find(|c| matches!(c, CambioEntidad::Actuales(_))) {
+                    for inst in self.instancias_activas.iter_mut().filter(|i| i.base.id == *id && i.base.es_unico) {
+                        for n in nuevos {
+                            if let Some(v) = inst.valores_actuales.iter_mut().find(|v| v.id_definicion == n.id_definicion) {
+                                v.valor = n.valor;
+                            }
+                        }
+                    }
                 }
                 // Si el cuerpo creció, puede salirse del mapa: se reencaja
                 if cambios.iter().any(|c| matches!(c, CambioEntidad::Cuerpo(_))) {
@@ -628,12 +648,14 @@ impl EstadoPartida {
             normalizar_variables(&vars, &mut e.variables);
             variables::recalcular_parametros(&defs, &vars, e);
             normalizar_pasos(&defs, &mut e.pasos_valor);
+            crate::tablero_general::instancias::normalizar_actuales(&defs, e, &[]);
         }
         for i in self.instancias_activas.iter_mut() {
             normalizar_parametros(&defs, &mut i.base.parametros);
             normalizar_variables(&vars, &mut i.base.variables);
             variables::recalcular_parametros(&defs, &vars, &mut i.base);
             normalizar_pasos(&defs, &mut i.base.pasos_valor);
+            crate::tablero_general::instancias::normalizar_actuales(&defs, &mut i.base, &i.valores_actuales);
             // Un valor actual por cada parámetro con máximo, en el orden de las definiciones. Uno que
             // gana el máximo después de crearse la instancia empieza lleno (en el valor de la ficha).
             let antes = std::mem::take(&mut i.valores_actuales);
@@ -783,7 +805,7 @@ pub(crate) mod tests {
                 miniatura_url: None,
                 foto_encuadre: Default::default(),
                 archivos_adjuntos: vec![],
-                es_unico: false, vision: 0, plantilla_id: None,
+                es_unico: false, vision: 0, plantilla_id: None, actuales: vec![],
                 propietarios: vec![],
             },
             valores_actuales: vec![ValorActual { id_definicion: ID_VIDA, valor: vida }],
@@ -823,6 +845,8 @@ pub(crate) mod tests {
         {
             let a = Almacen::abrir(&dir).unwrap();
             let mut e = EstadoPartida::default();
+            // Una partida con los parámetros genéricos ya guardada (sin `partida.json` nacería con D&D)
+            compactar(&a, &e).unwrap();
             let mut inst = instancia(1, 10);
             inst.base.parametros = vec![];
             e.registrar(&a, DeltaPartida::EntidadCreada(inst.base.clone())).unwrap();
@@ -886,7 +910,7 @@ pub(crate) mod tests {
         compactar(&a, &e).unwrap();
 
         let guardado = a.leer_partida().unwrap().expect("ahora existe partida.json");
-        for clave in ["Vida", "Armadura", "Velocidad", "Rango arma"] {
+        for clave in ["Puntos de golpe", "Clase de armadura", "Velocidad", "Rango arma"] {
             assert!(guardado.contains(clave), "falta {clave} en partida.json");
         }
         // La siguiente carga ya no es "nueva"
@@ -923,6 +947,8 @@ pub(crate) mod tests {
     #[test]
     fn una_ficha_antigua_en_el_log_se_carga_con_sus_valores() {
         let a = Almacen::abrir(dir_temporal("ficha_antigua")).unwrap();
+        // Una partida antigua: con su `partida.json` de los parámetros genéricos (sin él nacería con D&D)
+        compactar(&a, &EstadoPartida::default()).unwrap();
         a.anadir_delta(
             r#"{"seq":1,"delta":{"EntidadCreada":{"id":2,"nombre":"Lobo","tipo":"Enemigo","vida_max":9,
             "vida_es_publica":false,"armadura":1,"armadura_es_publica":true,"velocidad":12,"rango_arma":1,

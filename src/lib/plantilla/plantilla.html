@@ -30,6 +30,10 @@
   .ficha { display: flex; gap: 16px; flex-wrap: wrap; }
   .campos { flex: 1; min-width: 300px; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; align-items: center; }
   .campos .fila { min-width: 0; }
+  /* Una ficha ÚNICA enseña «actual / máx.» en los parámetros con máximo; las demás solo el máximo */
+  .campos .solo-unica { display: none; }
+  .campos.unica .solo-unica { display: inline-flex; align-items: center; gap: 6px; }
+  .campos.unica .sin-unica { display: none; }
   .publico { display: inline-flex; align-items: center; gap: 5px; color: #a1a1aa; font-size: 12px; white-space: nowrap; cursor: pointer; }
   label { color: #a1a1aa; }
   input, select { font: inherit; background: #09090b; border: 1px solid #3f3f46; color: white; border-radius: 4px; padding: 4px 6px; }
@@ -129,7 +133,7 @@
     return { antes: html.slice(0, i), despues: html.slice(i + marca.length) };
   })();
   const defs = DATOS.definiciones;
-  const LIMITE_VARIABLE = 9999, MAX_PARAMETRO = 32767, MAX_CUERPO = 255, MAX_VISION = 10000;
+  const LIMITE_VARIABLE = 9999, MAX_PARAMETRO = 32767, MAX_CUERPO = 255, MAX_VISION = 10000, LIMITE_ACTUAL = 16000;
   const MAX_BYTES_FOTO = 8 * 1024 * 1024, MAX_LADO_FOTO = 8192, MAX_PIXELES_FOTO = 40000000;
   const MIME_ADMITIDOS = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
 
@@ -140,7 +144,9 @@
     tipo: f.tipo || "Jugador",
     cuerpo: Array.isArray(f.cuerpo) ? [f.cuerpo[0] || 1, f.cuerpo[1] || 1] : [1, 1],
     vision: Number(f.vision) || 0,
+    unico: !!f.unico,
     parametros: {},
+    actuales: {}, // el valor actual de una ficha única (null = el mismo que el máximo)
     publicos: {},
     variables: {},
     foto: DATOS.foto || null
@@ -150,6 +156,7 @@
     const def = "Numero" in d.valor_por_defecto ? d.valor_por_defecto.Numero : d.valor_por_defecto.Texto;
     estado.parametros[d.id] = p ? p.valor : def;
     estado.publicos[d.id] = p ? !!p.publico : d.visibilidad === "SiemprePublico";
+    estado.actuales[d.id] = p && typeof p.actual === "number" ? p.actual : null;
   }
   for (const d of defs.variables) {
     const v = (f.variables || []).find((x) => x.id === d.id) || {};
@@ -245,7 +252,15 @@
     fila("Nombre", el("input", { type: "text", maxlength: 100, value: estado.nombre, oninput: (e) => { estado.nombre = e.target.value; marcar(); } }));
     const tipo = el("select", { onchange: (e) => { estado.tipo = e.target.value; marcar(); } });
     for (const t of ["Jugador", "NPC", "Enemigo", "Objeto"]) tipo.append(el("option", { value: t, texto: t, selected: t === estado.tipo }));
-    fila("Tipo", tipo);
+    // «Único»: solo existe una instancia de la ficha en el mundo; con ella los parámetros con máximo enseñan también el valor actual
+    const unico = el("label", { class: "publico", title: "Si es único solo existirá una instancia en el mundo (OpenRoll solo lo aplica si lo importa el host)" },
+      el("input", { type: "checkbox", checked: estado.unico, onchange: (e) => {
+        estado.unico = e.target.checked;
+        c.classList.toggle("unica", estado.unico);
+        marcar();
+      } }), document.createTextNode("Único"));
+    c.classList.toggle("unica", estado.unico);
+    fila("Tipo", tipo, unico);
     const lado = (i) => el("input", { type: "number", min: 1, max: MAX_CUERPO, value: estado.cuerpo[i],
       oninput: (e) => { estado.cuerpo[i] = acotar(e.target.value, 1, MAX_CUERPO); marcar(); } });
     fila("Cuerpo", lado(0), el("span", { class: "unidad", texto: "×" }), lado(1), el("span", { class: "unidad", texto: "casillas" }));
@@ -254,11 +269,22 @@
 
     for (const d of defs.parametros) {
       const numero = "Numero" in d.valor_por_defecto;
-      const etiqueta = d.clave + (d.tiene_maximo ? " (máx.)" : "");
+      const conActual = numero && !!d.tiene_maximo;
+      // En una ficha única el valor actual va junto al máximo: «actual / máx.»
+      const actual = conActual
+        ? el("input", { type: "number", min: -LIMITE_ACTUAL, max: LIMITE_ACTUAL,
+            value: estado.actuales[d.id] === null ? estado.parametros[d.id] : estado.actuales[d.id],
+            title: "Valor actual (puede pasar del máximo: vida extra)",
+            oninput: (e) => { estado.actuales[d.id] = acotar(e.target.value, -LIMITE_ACTUAL, LIMITE_ACTUAL); marcar(); } })
+        : null;
       const entrada = numero
         ? el("input", { type: "number", min: 0, max: MAX_PARAMETRO, value: estado.parametros[d.id], disabled: !!d.calculo,
             title: d.calculo ? "Se calcula con las variables de la ficha" : null,
-            oninput: (e) => { estado.parametros[d.id] = acotar(e.target.value, 0, MAX_PARAMETRO); marcar(); refrescarResultados(); } })
+            oninput: (e) => {
+              estado.parametros[d.id] = acotar(e.target.value, 0, MAX_PARAMETRO);
+              if (actual && estado.actuales[d.id] === null) actual.value = estado.parametros[d.id]; // sin tocar, el actual sigue al máximo
+              marcar(); refrescarResultados();
+            } })
         : el("input", { type: "text", maxlength: 2000, value: estado.parametros[d.id] || "",
             oninput: (e) => { estado.parametros[d.id] = e.target.value; marcar(); } });
       // Tres columnas, como en OpenRoll: etiqueta · cuadro · «Hacer público» (solo si cada ficha puede decidirlo)
@@ -266,8 +292,9 @@
         ? el("label", { class: "publico" }, el("input", { type: "checkbox", checked: !!estado.publicos[d.id],
             onchange: (e) => { estado.publicos[d.id] = e.target.checked; marcar(); } }), document.createTextNode("Hacer público"))
         : null;
-      c.append(el("label", { texto: etiqueta }),
-        el("div", { class: "fila" }, entrada, d.unidad ? el("span", { class: "unidad", texto: d.unidad }) : null,
+      const etiqueta = el("label", { texto: d.clave }, d.tiene_maximo ? el("span", { class: "sin-unica", texto: " (máx.)" }) : null);
+      c.append(etiqueta,
+        el("div", { class: "fila" }, actual ? el("span", { class: "solo-unica" }, actual, el("span", { class: "unidad", texto: "/" })) : null, entrada, d.unidad ? el("span", { class: "unidad", texto: d.unidad }) : null,
           d.calculo ? el("span", { class: "unidad", texto: "(se calcula)" }) : null, publica));
     }
   }
@@ -535,7 +562,10 @@
         tipo: estado.tipo,
         cuerpo: estado.cuerpo,
         vision: estado.vision,
-        parametros: defs.parametros.map((d) => ({ id: d.id, clave: d.clave, valor: estado.parametros[d.id], publico: !!estado.publicos[d.id] })),
+        unico: !!estado.unico,
+        parametros: defs.parametros.map((d) => ({ id: d.id, clave: d.clave, valor: estado.parametros[d.id], publico: !!estado.publicos[d.id],
+          // El valor actual solo existe en una ficha única; sin escribirlo, OpenRoll usa el máximo (o el de su instancia)
+          actual: estado.unico && d.tiene_maximo && estado.actuales[d.id] !== null ? estado.actuales[d.id] : undefined })),
         variables: defs.variables.map((d) => {
           const v = estado.variables[d.id];
           const o = (d.opciones || [])[v.eleccion];

@@ -174,6 +174,7 @@ impl EstadoPartida {
                     parametros: e.parametros.clone(),
                     variables: e.variables.clone(),
                     pasos_valor: e.pasos_valor.clone(),
+                    actuales: e.actuales.clone(),
                 });
             }
         }
@@ -199,6 +200,7 @@ impl EstadoPartida {
                 e.parametros = g.parametros.clone();
                 e.variables = g.variables.clone();
                 e.pasos_valor = g.pasos_valor.clone();
+                e.actuales = g.actuales.clone();
             }
         };
         let poner_instancia = |i: &mut Instancia| {
@@ -247,6 +249,7 @@ impl EstadoPartida {
             e.parametros.clear();
             e.variables.clear();
             e.pasos_valor.clear();
+            e.actuales.clear();
         };
         let vaciar_instancia = |i: &mut Instancia| {
             vaciar(&mut i.base);
@@ -834,7 +837,7 @@ mod tests {
         Entidad {
             id, nombre: format!("F{id}"), tipo: TipoEntidad::Enemigo, parametros, variables: vec![], pasos_valor: vec![],
             cuerpo: Cuerpo::Pequenio, zona_id: 1, foto_url: None, miniatura_url: None, foto_encuadre: Default::default(),
-            archivos_adjuntos: vec![], es_unico: false, vision: 0, plantilla_id: None, propietarios: vec![],
+            archivos_adjuntos: vec![], es_unico: false, vision: 0, plantilla_id: None, actuales: vec![], propietarios: vec![],
         }
     }
 
@@ -1183,9 +1186,11 @@ mod tests {
         assert_eq!(nueva.conjuntos_parametros.len(), 1);
         assert_eq!(nueva.conjuntos_parametros[0].origen.as_deref(), Some("dnd5e"));
         assert_eq!(nueva.conjuntos_parametros[0].contenido.nombre, "D&D 5e");
-        assert_eq!(nueva.grupos_variables.len(), 3);
-        assert_eq!(nueva.definiciones_variables.len(), 31);
-        assert_eq!(nueva.definiciones_parametros, parametros_por_defecto(), "vida, armadura, velocidad y rango de arma como siempre");
+        let dnd = crate::tablero_general::conjuntos_serie::dnd5e();
+        assert_eq!(nueva.grupos_variables.len(), 6);
+        assert_eq!(nueva.definiciones_variables.len(), 46);
+        assert_eq!(nueva.definiciones_parametros, dnd.parametros, "los de la hoja de D&D");
+        assert_eq!(nueva.archivos_texto_defecto, dnd.archivos_texto, "y sus archivos de texto");
         assert!(nueva.escala_resultado.is_some());
         // Las definiciones vivas SON las del conjunto activo
         assert_eq!(nueva.contenido_de(1).unwrap().variables, nueva.definiciones_variables);
@@ -1397,8 +1402,8 @@ mod tests {
         assert!(viejo.archivos_texto.is_empty());
         let e: EstadoPartida = serde_json::from_str(&serde_json::to_string(&EstadoPartida::default()).unwrap().replace(",\"archivos_texto_defecto\":[]", "")).unwrap();
         assert!(e.archivos_texto_defecto.is_empty());
-        // Los conjuntos de serie no traen ninguno
-        assert!(integrados().iter().all(|i| i.contenido.archivos_texto.is_empty()));
+        // De los conjuntos de serie, solo D&D trae (los de su hoja de personaje)
+        assert!(integrados().iter().all(|i| i.contenido.archivos_texto.is_empty() == (i.clave != "dnd5e")));
     }
 
     #[test]

@@ -45,6 +45,7 @@ pub fn vista_jugador(inst: &Instancia, definiciones: &[DefinicionParametro]) -> 
     vista.base.variables.clear();
     vista.base.pasos_valor.clear(); // preferencia de quien controla la ficha
     vista.base.plantilla_id = None; // es de quien rellena la ficha, no de quien la ve
+    vista.base.actuales.clear(); // el valor actual de una única que llega es el de su instancia (solo de los parámetros públicos)
     vista
 }
 
@@ -179,7 +180,7 @@ pub fn cambios_para(
     let visibles: Vec<CambioEntidad> = cambios
         .iter()
         .filter(|c| match c {
-            CambioEntidad::Adjuntos(_) | CambioEntidad::Variable(_) | CambioEntidad::PasoValor(_) | CambioEntidad::PlantillaId(_) => false,
+            CambioEntidad::Adjuntos(_) | CambioEntidad::Variable(_) | CambioEntidad::PasoValor(_) | CambioEntidad::PlantillaId(_) | CambioEntidad::Actuales(_) => false,
             CambioEntidad::Parametro(p) => p.publico,
             _ => true,
         })
@@ -212,7 +213,7 @@ mod tests {
                 miniatura_url: None,
                 foto_encuadre: Default::default(),
                 archivos_adjuntos: vec![Some("archivos/entidad_1/notas.txt".into())],
-                es_unico: false, vision: 0, plantilla_id: None,
+                es_unico: false, vision: 0, plantilla_id: None, actuales: vec![],
                 propietarios: vec![3],
             },
             valores_actuales: vec![ValorActual { id_definicion: ID_VIDA, valor: 7 }],

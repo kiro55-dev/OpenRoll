@@ -31,6 +31,8 @@ pub enum CambioEntidad {
     Encuadre(EncuadreFoto),
     Adjuntos(Vec<Option<String>>),
     Unico(bool),
+    /// Los valores actuales de una ficha única (ver `Entidad.actuales`); también llegan a su instancia.
+    Actuales(Vec<ValorActual>),
     Propietarios(Vec<IdJugador>),
 }
 
@@ -89,6 +91,9 @@ pub fn entre(antes: &Entidad, despues: &Entidad) -> Vec<CambioEntidad> {
     if antes.es_unico != despues.es_unico {
         cambios.push(CambioEntidad::Unico(despues.es_unico));
     }
+    if antes.actuales != despues.actuales {
+        cambios.push(CambioEntidad::Actuales(despues.actuales.clone()));
+    }
     if antes.propietarios != despues.propietarios {
         cambios.push(CambioEntidad::Propietarios(despues.propietarios.clone()));
     }
@@ -129,6 +134,7 @@ pub fn aplicar(e: &mut Entidad, cambios: &[CambioEntidad]) {
             CambioEntidad::Encuadre(enc) => e.foto_encuadre = *enc,
             CambioEntidad::Adjuntos(a) => e.archivos_adjuntos = a.clone(),
             CambioEntidad::Unico(u) => e.es_unico = *u,
+            CambioEntidad::Actuales(a) => e.actuales = a.clone(),
             CambioEntidad::Propietarios(p) => e.propietarios = p.clone(),
         }
     }
@@ -153,7 +159,7 @@ mod tests {
             miniatura_url: Some("miniaturas/ficha/entidad_1_1.webp".into()),
             foto_encuadre: Default::default(),
             archivos_adjuntos: vec![Some("archivos/entidad_1/notas.txt".into())],
-            es_unico: false, vision: 0, plantilla_id: None,
+            es_unico: false, vision: 0, plantilla_id: None, actuales: vec![],
             propietarios: vec![],
         }
     }

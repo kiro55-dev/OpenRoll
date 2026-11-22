@@ -72,6 +72,11 @@ fn parametro(
     }
 }
 
+/// Un archivo de texto por defecto (el id lo da su posición).
+fn archivo(id: u16, nombre: &str, contenido: &str) -> ArchivoTextoDefecto {
+    ArchivoTextoDefecto { id, nombre: nombre.into(), contenido: contenido.into() }
+}
+
 /// Las seis características de D&D y Pathfinder, en su orden: nombre y abreviatura.
 const SEIS: [(&str, &str); 6] = [
     ("Fuerza", "fue"),
@@ -91,11 +96,11 @@ fn id_de(abreviatura: &str) -> u16 {
 // D&D 5e
 // ------------------------------------------------------------------
 
-/// Las habilidades de D&D 5e: nombre, abreviatura y característica.
+/// Las habilidades de D&D 5e, en el orden de la hoja de personaje oficial en castellano: nombre, abreviatura y característica.
 const HABILIDADES_DND: [(&str, &str, &str); 18] = [
     ("Acrobacia", "acro", "des"),
     ("Atletismo", "atl", "fue"),
-    ("Arcano", "arc", "int"),
+    ("Conocimiento arcano", "arc", "int"),
     ("Engaño", "eng", "car"),
     ("Historia", "his", "int"),
     ("Interpretación", "interp", "car"),
@@ -113,11 +118,51 @@ const HABILIDADES_DND: [(&str, &str, &str); 18] = [
     ("Trato con animales", "tan", "sab"),
 ];
 
-/// D&D 5e: las seis características y la Competencia (variables base), las tiradas de salvación y las habilidades (derivadas, con la
-/// competencia como opcional: un check «+ com» en la ficha). Los parámetros visuales son los de siempre.
+/// Los archivos de texto con los que nace cada personaje de D&D: las cajas de texto libre de la hoja oficial (las tres páginas), los
+/// datos de la cabecera que no son números (un parámetro de texto no podría ser variable) y los espacios de conjuro de cada nivel.
+fn archivos_dnd() -> Vec<ArchivoTextoDefecto> {
+    let niveles: String = (1..=9).map(|n| format!("NIVEL {n}\n- \n\n")).collect();
+    let espacios: String = (1..=9).map(|n| format!("NIVEL {n}: 0/0\n")).collect();
+    let lista: Vec<(&str, String)> = vec![
+        ("Datos del personaje", "RAZA: \nCLASE Y NIVEL: \nTRASFONDO: \nALINEAMIENTO: \n".into()),
+        ("Personalidad", "RASGOS DE PERSONALIDAD\n- \n\nIDEALES\n- \n\nVÍNCULOS\n- \n\nDEFECTOS\n- \n".into()),
+        ("Ataques y lanzamiento de conjuros", "NOMBRE | BONIFICADOR | DAÑO/TIPO\n | | \n | | \n | | \n\nNOTAS\n- \n".into()),
+        ("Equipo", "EQUIPO\n- \n\n(Las monedas PC, PP, PE, PO y PPT están en las variables del grupo «Dinero».)\n".into()),
+        ("Otras competencias e idiomas", "IDIOMAS\n- \n\nARMADURAS\n- \n\nARMAS\n- \n\nHERRAMIENTAS\n- \n\nOTRAS\n- \n".into()),
+        ("Rasgos y atributos", "RASGOS Y ATRIBUTOS\n- \n\nRASGOS Y ATRIBUTOS ADICIONALES\n- \n".into()),
+        (
+            "Conjuros",
+            format!(
+                "CLASE LANZADORA: \nAPTITUD MÁGICA: \n\n(El ataque y la CD de conjuros son las variables «Ataque de conjuros» y «CD de conjuros»: marca en ellas tu aptitud mágica. Los espacios están en el archivo «Espacios de conjuro».)\n\nMarca con [P] los conjuros preparados.\n\nTRUCOS (NIVEL 0)\n- \n\n{niveles}"
+            ),
+        ),
+        // actual/máximo de cada nivel: se escribe, p. ej., «NIVEL 1: 2/4»
+        ("Espacios de conjuro", format!("ESPACIOS DE CONJURO (actual/máximo)\n{espacios}")),
+        ("Aspecto", "EDAD: \nALTURA: \nPESO: \nOJOS: \nPIEL: \nPELO: \n\nDESCRIPCIÓN\n".into()),
+        ("Historia del personaje", String::new()),
+        ("Aliados y organizaciones", "NOMBRE: \nSÍMBOLO: \n\n- \n".into()),
+        ("Tesoro", String::new()),
+    ];
+    lista.into_iter().enumerate().map(|(i, (nombre, contenido))| archivo(i as u16 + 1, nombre, &contenido)).collect()
+}
+
+/// D&D 5e, según la hoja de personaje oficial en castellano:
+///  * Variables (todo lo numérico de la hoja): las seis características y la Competencia (bases), las tiradas de salvación y las
+///    habilidades (derivadas, con la competencia como opcional: un check «+ com» en la ficha); «Combate y conjuros»: iniciativa, ataques
+///    cuerpo a cuerpo y a distancia, la percepción pasiva y el ataque y la CD de conjuros, que suman la característica de lanzamiento que
+///    marque cada ficha (Int, Sab o Car); «Dinero» (las cinco monedas) y «Personaje» (experiencia, salvaciones contra la muerte e
+///    inspiración), bases cuyo resultado es su valor.
+///  * Parámetros visuales: lo que se dibuja en el tablero o se gasta en combate: puntos de golpe (con máximo), clase de armadura,
+///    velocidad, rango de arma y dados de golpe (con máximo). Sin puntos de golpe temporales: una ficha única puede tener más vida
+///    actual que máxima.
+///  * Archivos de texto: las cajas de texto libre de la hoja, los datos de cabecera (raza, clase y nivel, trasfondo, alineamiento) y los
+///    espacios de conjuro de cada nivel (actual/máximo).
 pub fn dnd5e() -> ConjuntoParametros {
     const SALVACIONES: u16 = 2;
     const HABILIDADES: u16 = 3;
+    const COMBATE: u16 = 4;
+    const DINERO: u16 = 5;
+    const PERSONAJE: u16 = 6;
     let competencia = 7;
 
     let mut variables: Vec<DefinicionVariable> =
@@ -134,20 +179,58 @@ pub fn dnd5e() -> ConjuntoParametros {
         id += 1;
         variables.push(derivada(id, nombre, abreviatura, HABILIDADES, id_de(caracteristica), &[competencia]));
     }
+    // Combate y conjuros: el ataque y la CD de conjuros dependen de la Competencia y suman la característica que marque la ficha
+    let lanzadoras = [id_de("int"), id_de("sab"), id_de("car")];
+    let siguiente = |id: &mut u16| {
+        *id += 1;
+        *id
+    };
+    variables.push(derivada(siguiente(&mut id), "Iniciativa", "ini", COMBATE, id_de("des"), &[]));
+    variables.push(derivada(siguiente(&mut id), "Ataque cuerpo a cuerpo", "atcc", COMBATE, id_de("fue"), &[competencia]));
+    variables.push(derivada(siguiente(&mut id), "Ataque a distancia", "atdist", COMBATE, id_de("des"), &[competencia]));
+    variables.push(derivada(siguiente(&mut id), "Ataque de conjuros", "atconj", COMBATE, competencia, &lanzadoras));
+    variables.push(DefinicionVariable { constante: 8, ..derivada(siguiente(&mut id), "CD de conjuros", "cdconj", COMBATE, competencia, &lanzadoras) });
+    // Sabiduría (percepción) pasiva = 10 + Sabiduría (+ competencia si la ficha domina Percepción)
+    variables.push(DefinicionVariable {
+        constante: 10,
+        ..derivada(siguiente(&mut id), "Sabiduría percepción pasiva", "ppas", COMBATE, id_de("sab"), &[competencia])
+    });
+    // Dinero y datos del personaje: bases con neutro 0 y escala 1 (su resultado es su valor); sin abreviatura se tiran por su nombre
+    for moneda in ["PC", "PP", "PE", "PO", "PPT"] {
+        variables.push(base(siguiente(&mut id), moneda, "", DINERO, 0, 1));
+    }
+    for nombre in ["Puntos de experiencia", "Éxitos contra la muerte", "Fallos contra la muerte", "Inspiración"] {
+        variables.push(base(siguiente(&mut id), nombre, "", PERSONAJE, 0, 1));
+    }
+
+    let por_defecto = parametros_por_defecto();
+    // Los puntos de golpe temporales no hacen falta: en una ficha única el valor actual puede pasar del máximo (vida extra)
+    let parametros = vec![
+        DefinicionParametro { clave: "Puntos de golpe".into(), ..por_defecto[0].clone() },
+        DefinicionParametro { clave: "Clase de armadura".into(), ..por_defecto[1].clone() },
+        // 30 pies ≈ 9 m
+        DefinicionParametro { valor_por_defecto: ValorParametro::Numero(9), ..por_defecto[2].clone() },
+        por_defecto[3].clone(),
+        // Los dados de golpe: el máximo es el total y el valor actual, los que quedan (se gastan al descansar)
+        parametro(5, "Dados de golpe", 1, true, None, Visibilidad::SiemprePrivado, None, false, None),
+    ];
 
     ConjuntoParametros {
         nombre: "D&D 5e".into(),
-        descripcion: "Las seis características y la competencia, las tiradas de salvación y las 18 habilidades (con su check «+ com»). Vida, armadura, velocidad y rango de arma como siempre.".into(),
-        parametros: parametros_por_defecto(),
+        descripcion: "Según la hoja de personaje oficial: características, salvaciones, 18 habilidades, combate y conjuros, dinero y datos del personaje como variables; y archivos de texto para equipo, rasgos, conjuros y sus espacios, personalidad...".into(),
+        parametros,
         grupos_variables: vec![
             grupo(CARACTERISTICAS, "Características", TipoGrupoVariables::Base),
             grupo(SALVACIONES, "Tiradas de salvación", TipoGrupoVariables::Derivadas),
             grupo(HABILIDADES, "Habilidades", TipoGrupoVariables::Derivadas),
+            grupo(COMBATE, "Combate y conjuros", TipoGrupoVariables::Derivadas),
+            grupo(DINERO, "Dinero", TipoGrupoVariables::Base),
+            grupo(PERSONAJE, "Personaje", TipoGrupoVariables::Base),
         ],
         variables,
         listas_rangos: vec![],
         escala_resultado: Some(escala("dnd")),
-        archivos_texto: vec![],
+        archivos_texto: archivos_dnd(),
     }
 }
 
@@ -392,17 +475,70 @@ mod tests {
         ] {
             assert_eq!(r(&c, &v, a), esperado, "{a}");
         }
-        // Estructura: tres grupos, la competencia con las características y cada derivada con su característica y la competencia opcional
-        assert_eq!(c.grupos_variables.iter().map(|g| g.nombre.as_str()).collect::<Vec<_>>(), ["Características", "Tiradas de salvación", "Habilidades"]);
-        assert_eq!(c.variables.len(), 6 + 1 + 6 + 18);
+        // Estructura: seis grupos, la competencia con las características y cada salvación o habilidad con su característica y la
+        // competencia opcional
+        assert_eq!(
+            c.grupos_variables.iter().map(|g| g.nombre.as_str()).collect::<Vec<_>>(),
+            ["Características", "Tiradas de salvación", "Habilidades", "Combate y conjuros", "Dinero", "Personaje"]
+        );
+        assert_eq!(c.variables.len(), 6 + 1 + 6 + 18 + 6 + 5 + 4);
         assert_eq!(por_abreviatura(&c, "com").grupo, CARACTERISTICAS);
         let competencia = por_abreviatura(&c, "com").id;
-        assert!(c.variables.iter().filter(|d| d.grupo != CARACTERISTICAS).all(|d| d.bases.len() == 1 && d.opcionales == [competencia]));
+        assert!(c.variables.iter().filter(|d| d.grupo == 2 || d.grupo == 3).all(|d| d.bases.len() == 1 && d.opcionales == [competencia]));
         assert_eq!(por_abreviatura(&c, "acro").bases, [por_abreviatura(&c, "des").id]);
         assert_eq!(por_abreviatura(&c, "ssab").bases, [por_abreviatura(&c, "sab").id]);
-        // Los parámetros visuales son los de siempre, y la escala es la de D&D
-        assert_eq!(c.parametros, parametros_por_defecto());
+        assert_eq!(por_abreviatura(&c, "acro").nombre, "Acrobacia", "la hoja dice «Acrobacias»: es una errata");
+        assert_eq!(por_abreviatura(&c, "arc").nombre, "Conocimiento arcano");
         assert_eq!(c.escala_resultado, Some(escala("dnd")));
+
+        // Combate y conjuros: iniciativa = Des; ataques con su característica (+ com); conjuros = com + la aptitud marcada (y la CD, + 8)
+        assert_eq!(r(&c, &v, "ini"), 3);
+        marcar(&c, &mut v, "atdist", "com");
+        assert_eq!((r(&c, &v, "atcc"), r(&c, &v, "atdist")), (-1, 6));
+        assert_eq!((r(&c, &v, "atconj"), r(&c, &v, "cdconj")), (3, 11), "sin aptitud marcada: solo la competencia");
+        marcar(&c, &mut v, "atconj", "int");
+        marcar(&c, &mut v, "cdconj", "int");
+        assert_eq!((r(&c, &v, "atconj"), r(&c, &v, "cdconj")), (7, 15), "mago con Int 18: +7 y CD 15");
+        // La percepción pasiva: 10 + Sabiduría (+3), y con la competencia marcada (+3) suma 16
+        assert_eq!(r(&c, &v, "ppas"), 13);
+        marcar(&c, &mut v, "ppas", "com");
+        assert_eq!(r(&c, &v, "ppas"), 16);
+
+        // Parámetros visuales: los cinco del tablero y del combate, con los nombres de la hoja y los ids de siempre
+        assert_eq!(
+            c.parametros.iter().map(|p| p.clave.as_str()).collect::<Vec<_>>(),
+            ["Puntos de golpe", "Clase de armadura", "Velocidad", "Rango arma", "Dados de golpe"]
+        );
+        let param = |clave: &str| c.parametros.iter().find(|p| p.clave == clave).unwrap();
+        assert_eq!(c.parametros[0].id, ID_VIDA);
+        assert!(param("Puntos de golpe").tiene_maximo && param("Puntos de golpe").atenuar_si_negativo);
+        assert_eq!(param("Clase de armadura").id, ID_ARMADURA);
+        assert_eq!((param("Velocidad").id, param("Rango arma").id), (ID_VELOCIDAD, ID_RANGO_ARMA));
+        assert!(param("Dados de golpe").tiene_maximo && param("Dados de golpe").visibilidad == Visibilidad::SiemprePrivado);
+
+        // El dinero y los datos del personaje son variables base cuyo resultado es su valor
+        for (grupo, nombres) in [
+            ("Dinero", vec!["PC", "PP", "PE", "PO", "PPT"]),
+            ("Personaje", vec!["Puntos de experiencia", "Éxitos contra la muerte", "Fallos contra la muerte", "Inspiración"]),
+        ] {
+            let id_grupo = c.grupos_variables.iter().find(|g| g.nombre == grupo).unwrap().id;
+            let del_grupo: Vec<&str> = c.variables.iter().filter(|d| d.grupo == id_grupo).map(|d| d.nombre.as_str()).collect();
+            assert_eq!(del_grupo, nombres, "{grupo}");
+            assert!(c.variables.iter().filter(|d| d.grupo == id_grupo).all(|d| d.bases.is_empty() && (d.neutro, d.escala) == (0, 1)));
+        }
+
+        // Los archivos de texto de la hoja; los rasgos de personalidad, ideales, vínculos y defectos van juntos en uno
+        let archivo = |n: &str| c.archivos_texto.iter().find(|a| a.nombre == n).unwrap_or_else(|| panic!("falta «{n}»"));
+        for n in ["Datos del personaje", "Personalidad", "Ataques y lanzamiento de conjuros", "Equipo", "Otras competencias e idiomas", "Rasgos y atributos", "Conjuros", "Espacios de conjuro"] {
+            archivo(n);
+        }
+        assert!(["RASGOS DE PERSONALIDAD", "IDEALES", "VÍNCULOS", "DEFECTOS"].iter().all(|t| archivo("Personalidad").contenido.contains(t)));
+        assert!(["RAZA", "CLASE Y NIVEL", "TRASFONDO", "ALINEAMIENTO"].iter().all(|t| archivo("Datos del personaje").contenido.contains(t)));
+        // Los espacios de conjuro: una línea «NIVEL n: 0/0» (actual/máximo) por nivel
+        assert!((1..=9).all(|n| archivo("Espacios de conjuro").contenido.contains(&format!("NIVEL {n}: 0/0"))));
+        assert!(archivo("Conjuros").contenido.contains("NIVEL 9"));
+        // Los ids de los archivos son su posición
+        assert!(c.archivos_texto.iter().enumerate().all(|(i, a)| a.id as usize == i + 1));
     }
 
     #[test]
@@ -464,6 +600,7 @@ mod tests {
                 assert!(c.variables[..i].iter().all(|o| o.id != v.id), "{}: id repetido {}", c.nombre, v.id);
             }
             assert!(c.descripcion.chars().count() <= 300, "{}", c.nombre);
+            assert_eq!(crate::tablero_general::archivos_defecto::validar(c.archivos_texto.clone()).as_ref(), Ok(&c.archivos_texto), "{}", c.nombre);
         }
     }
 }

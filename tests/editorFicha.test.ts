@@ -50,6 +50,7 @@ async function nuevoEditor(e = entidad(), esBorrador = false) {
     errorEditor: "",
     definiciones: structuredClone(DEFINICIONES),
     conjuntos: { activo: 0, guardados: [] },
+    instancias: [] as any[],
     entidadEnEdicion: e,
     avisar: vi.fn(),
     guardarEntidad: vi.fn(async () => true),
@@ -58,7 +59,7 @@ async function nuevoEditor(e = entidad(), esBorrador = false) {
       partidaFalsa.entidadEnEdicion = null;
     })
   };
-  vi.doMock("$lib/partida.svelte", () => ({ partida: partidaFalsa }));
+  vi.doMock("$lib/partida.svelte", () => ({ partida: partidaFalsa, LIMITE_VALOR_ACTUAL: 16000 }));
   const { EditorFicha } = await import("$lib/editorFicha.svelte");
   return new EditorFicha(e, esBorrador);
 }
@@ -453,5 +454,60 @@ describe("archivos de texto de una plantilla", () => {
       { original: "a.txt", nombre: "a.txt", contenido: "sin guardar" },
       { original: "b.txt", nombre: "b.txt", contenido: "disco:" + DIR + "b.txt" }
     ]);
+  });
+});
+
+describe("valor actual de una ficha única", () => {
+  const vida = (e: any) => e.parametros.find((p: any) => p.id_definicion === 1);
+
+  it("solo una ficha única enseña actual y máximo, y solo en los parámetros numéricos con máximo", async () => {
+    const ed = await nuevoEditor(entidad());
+    const [pg, armadura] = ed.definiciones;
+    expect([ed.muestraActual(pg), ed.muestraActual(armadura)]).toEqual([false, false]);
+    ed.entidad.es_unico = true;
+    expect([ed.muestraActual(pg), ed.muestraActual(armadura)]).toEqual([true, false]);
+  });
+
+  it("sin escribir, el actual es el de su instancia si la tiene y, si no, el máximo", async () => {
+    const ed = await nuevoEditor(entidad({ es_unico: true }));
+    expect(ed.actual(1)).toBe(18);
+    partidaFalsa.instancias = [{ base: { id: 7 }, valores_actuales: [{ id_definicion: 1, valor: 5 }] }];
+    expect(ed.actual(1)).toBe(5);
+    ed.ponerActual(1, 25); // vida extra: pasa del máximo
+    expect(ed.actual(1)).toBe(25);
+  });
+
+  it("al guardar manda los actuales de una única (acotados) y nada si no lo es", async () => {
+    const ed = await nuevoEditor(entidad({ es_unico: true }));
+    ed.ponerActual(1, 99999);
+    ed.ponerActual(2, 4); // la armadura no tiene máximo: no vale
+    expect(await ed.guardar()).toBe(true);
+    expect(partidaFalsa.guardarEntidad).toHaveBeenCalled();
+    expect(ed.entidad.actuales).toEqual([{ id_definicion: 1, valor: 16000 }]);
+
+    const otra = await nuevoEditor(entidad({ es_unico: false, actuales: [{ id_definicion: 1, valor: 3 }] }));
+    expect(await otra.guardar()).toBe(true);
+    expect(otra.entidad.actuales).toEqual([]);
+  });
+
+  it("una plantilla marca la ficha como única y trae su valor actual; un jugador no la hace única", async () => {
+    const plantilla = (unico: boolean) =>
+      ({
+        conjunto: "", id_ficha: null, plantilla_id: null, foto: null, archivos: null,
+        ficha: { nombre: "Orco", tipo: "Enemigo", cuerpo: [1, 1], vision: 0, unico, parametros: [{ id: 1, clave: "Vida", valor: 18, actual: 7 }], variables: [] },
+        nombresVariables: new Map(), nombresParametros: new Map()
+      }) as any;
+    const ed = await nuevoEditor(entidad());
+    await ed.aplicarPlantilla(plantilla(true));
+    expect(ed.entidad.es_unico).toBe(true);
+    expect(ed.entidad.actuales).toEqual([{ id_definicion: 1, valor: 7 }]);
+    expect(ed.actual(1)).toBe(7);
+    await ed.aplicarPlantilla(plantilla(false));
+    expect(ed.entidad.es_unico).toBe(false);
+    expect(ed.entidad.actuales).toEqual([]);
+    // Al exportar, una única lleva su valor actual
+    ed.entidad.es_unico = true;
+    ed.ponerActual(1, 9);
+    expect(ed.entidadParaPlantilla().actuales).toEqual([{ id_definicion: 1, valor: 9 }]);
   });
 });

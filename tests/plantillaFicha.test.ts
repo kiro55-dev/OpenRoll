@@ -285,3 +285,50 @@ function plantillaHtmlSinArchivos(): string {
   const datos = { formato: "openroll-plantilla", version: 1, conjunto: "X", id_ficha: null, definiciones: {}, ficha: null, foto: null };
   return plantillaHtml.replace("__DATOS_OPENROLL__", JSON.stringify(datos));
 }
+
+describe("ficha única y valor actual", () => {
+  const unica = () => ({ ...ficha(), es_unico: true, actuales: [{ id_definicion: 1, valor: 7 }] }) as Entidad;
+
+  it("una ficha única exporta que lo es y el valor actual de sus parámetros con máximo; una que no lo es, no", () => {
+    const leida = leerPlantilla(exportar(unica()));
+    expect(leida.ficha?.unico).toBe(true);
+    expect(leida.ficha?.parametros.find((p) => p.id === 1)).toMatchObject({ valor: 20, actual: 7 });
+    expect(leida.ficha?.parametros.find((p) => p.id === 2)?.actual).toBeUndefined(); // sin máximo no hay «actual»
+    const normal = leerPlantilla(exportar(ficha()));
+    expect(normal.ficha?.unico).toBe(false);
+    expect(normal.ficha?.parametros.every((p) => p.actual === undefined)).toBe(true);
+  });
+
+  it("lee lo que trae, acota el actual y se queda sin ello si falta o está roto", () => {
+    const con = (extra: Record<string, unknown>) => {
+      const e = exportar(null, { ficha: { nombre: "X", tipo: "Enemigo", cuerpo: [1, 1], vision: 0, parametros: [{ id: 1, clave: "Vida", valor: 5, ...extra }], variables: [], ...extra } });
+      return leerPlantilla(e).ficha!;
+    };
+    expect(con({ actual: 99999 }).parametros[0].actual).toBe(16000);
+    expect(con({ actual: -99999 }).parametros[0].actual).toBe(-16000);
+    expect(con({ actual: "mucho" }).parametros[0].actual).toBeUndefined();
+    expect(con({ unico: "sí" }).unico).toBeUndefined();
+    expect(con({ unico: true }).unico).toBe(true);
+  });
+
+  it("al aplicarla pone si es única y los valores actuales (vida extra incluida), y quita ambos si no lo es", () => {
+    const { entidad } = aplicarAFicha(ficha(), leerPlantilla(exportar(unica(), {})), ctx);
+    expect(entidad.es_unico).toBe(true);
+    expect(entidad.actuales).toEqual([{ id_definicion: 1, valor: 7 }]);
+    const extra = leerPlantilla(exportar(unica()));
+    extra.ficha!.parametros.find((p) => p.id === 1)!.actual = 31;
+    expect(aplicarAFicha(ficha(), extra, ctx).entidad.actuales).toEqual([{ id_definicion: 1, valor: 31 }]);
+    // Una plantilla de una ficha que no es única deja la ficha sin valores actuales
+    const deVuelta = aplicarAFicha(unica(), leerPlantilla(exportar(ficha())), ctx).entidad;
+    expect([deVuelta.es_unico, deVuelta.actuales]).toEqual([false, []]);
+  });
+
+  it("un jugador no puede hacer única una ficha con una plantilla, y una plantilla de antes no lo cambia", () => {
+    const leida = leerPlantilla(exportar(unica()));
+    const deJugador = aplicarAFicha(ficha(), leida, { ...ctx, puedeUnico: false }).entidad;
+    expect([deJugador.es_unico, deJugador.actuales]).toEqual([false, []]);
+    const vieja = leerPlantilla(exportar(unica()));
+    delete vieja.ficha!.unico;
+    expect(aplicarAFicha(unica(), vieja, ctx).entidad.es_unico).toBe(true);
+  });
+});

@@ -12,6 +12,7 @@ import type {
   Entidad,
   GrupoVariables,
   TipoEntidad,
+  ValorActual,
   ValorVariable
 } from "./partida.svelte";
 import { esDerivada } from "./variables";
@@ -50,6 +51,8 @@ const LIMITE_VARIABLE = 9999;
 const MAX_PARAMETRO = 32767;
 const MAX_CUERPO = 255;
 const MAX_VISION = 10000;
+/** Tope de un valor actual, en positivo y en negativo (`LIMITE_VALOR_ACTUAL` en Rust). */
+const LIMITE_ACTUAL = 16000;
 
 export interface EncuadrePlantilla {
   x: number;
@@ -69,7 +72,10 @@ export interface FichaPlantilla {
   tipo: TipoEntidad;
   cuerpo: [number, number];
   vision: number;
-  parametros: { id: number; clave: string; valor: number | string; publico?: boolean }[];
+  /** ¿Es una ficha única (una sola instancia en el mundo)? Solo la importa el host. Una plantilla de antes no lo trae. */
+  unico?: boolean;
+  /** `actual`: solo en una ficha única y en un parámetro con máximo (`valor` es el máximo): el valor actual, que puede pasar del máximo. */
+  parametros: { id: number; clave: string; valor: number | string; publico?: boolean; actual?: number }[];
   variables: {
     id: number;
     nombre: string;
@@ -156,11 +162,14 @@ export function datosDePlantilla(p: {
           tipo: e.tipo,
           cuerpo: ladosDe(e.cuerpo),
           vision: e.vision ?? 0,
+          unico: !!e.es_unico,
           parametros: (e.parametros ?? []).map((x) => ({
             id: x.id_definicion,
             clave: p.definiciones.find((d) => d.id === x.id_definicion)?.clave ?? "",
             valor: "Numero" in x.valor ? x.valor.Numero : x.valor.Texto,
-            publico: x.publico
+            publico: x.publico,
+            // El valor actual solo existe en una ficha única (la otra tiene varias instancias, cada una con el suyo)
+            actual: e.es_unico && p.definiciones.find((d) => d.id === x.id_definicion)?.tiene_maximo ? e.actuales?.find((a) => a.id_definicion === x.id_definicion)?.valor : undefined
           })),
           variables: (e.variables ?? []).map((v) => {
             const d = p.variables.find((x) => x.id === v.id_definicion);
@@ -296,6 +305,7 @@ function leerFicha(f: Record<string, unknown>): FichaPlantilla {
     tipo,
     cuerpo: [acotar(cuerpo[0], 1, MAX_CUERPO), acotar(cuerpo[1], 1, MAX_CUERPO)],
     vision: esEntero(f.vision) ? acotar(f.vision, 0, MAX_VISION) : 0,
+    unico: typeof f.unico === "boolean" ? f.unico : undefined,
     parametros: lista(f.parametros ?? [], "parámetros").map((x) => {
       const p = objeto(x, "parámetro");
       if (!esEntero(p.id)) throw new Error("La plantilla está dañada (parámetro)");
@@ -303,7 +313,8 @@ function leerFicha(f: Record<string, unknown>): FichaPlantilla {
         typeof p.valor === "number" && Number.isFinite(p.valor)
           ? acotar(p.valor, 0, MAX_PARAMETRO)
           : texto(p.valor ?? "", MAX_TEXTO, "parámetro");
-      return { id: p.id, clave: texto(p.clave ?? "", MAX_NOMBRE, "parámetro"), valor, publico: typeof p.publico === "boolean" ? p.publico : undefined };
+      const actual = typeof p.actual === "number" && Number.isFinite(p.actual) ? acotar(p.actual, -LIMITE_ACTUAL, LIMITE_ACTUAL) : undefined;
+      return { id: p.id, clave: texto(p.clave ?? "", MAX_NOMBRE, "parámetro"), valor, publico: typeof p.publico === "boolean" ? p.publico : undefined, actual };
     }),
     variables: lista(f.variables ?? [], "variables").map((x) => {
       const v = objeto(x, "variable");
@@ -386,13 +397,14 @@ function emparejar<T extends { id: number }>(defs: T[], nombre: (d: T) => string
 /**
  * Los datos de la plantilla sobre una COPIA de `entidad` (ya normalizada: un parámetro y una variable por definición). Cambia nombre,
  * tipo, cuerpo, visión, los parámetros que se escriben a mano (no los calculados) con su «Hacer público» (solo en los de visibilidad variable) y las variables (valor de
- * las bases; rango, opcionales y parámetros marcados de las derivadas, solo los que lo sigan siendo). No toca zona, único,
- * propietarios, adjuntos, pasos ni la foto (la pone el editor). `avisos`: lo que no se pudo pasar.
+ * las bases; rango, opcionales y parámetros marcados de las derivadas, solo los que lo sigan siendo) y, si es única (solo lo cambia el
+ * host: `ctx.puedeUnico`), si lo es y el valor actual de sus parámetros con máximo. No toca zona, propietarios, adjuntos, pasos ni la
+ * foto (la pone el editor). `avisos`: lo que no se pudo pasar.
  */
 export function aplicarAFicha(
   entidad: Entidad,
   plantilla: PlantillaLeida,
-  ctx: { definiciones: DefinicionParametro[]; variables: DefinicionVariable[]; conjunto: string }
+  ctx: { definiciones: DefinicionParametro[]; variables: DefinicionVariable[]; conjunto: string; puedeUnico?: boolean }
 ): { entidad: Entidad; avisos: string[] } {
   const e: Entidad = structuredClone(entidad);
   const avisos: string[] = [];
@@ -409,6 +421,9 @@ export function aplicarAFicha(
   e.tipo = f.tipo;
   e.cuerpo = f.cuerpo[0] === 1 && f.cuerpo[1] === 1 ? "Pequenio" : { Grande: [f.cuerpo[0], f.cuerpo[1]] };
   e.vision = f.vision;
+  // Si es única lo decide el host (un jugador no lo cambia): una plantilla de antes no lo dice y se deja como está
+  if (ctx.puedeUnico !== false && typeof f.unico === "boolean") e.es_unico = f.unico;
+  const actuales: ValorActual[] = [];
 
   const sinPareja: string[] = [];
   for (const p of f.parametros) {
@@ -421,6 +436,8 @@ export function aplicarAFicha(
     if (!actual) continue;
     // «Hacer público»: solo en los que cada ficha decide (los de visibilidad fija no cambian)
     if (d.visibilidad === "Variable" && typeof p.publico === "boolean") actual.publico = p.publico;
+    // El valor actual de una única (puede pasar del máximo); lo que no traiga lo rellena Rust con el de su instancia o el máximo
+    if (typeof p.actual === "number" && d.tiene_maximo && "Numero" in d.valor_por_defecto) actuales.push({ id_definicion: d.id, valor: p.actual });
     if (d.calculo) continue; // lo calcula Rust con las variables
     const esNumero = "Numero" in d.valor_por_defecto;
     if (esNumero && typeof p.valor === "number") actual.valor = { Numero: p.valor };
@@ -464,6 +481,7 @@ export function aplicarAFicha(
       )
     ];
   }
+  e.actuales = e.es_unico ? [...(entidad.actuales ?? []).filter((a) => !actuales.some((n) => n.id_definicion === a.id_definicion)), ...actuales] : [];
   if (sinPareja.length > 0) avisos.push(`No se han encontrado en esta partida: ${[...new Set(sinPareja)].join(", ")}.`);
   return { entidad: e, avisos };
 }

@@ -307,6 +307,9 @@ export interface Entidad {
   foto_encuadre: Encuadre;
   archivos_adjuntos: (string | null)[];
   es_unico: boolean;
+  /** Solo en una ficha ÚNICA: el valor actual de cada parámetro con máximo (la vida actual...), que se escribe junto al máximo. La
+   *  mantiene Rust al día con el de su instancia; en las demás fichas está vacía. */
+  actuales?: ValorActual[];
   /** La identidad del archivo de plantilla con el que se rellenó la ficha (un UUID); sirve para reconocerla si se vuelve a importar. */
   plantilla_id?: string | null;
   /** Ids de los jugadores que controlan la ficha (`IdJugador` en Rust), sin el host, que lo puede todo. Vacío = solo el host. */

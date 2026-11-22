@@ -216,15 +216,37 @@ fn colocar(est: &EstadoPartida, lados: (u16, u16), destino: Option<Destino>) -> 
     Ok((Some(mapa.id), Coordenada::Casilla(casilla)))
 }
 
-/// Cada parámetro con máximo empieza en el valor de la ficha (que es el máximo).
+/// Cada parámetro con máximo empieza en el valor de la ficha (que es el máximo), salvo en una ficha ÚNICA, que ya trae los suyos
+/// (`Entidad.actuales`: la vida con la que se quedó).
 pub fn valores_iniciales(defs: &[DefinicionParametro], entidad: &Entidad) -> Vec<ValorActual> {
     defs.iter()
         .filter(|d| d.tiene_maximo)
         .filter_map(|d| match entidad.parametros.iter().find(|p| p.id_definicion == d.id)?.valor {
-            ValorParametro::Numero(n) => Some(ValorActual { id_definicion: d.id, valor: n }),
+            ValorParametro::Numero(n) => {
+                let propio = entidad.es_unico.then(|| entidad.actuales.iter().find(|a| a.id_definicion == d.id)).flatten();
+                Some(ValorActual { id_definicion: d.id, valor: propio.map_or(n, |a| a.valor) })
+            }
             ValorParametro::Texto(_) => None,
         })
         .collect()
+}
+
+/// Deja los valores actuales de una ficha como deben estar: vacíos si NO es única; si lo es, uno por parámetro numérico con máximo, en
+/// el orden de las definiciones, con el que ya tenía (dentro de ±`LIMITE_VALOR_ACTUAL`) o, si no tenía, `de_instancia` (lo que vale en
+/// su instancia, si la hay) o el máximo de la ficha.
+pub fn normalizar_actuales(defs: &[DefinicionParametro], e: &mut Entidad, de_instancia: &[ValorActual]) {
+    let anteriores = std::mem::take(&mut e.actuales);
+    if !e.es_unico {
+        return;
+    }
+    for d in defs.iter().filter(|d| d.tiene_maximo) {
+        let Some(Parametro { valor: ValorParametro::Numero(maximo), .. }) = e.parametros.iter().find(|p| p.id_definicion == d.id) else { continue };
+        let valor = [&anteriores[..], de_instancia]
+            .iter()
+            .find_map(|l| l.iter().find(|a| a.id_definicion == d.id))
+            .map_or(*maximo, |a| a.valor.clamp(-LIMITE_VALOR_ACTUAL, LIMITE_VALOR_ACTUAL));
+        e.actuales.push(ValorActual { id_definicion: d.id, valor });
+    }
 }
 
 #[cfg(test)]
@@ -264,7 +286,7 @@ mod tests {
             miniatura_url: None,
             foto_encuadre: Default::default(),
             archivos_adjuntos: vec![],
-            es_unico, vision: 0, plantilla_id: None,
+            es_unico, vision: 0, plantilla_id: None, actuales: vec![],
             propietarios: vec![],
         }
     }
