@@ -11,7 +11,7 @@ use red::comandos::{
 
 use tablero_general::almacen::Almacen;
 use tablero_general::conjuntos::{
-    anadir_conjunto_de_serie, anadir_de_biblioteca, borrar_conjunto, borrar_de_biblioteca, guardar_en_biblioteca,
+    anadir_conjunto_de_serie, anadir_de_biblioteca, crear_conjunto_vacio, borrar_conjunto, borrar_de_biblioteca, guardar_en_biblioteca,
     importar_conjunto, listar_biblioteca_conjuntos, obtener_conjunto_activo, obtener_conjuntos_parametros, renombrar_conjunto, usar_conjunto,
 };
 use tablero_general::archivos_defecto::{guardar_archivos_texto_defecto, obtener_archivos_texto_defecto};
@@ -158,6 +158,7 @@ pub fn run() {
             borrar_grupo_variables,
             obtener_conjuntos_parametros,
             anadir_conjunto_de_serie,
+            crear_conjunto_vacio,
             usar_conjunto,
             obtener_escala_resultado,
             obtener_listas_rangos,

@@ -870,6 +870,13 @@ class Partida {
     await this.#cambiarDefiniciones("usar_conjunto", { id });
   }
 
+  /** Crea un conjunto nuevo y vacío (sin usarlo) y devuelve su id. */
+  async crearConjuntoVacio(): Promise<number> {
+    let id = 0;
+    await this.#cambiarDefiniciones("crear_conjunto_vacio", {}, (r) => (id = r as number));
+    return id;
+  }
+
   /** Copia un conjunto de serie a la partida (sin usarlo) y devuelve su id. */
   async anadirConjuntoDeSerie(clave: string): Promise<number> {
     let id = 0;

@@ -613,6 +613,28 @@ pub fn anadir_conjunto_de_serie_en(clave: &str, state: &AppState) -> Result<u16,
     Ok(anadir(&mut est, state, Some(serie.clave.to_string()), serie.contenido)?.id)
 }
 
+/// Crea un conjunto NUEVO y vacío («Conjunto nuevo»: sin parámetros ni variables, con el grupo de variables de siempre) SIN activarlo: se
+/// elige después con «Usar» y se rellena desde la ventana de parámetros. Es la forma de partir de cero en vez de importar o copiar uno.
+#[tauri::command]
+pub fn crear_conjunto_vacio(state: State<'_, AppState>) -> Result<u16, String> {
+    crear_conjunto_vacio_en(&state)
+}
+
+pub fn crear_conjunto_vacio_en(state: &AppState) -> Result<u16, String> {
+    let contenido = validar(ConjuntoParametros {
+        nombre: "Conjunto nuevo".into(),
+        descripcion: String::new(),
+        parametros: vec![],
+        grupos_variables: grupos_por_defecto(),
+        variables: vec![],
+        listas_rangos: vec![],
+        escala_resultado: None,
+        archivos_texto: vec![],
+    })?;
+    let mut est = state.lock();
+    Ok(anadir(&mut est, state, None, contenido)?.id)
+}
+
 /// Pasa a usar el conjunto `id`. Las fichas empiezan de cero (la pantalla avisa antes). No con una ficha nueva abierta:
 /// su borrador tiene los valores del conjunto anterior.
 #[tauri::command]
@@ -1223,6 +1245,25 @@ mod tests {
         vieja.ajustar_a_definiciones();
         assert_eq!(vieja.listas_rangos.len(), 1, "las dos tenían los mismos rangos: una sola lista");
         assert!(vieja.definiciones_variables[1..].iter().all(|d| d.rangos == Some(vieja.listas_rangos[0].id) && d.opciones == dos));
+    }
+
+    #[test]
+    fn crear_un_conjunto_vacio_lo_guarda_sin_activarlo_con_nombre_libre_y_se_puede_usar() {
+        let state = estado_en_a("conjunto_vacio");
+        let antes = state.lock().conjuntos_parametros.len();
+        let id = crear_conjunto_vacio_en(&state).unwrap();
+        let otro = crear_conjunto_vacio_en(&state).unwrap();
+        let est = state.lock();
+        assert_eq!(est.conjuntos_parametros.len(), antes + 2);
+        assert_ne!(id, otro);
+        assert_ne!(est.conjunto_activo, id, "no se activa solo");
+        let c = est.contenido_de(id).unwrap();
+        assert_eq!((c.nombre.as_str(), c.parametros.len(), c.variables.len(), c.grupos_variables.len()), ("Conjunto nuevo", 0, 0, 1));
+        assert_eq!(est.contenido_de(otro).unwrap().nombre, "Conjunto nuevo (2)", "el nombre se hace único");
+        drop(est);
+        // Se puede usar: las fichas se quedan sin parámetros ni variables
+        usar_conjunto_en(id, &state).unwrap();
+        assert!(state.lock().definiciones_parametros.is_empty());
     }
 
     #[test]

@@ -61,6 +61,29 @@
     }
   }
 
+  // ---- Crear un conjunto nuevo y vacío ----
+  async function crearConjunto() {
+    // Se pasa a usar al crearlo, así que valen los mismos bloqueos que al cambiar de conjunto (antes de crear nada)
+    if (ocupado || partida.hayFichaNuevaAbierta) return;
+    aviso = "";
+    if (edicionVariables.hayCambios) {
+      onError("Guarda o descarta los cambios sin guardar de las variables antes de cambiar de conjunto");
+      return;
+    }
+    ocupado = true;
+    try {
+      const id = await partida.crearConjuntoVacio();
+      await partida.usarConjunto(id);
+      onError("");
+      alCambiar();
+      aviso = `Creado «${partida.conjuntos.guardados.find((c) => c.id === id)?.nombre ?? "conjunto"}», vacío, y ahora lo usas.`;
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      ocupado = false;
+    }
+  }
+
   // ---- Importar (desde una plantilla de ficha) y exportar (la plantilla) ----
   /** Importa el conjunto que lleva la plantilla `ruta` (rellena o no: de ella solo se lee el conjunto). */
   async function importarDe(ruta: string) {
@@ -249,25 +272,34 @@
   <p class="aviso" role="status">{aviso}</p>
 {/if}
 
+<!-- Siempre a la vista: exportar la plantilla con los parámetros en uso e importar un conjunto desde una plantilla, uno al lado del otro -->
+<div class="fila-importar centrado">
+  <button
+    type="button"
+    class="importar"
+    disabled={ocupado}
+    onclick={exportarPlantillaEnBlanco}
+    title={ayuda("Guarda una ficha de personaje en blanco en un .html que sirve tanto como para crear personajes como para distribuir la definición de parámetros")}
+  >
+    Exportar
+  </button>
+  <button type="button" class="importar" disabled={ocupado} onclick={importar} title={ayuda("Arrastra una ficha vacia o rellena (el .html que exportas) para importar la definición de parámetros adjunto")}>
+    Importar
+  </button>
+</div>
 {#if gestionando}
   <div class="gestor">
-    <!-- La plantilla de ficha en blanco (un .html para rellenar fuera de OpenRoll) con los parámetros y variables en uso -->
+    <!-- Un conjunto nuevo y vacío, para partir de cero (se elige después con «Usar») -->
     <div class="fila-importar">
       <button
         type="button"
         class="importar"
         disabled={ocupado}
-        onclick={exportarPlantillaEnBlanco}
-        title={ayuda("Guarda una plantilla de ficha en blanco (un .html) con todo el conjunto en uso. Se rellena con cualquier navegador, sin OpenRoll, y después se arrastra al banco de fichas; la misma plantilla sirve para llevar el conjunto a otra partida")}
+        onclick={crearConjunto}
+        title={ayuda("Crea un conjunto nuevo y vacío (sin parámetros ni variables) y pasa a usarlo, para rellenarlo a tu gusto")}
       >
-        Exportar plantilla de los parámetros actuales
+        + Añadir conjunto
       </button>
-    </div>
-    <div class="fila-importar">
-      <button type="button" class="importar" disabled={ocupado} onclick={importar} title={ayuda("Trae el conjunto que lleva dentro una plantilla de ficha (rellena o en blanco: del personaje no se coge nada). No sustituye lo que tienes: se añade a la lista")}>
-        Importar desde plantilla…
-      </button>
-      <span class="nota">O arrastra la plantilla a esta ventana. Se añade a la lista; no borra nada.</span>
     </div>
 
     <div class="lista">
@@ -301,10 +333,7 @@
             </span>
           </div>
           <div class="acciones">
-            {#if !enUso}
-              <button type="button" onclick={() => pedirCambio(String(c.id))}>Usar</button>
-            {/if}
-            <button type="button" disabled={ocupado} onclick={() => aBiblioteca(c)} title={ayuda("Lo guarda en tu biblioteca para usarlo en cualquier partida. Si ya hay uno con ese nombre, lo actualiza")}>A mi biblioteca</button>
+            <button type="button" disabled={ocupado} onclick={() => aBiblioteca(c)} title={ayuda("Lo puedes usar en otras partidas")}>Guardar</button>
             {#if !enUso}
               {#if borrandoId === c.id}
                 <button type="button" class="peligro" onclick={() => borrar(c.id)}>¿Borrar?</button>
@@ -377,13 +406,12 @@
   .aviso { margin: 0; color: #86efac; font-size: 10px; }
 
   .gestor { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #111113; border: 1px solid #27272a; border-radius: 6px; }
-  .fila-importar { display: flex; align-items: center; gap: 8px; }
+  .fila-importar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .importar {
     background: #2563eb; border: none; color: white; border-radius: 4px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer;
   }
   .importar:hover:not(:disabled) { background: #1d4ed8; }
   .importar:disabled { opacity: 0.5; cursor: default; }
-  .nota { color: #71717a; font-size: 10px; }
   .lista { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
   .subtitulo { margin-top: 4px; color: #71717a; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
   .conjunto {
@@ -404,4 +432,10 @@
   .acciones button:disabled { opacity: 0.5; cursor: default; }
   .acciones .peligro { color: #f87171; }
   .acciones .peligro:hover:not(:disabled) { border-color: #ef4444; color: #fca5a5; }
+  .centrado {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    margin-right: auto;
+  }
 </style>
