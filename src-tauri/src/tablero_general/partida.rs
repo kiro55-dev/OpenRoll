@@ -1554,7 +1554,7 @@ pub fn restaurar_papelera(state: State<'_, AppState>) -> Result<Option<papelera:
 /// Vacía la papelera (con el lock cogido): se liberan sus imágenes, miniaturas y adjuntos (recursos.rs)
 /// y la carpeta de cada ficha que se va. Solo al cerrar la aplicación o al salir de la partida.
 fn vaciar_papelera(est: &mut EstadoPartida, almacen: &Almacen) {
-    if est.papelera.is_empty() {
+    if est.papelera.is_empty() && est.imagenes_sustituidas.is_empty() {
         return;
     }
     let fichas = papelera::ids_entidades(est);
@@ -2412,7 +2412,7 @@ mod tests_fondos_antiguos {
 
         let fondo = |id: u16| est.mapas.iter().find(|m| m.id == id).unwrap().url_imagen_fondo.clone();
         let nuevo = fondo(1).unwrap();
-        assert!(nuevo.starts_with("imagenes/") && nuevo.ends_with(".png"), "{nuevo}");
+        assert!(nuevo.starts_with("imagenes/") && nuevo.ends_with(".webp"), "{nuevo}");
         assert!(dir.join(&nuevo).is_file(), "se copió a la carpeta de datos");
         let m1 = est.mapas.iter().find(|m| m.id == 1).unwrap();
         assert_eq!((m1.ancho, m1.alto), (40, 30), "y ya se pudo medir");

@@ -3,6 +3,8 @@
   import { ayuda } from "$lib/ajustesVista.svelte";
   import { onMount, untrack, onDestroy } from 'svelte';
   import { urlDeImagen } from '$lib/imagenes';
+  import { conversionImagen } from "$lib/conversionImagen.svelte";
+  import TextoConvirtiendo from "./comunes/TextoConvirtiendo.svelte";
   import {
     rejillaDe, pantallaAMundo, mundoAPantalla, casillaEn, casillaMasCercana, extenderRecorrido, origenAlSoltar,
     disposicionEnCuadricula, desplazarGrupo, ladosInstancia
@@ -983,6 +985,8 @@
   <canvas bind:this={canvasMarcas}></canvas>
   {#if !hayMapa}
     <div class="sin-mapa">Crea un mapa</div>
+  {:else if conversionImagen.convierte(mapa.id)}
+    <div class="sin-mapa convirtiendo"><TextoConvirtiendo /></div>
   {/if}
 </div>
 
@@ -996,6 +1000,7 @@
     cursor: grab;
     touch-action: none;
   }
+  .sin-mapa.convirtiendo { color: #a1a1aa; font-size: 20px; background: rgba(18, 18, 18, 0.6); }
   /* Sin mapa: un mensaje gris centrado de fondo (no recoge el ratón) */
   .sin-mapa {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;

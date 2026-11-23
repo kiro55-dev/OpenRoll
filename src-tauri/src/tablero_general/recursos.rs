@@ -78,6 +78,8 @@ pub fn referencias(estado: &EstadoPartida) -> Referencias {
             }
         }
     }
+    // Los fondos sustituidos esperan a que se vacíe la papelera (ver `EstadoPartida.imagenes_sustituidas`)
+    r.imagenes.extend(estado.imagenes_sustituidas.iter().filter(|u| es_ruta_de(u, "imagenes")).cloned());
     for m in fondos {
         if let Some(u) = m.url_imagen_fondo.as_deref().filter(|u| es_ruta_de(u, "imagenes")) {
             r.imagenes.insert(u.to_string());
@@ -251,11 +253,19 @@ mod tests {
         est.banco_entidades = vec![ficha(1, 1, Some("imagenes/compartida.png"), &[], false)];
 
         aplicar(&d, &mut est, DeltaPartida::MapaModificado(mapa(1, 1, Some("imagenes/nueva.png"))));
-        assert!(!existe(&d, "imagenes/vieja.png") && existe(&d, "imagenes/nueva.png"));
+        // La sustituida espera a que se vacíe la papelera (el webview aún puede tenerla abierta)
+        assert!(existe(&d, "imagenes/vieja.png") && existe(&d, "imagenes/nueva.png"));
+        assert_eq!(est.imagenes_sustituidas, vec!["imagenes/vieja.png".to_string()]);
 
         // La foto de una ficha cuenta como uso: el mapa 2 suelta la imagen y se conserva
         aplicar(&d, &mut est, DeltaPartida::MapaModificado(mapa(2, 1, None)));
         assert!(existe(&d, "imagenes/compartida.png"));
+
+        aplicar(&d, &mut est, DeltaPartida::PapeleraVaciada);
+        assert!(est.imagenes_sustituidas.is_empty());
+        assert!(!existe(&d, "imagenes/vieja.png"), "al vaciar la papelera se libera");
+        assert!(!existe(&d, "miniaturas/mapa/vieja.webp"));
+        assert!(existe(&d, "imagenes/nueva.png") && existe(&d, "imagenes/compartida.png"));
     }
 
     #[test]

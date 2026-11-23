@@ -183,6 +183,11 @@ pub struct EstadoPartida {
     /// Lo borrado que aún se puede restaurar con Ctrl+Z, del más antiguo al más reciente.
     #[serde(default)]
     pub papelera: Vec<GrupoPapelera>,
+    /// Imágenes de fondo que un mapa tuvo y ya no tiene (se le puso otra). Siguen en el disco hasta que se vacía la papelera
+    /// (al cerrar la aplicación o cambiar de partida): en Windows el webview mantiene abierto el archivo que enseñaba, así
+    /// que no se puede borrar en el momento. Cuentan como referenciadas (`recursos::referencias`).
+    #[serde(default)]
+    pub imagenes_sustituidas: Vec<String>,
     /// Jugadores registrados (sin el host). Sus ids son los de `Entidad.propietarios`.
     #[serde(default)]
     pub jugadores: Vec<Jugador>,
@@ -244,6 +249,7 @@ impl Default for EstadoPartida {
             instancias_activas: Vec::new(),
             historial_tiradas: Vec::new(),
             papelera: Vec::new(),
+            imagenes_sustituidas: Vec::new(),
             jugadores: Vec::new(),
             mapa_del_host: MapaDelHost::default(),
         }
@@ -365,6 +371,11 @@ impl EstadoPartida {
             }
             DeltaPartida::MapaModificado(mapa) => {
                 if let Some(pos) = self.mapas.iter().position(|m| m.id == mapa.id) {
+                    if let Some(vieja) = self.mapas[pos].url_imagen_fondo.clone().filter(|v| mapa.url_imagen_fondo.as_ref() != Some(v)) {
+                        if !self.imagenes_sustituidas.contains(&vieja) {
+                            self.imagenes_sustituidas.push(vieja);
+                        }
+                    }
                     self.mapas[pos] = mapa.clone();
 
                     // Si la rejilla o el tamaño cambian, una ficha podría quedar fuera: vuelve al borde.
@@ -561,6 +572,7 @@ impl EstadoPartida {
             DeltaPartida::RestauradoDePapelera(id) => papelera::aplicar_restauracion(self, *id),
             DeltaPartida::PapeleraVaciada => {
                 self.papelera.clear();
+                self.imagenes_sustituidas.clear();
                 self.podar_valores_guardados(); // las fichas y instancias que se iban a restaurar ya no existen
             }
             DeltaPartida::JugadorRegistrado(jugador) => match self.jugadores.iter().position(|j| j.id == jugador.id) {

@@ -6,6 +6,8 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { partida, type Mapa } from "$lib/partida.svelte";
   import { miniaturas } from "$lib/miniaturas.svelte";
+  import { conversionImagen } from "$lib/conversionImagen.svelte";
+  import TextoConvirtiendo from "../comunes/TextoConvirtiendo.svelte";
   import { esJugador } from "$lib/modo";
   import { ListaOrdenable } from "$lib/ordenable.svelte";
   import { esImagen, EXTENSIONES_IMAGEN } from "$lib/imagenes";
@@ -119,7 +121,9 @@
           oncontextmenu={(e) => (esJugador ? e.preventDefault() : abrirMenu(e, m))}
         >
           <!-- Contenedor de imagen blindado para no interceptar clics/arrastres -->
-          {#if miniaturas.de(m.url_imagen_fondo)}
+          {#if conversionImagen.enCurso(m.id, !!miniaturas.de(m.url_imagen_fondo))}
+            <div class="contenedor-low"><span class="convirtiendo"><TextoConvirtiendo /></span></div>
+          {:else if miniaturas.de(m.url_imagen_fondo)}
             <div class="contenedor-low">
               <img src={miniaturas.de(m.url_imagen_fondo)} alt="" class="img-low" draggable="false" />
             </div>
@@ -157,6 +161,9 @@
           />
         {/if}
       </div>
+    {/each}
+    {#each Array(conversionImagen.nuevos) as _, k (k)}
+      <div class="tarjeta-mapa"><div class="contenedor-low"><span class="convirtiendo"><TextoConvirtiendo /></span></div></div>
     {/each}
     {#if !esJugador}
       <button
@@ -216,6 +223,7 @@
   .tarjeta-mapa.seleccionado { border-color: #3b82f6; background: #2a2a32; }
   .tarjeta-mapa.nueva { border-style: dashed; font-size: 14px; padding: 6px; cursor: pointer; }
   .tarjeta-mapa.nueva:disabled { opacity: 0.4; cursor: not-allowed; }
+  .convirtiendo { font-size: 9px; color: #a1a1aa; padding: 0 2px; }
   .previa-mapa { font-size: 16px; display: block; pointer-events: none; }
   .item-mapa { position: relative; }
   .compartir { position: absolute; top: 4px; right: 4px; margin: 0; width: 13px; height: 13px; cursor: pointer; accent-color: #22c55e; }

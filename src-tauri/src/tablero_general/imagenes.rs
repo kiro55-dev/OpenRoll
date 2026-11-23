@@ -44,6 +44,44 @@ impl Uso {
     }
 }
 
+/// Calidad (0-100) con la que se guarda el fondo de un mapa: pasa a WebP con pérdida (~10 %), que pesa mucho menos que el
+/// PNG/JPG original y se decodifica más rápido en el webview. PRUEBA: para volver a guardar el original tal cual, quitar la llamada.
+const CALIDAD_WEBP_MAPA: f32 = 90.0;
+/// El formato WebP no admite más de 16383 px por lado.
+const MAX_LADO_WEBP: u32 = 16383;
+
+/// ¿Es un WebP SIN pérdidas (chunk `VP8L`) y no animado? Solo mira las cabeceras de los chunks, no decodifica.
+fn webp_sin_perdidas(bytes: &[u8]) -> bool {
+    if bytes.len() < 12 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WEBP" {
+        return false;
+    }
+    let mut pos = 12;
+    let mut sin_perdidas = false;
+    while pos + 8 <= bytes.len() {
+        let tam = u32::from_le_bytes([bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7]]) as usize;
+        match &bytes[pos..pos + 4] {
+            b"ANIM" | b"ANMF" => return false, // animado: solo se decodificaría el primer fotograma
+            b"VP8L" => sin_perdidas = true,
+            _ => {}
+        }
+        pos = pos.saturating_add(8 + tam + (tam & 1));
+    }
+    sin_perdidas
+}
+
+/// El fondo de un mapa convertido a WebP (respetando la orientación EXIF y la transparencia). `None` si no se puede
+/// (no decodifica, demasiado grande para WebP...): entonces se guarda el original.
+fn mapa_a_webp(origen: &Path) -> Option<(Vec<u8>, image::DynamicImage)> {
+    let imagen = crate::tablero_general::miniaturas::decodificar(origen)?;
+    let rgba = imagen.to_rgba8();
+    let (ancho, alto) = rgba.dimensions();
+    if ancho == 0 || alto == 0 || ancho > MAX_LADO_WEBP || alto > MAX_LADO_WEBP {
+        return None;
+    }
+    let webp = webp::Encoder::from_rgba(rgba.as_raw(), ancho, alto).encode(CALIDAD_WEBP_MAPA).to_vec();
+    Some((webp, imagen))
+}
+
 /// Copia `origen` a `<dir_datos>/imagenes/` y devuelve la ruta relativa para guardar en el mapa.
 /// Bloqueante (lee y escribe el archivo entero): llamarlo desde un hilo aparte.
 pub fn importar(dir_datos: &Path, origen: &Path, uso: Uso) -> Result<String, String> {
@@ -64,6 +102,24 @@ pub fn importar(dir_datos: &Path, origen: &Path, uso: Uso) -> Result<String, Str
             meta.len() / (1024 * 1024),
             MAX_BYTES / (1024 * 1024)
         ));
+    }
+
+    // El fondo de un mapa se guarda como WebP con pérdida. Un WebP que ya es con pérdida se deja como está (recomprimirlo
+    // perdería calidad dos veces); uno sin pérdidas sí se comprime.
+    let ya_comprimido = ext == "webp" && !fs::read(origen).is_ok_and(|b| webp_sin_perdidas(&b));
+    if uso == Uso::Mapa && !ya_comprimido {
+        if let Some((webp, imagen)) = mapa_a_webp(origen) {
+            let ruta = guardar_imagen(dir_datos, &webp, "webp")?;
+            // La miniatura sale de la imagen que ya está en memoria: cuando el mapa cambie de fondo, ya existe
+            use crate::tablero_general::miniaturas::{guardar_desde_imagen, ruta_miniatura, Tipo};
+            if let Some(rel) = ruta_miniatura(&ruta, Tipo::Mapa).filter(|r| !dir_datos.join(r).is_file()) {
+                if let Err(e) = guardar_desde_imagen(dir_datos, &rel, Tipo::Mapa, &imagen) {
+                    eprintln!("[imagenes] miniatura del mapa: {e}");
+                }
+            }
+            return Ok(ruta);
+        }
+        eprintln!("[imagenes] no se pudo convertir a WebP {}: se guarda tal cual", origen.display());
     }
 
     let bytes = fs::read(origen).map_err(|e| format!("No se puede leer la imagen: {e}"))?;
@@ -206,6 +262,53 @@ mod tests {
         let mut png = Vec::new();
         image::RgbaImage::new(64, 32).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
         assert!(importar_bytes(&datos, &png, "png").is_ok(), "una normal sí");
+    }
+
+    #[test]
+    fn el_fondo_de_un_mapa_se_guarda_como_webp_y_la_foto_de_una_ficha_no() {
+        let datos = dir_temporal("img_webp");
+        let origen = dir_temporal("img_webp_o");
+        fs::create_dir_all(&origen).unwrap();
+        let mut img = image::RgbaImage::from_pixel(64, 40, image::Rgba([200, 30, 30, 255]));
+        img.put_pixel(0, 0, image::Rgba([0, 0, 0, 0]));
+        img.save(origen.join("mapa.png")).unwrap();
+
+        let ruta = importar(&datos, &origen.join("mapa.png"), Uso::Mapa).unwrap();
+        assert!(ruta.ends_with(".webp"), "{ruta}");
+        let mini = crate::tablero_general::miniaturas::ruta_miniatura(&ruta, crate::tablero_general::miniaturas::Tipo::Mapa).unwrap();
+        assert!(datos.join(mini).is_file(), "la miniatura del mapa se hace al importar, sin decodificar otra vez");
+        let bytes = fs::read(datos.join(&ruta)).unwrap();
+        assert!(bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP");
+        assert_eq!(dimensiones(&datos, &ruta), Some((64, 40)));
+        let vuelta = image::load_from_memory(&bytes).unwrap().to_rgba8();
+        let c = vuelta.get_pixel(30, 20);
+        assert!((c[0] as i32 - 200).abs() < 12 && (c[1] as i32 - 30).abs() < 12, "colores casi iguales: {c:?}");
+        assert_eq!(vuelta.get_pixel(0, 0)[3], 0, "la transparencia se conserva");
+        // La misma imagen dos veces es un solo archivo
+        assert_eq!(importar(&datos, &origen.join("mapa.png"), Uso::Mapa).unwrap(), ruta);
+        assert_eq!(fs::read_dir(datos.join("imagenes")).unwrap().count(), 1);
+        // La foto de una ficha se guarda tal cual
+        assert!(importar(&datos, &origen.join("mapa.png"), Uso::Ficha).unwrap().ends_with(".png"));
+    }
+
+    #[test]
+    fn un_webp_con_perdidas_se_deja_y_uno_sin_perdidas_se_comprime() {
+        let datos = dir_temporal("img_webp2");
+        let origen = dir_temporal("img_webp2_o");
+        fs::create_dir_all(&origen).unwrap();
+        let img = image::RgbaImage::from_pixel(64, 64, image::Rgba([10, 120, 200, 255]));
+        let sin = webp::Encoder::from_rgba(img.as_raw(), 64, 64).encode_lossless().to_vec();
+        let con = webp::Encoder::from_rgba(img.as_raw(), 64, 64).encode(80.0).to_vec();
+        assert!(webp_sin_perdidas(&sin) && !webp_sin_perdidas(&con) && !webp_sin_perdidas(b"nada"));
+        fs::write(origen.join("sin.webp"), &sin).unwrap();
+        fs::write(origen.join("con.webp"), &con).unwrap();
+
+        let ruta_con = importar(&datos, &origen.join("con.webp"), Uso::Mapa).unwrap();
+        assert_eq!(fs::read(datos.join(ruta_con)).unwrap(), con, "con pérdidas: igual que vino");
+        let ruta_sin = importar(&datos, &origen.join("sin.webp"), Uso::Mapa).unwrap();
+        let guardado = fs::read(datos.join(ruta_sin)).unwrap();
+        assert_ne!(guardado, sin);
+        assert!(!webp_sin_perdidas(&guardado), "sin pérdidas: se recomprime con pérdida");
     }
 
     #[test]

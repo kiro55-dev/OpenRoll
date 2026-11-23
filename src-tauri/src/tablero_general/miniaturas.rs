@@ -85,7 +85,15 @@ pub fn asegurar(dir_datos: &Path, ruta_imagen: &str, tipo: Tipo) -> Result<Optio
     }
 
     let Some(imagen) = decodificar(&origen) else { return Ok(None) };
+    guardar_desde_imagen(dir_datos, &rel, tipo, &imagen)?;
+    Ok(Some(rel))
+}
 
+/// Reduce una imagen YA decodificada y guarda su miniatura en `rel` (ruta relativa de `ruta_miniatura`). Lo usa `asegurar`
+/// y la importación de un fondo de mapa, que ya tiene la imagen en memoria y así no la decodifica una segunda vez (con una
+/// imagen grande son varios segundos).
+pub(crate) fn guardar_desde_imagen(dir_datos: &Path, rel: &str, tipo: Tipo, imagen: &DynamicImage) -> Result<(), String> {
+    let destino = dir_datos.join(rel);
     let (ancho, alto) = tipo.tamano();
     let reducida = imagen.resize_to_fill(ancho, alto, FilterType::Lanczos3).to_rgba8();
     let webp = webp::Encoder::from_rgba(reducida.as_raw(), reducida.width(), reducida.height()).encode(CALIDAD_WEBP);
@@ -96,13 +104,11 @@ pub fn asegurar(dir_datos: &Path, ruta_imagen: &str, tipo: Tipo) -> Result<Optio
     // Temporal + rename: nunca queda una miniatura a medias con el nombre definitivo.
     let tmp = carpeta.join(format!("{}.tmp", destino.file_name().and_then(|n| n.to_str()).unwrap_or("mini")));
     fs::write(&tmp, &*webp).map_err(|e| format!("No se pudo guardar la miniatura: {e}"))?;
-    fs::rename(&tmp, &destino).map_err(|e| format!("No se pudo guardar la miniatura: {e}"))?;
-
-    Ok(Some(rel))
+    fs::rename(&tmp, &destino).map_err(|e| format!("No se pudo guardar la miniatura: {e}"))
 }
 
 /// Decodifica respetando la orientación EXIF (las fotos de móvil), como hace el navegador con la original.
-fn decodificar(ruta: &Path) -> Option<DynamicImage> {
+pub(crate) fn decodificar(ruta: &Path) -> Option<DynamicImage> {
     let mut lector = ImageReader::open(ruta).ok()?.with_guessed_format().ok()?;
     // Topes explícitos: una imagen gigantesca no se reduce (se usa la original) en vez de reservar gigas
     let mut limites = image::Limits::default();

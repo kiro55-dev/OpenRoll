@@ -11,6 +11,7 @@ import { EVENTO_PARTIDA_CAMBIADA, invoke, listen } from "$lib/backend";
 import type { PartesCambiadas } from "$lib/red/replica";
 import { iniciarImagenes, importarImagen } from "$lib/imagenes";
 import { miniaturas } from "$lib/miniaturas.svelte";
+import { conversionImagen } from "$lib/conversionImagen.svelte";
 import { enviarAviso, avisoFoco } from "$lib/avisosTablero";
 import { desplazarGrupo, encajar, ladosInstancia, rejillaDe } from "$lib/tablero";
 import { ajustesVista } from "$lib/ajustesVista.svelte";
@@ -1524,17 +1525,20 @@ class Partida {
   async crearMapa(rutaOrigen: string | null = null) {
     if (this.zonaId === null) return;
 
-    let referencia: string | null = null;
-    if (rutaOrigen) {
-      try {
-        referencia = await importarImagen(rutaOrigen, "mapa");
-      } catch (err) {
-        console.error("No se pudo importar la imagen:", err);
-        return;
-      }
+    const idZona = this.zonaId;
+    let nuevo: Mapa;
+    try {
+      // La tarjeta temporal «Convirtiendo imagen» dura hasta que el mapa existe (y entonces sigue su propia tarjeta)
+      nuevo = await conversionImagen.durante(null, async () => {
+        const referencia = rutaOrigen ? await importarImagen(rutaOrigen, "mapa") : null;
+        const creado = await invoke<Mapa>("crear_mapa", { idZona, urlImagenFondo: referencia });
+        if (referencia) conversionImagen.esperarMiniatura(creado.id);
+        return creado;
+      });
+    } catch (err) {
+      console.error("No se pudo crear el mapa:", err);
+      return;
     }
-
-    const nuevo = await invoke<Mapa>("crear_mapa", { idZona: this.zonaId, urlImagenFondo: referencia });
     await this.recargarMapas(nuevo.id); // abre el mapa nuevo
   }
 
@@ -1551,12 +1555,15 @@ class Partida {
   async cambiarImagenMapa(mapa: Mapa, rutaOrigen: string) {
     let referencia: string;
     try {
-      referencia = await importarImagen(rutaOrigen, "mapa");
+      referencia = await conversionImagen.durante(mapa.id, () => importarImagen(rutaOrigen, "mapa"));
     } catch (err) {
       console.error("No se pudo importar la imagen:", err);
       return;
     }
-    await this.#editarMapa(mapa.id, { url_imagen_fondo: referencia });
+    await conversionImagen.durante(mapa.id, async () => {
+      await this.#editarMapa(mapa.id, { url_imagen_fondo: referencia });
+      conversionImagen.esperarMiniatura(mapa.id);
+    });
   }
 
   async reordenarMapas(ids: number[]) {
