@@ -37,7 +37,8 @@ use crate::tablero_general::tablero::AvisoTablero;
 /// 15: parámetros visuales como fuente de una derivada (`DefinicionVariable.parametros/parametros_opcionales`,
 ///     `ValorVariable.parametros_marcados`).
 /// 16: modo batalla (`Mapa.batalla`, la acción `pasar_turno`) y la visión de las fichas (`Entidad.vision`, `CambioEntidad::Vision`).
-pub const VERSION_PROTOCOLO: u32 = 16;
+/// 17: fórmulas individuales por entrada de una derivada (`DefinicionVariable.formulas_entradas`).
+pub const VERSION_PROTOCOLO: u32 = 17;
 
 /// Primer byte de un trozo binario: de una imagen que baja (host → jugador) o que sube (jugador → host).
 pub const TROZO_BAJADA: u8 = 1;

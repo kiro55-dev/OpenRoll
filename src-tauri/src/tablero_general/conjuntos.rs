@@ -314,7 +314,7 @@ pub fn asegurar(est: &mut EstadoPartida) {
 }
 
 impl EstadoPartida {
-    /// El estado de una partida NUEVA: D&D 5e como conjunto activo (sus parámetros, variables, grupos y escala son las definiciones
+    /// El estado de una partida NUEVA: una zona con un mapa vacío y D&D 5e como conjunto activo (sus parámetros, variables, grupos y escala son las definiciones
     /// vivas). `default()` sigue siendo el genérico: es la base de las partidas anteriores a los conjuntos y de casi todas las pruebas.
     /// Una partida que ya existe no pasa por aquí: conserva lo que tiene (`asegurar`).
     pub fn para_partida_nueva() -> Self {
@@ -329,6 +329,22 @@ impl EstadoPartida {
         e.conjuntos_parametros =
             vec![ConjuntoGuardado { id: 1, origen: Some(CONJUNTO_POR_DEFECTO.into()), contenido: dnd, valores: Default::default() }];
         e.conjunto_activo = 1;
+        // Una partida nueva no nace vacía: una zona con un mapa sin imagen (como si el usuario los hubiera creado)
+        e.zonas = vec![Zona { id: 1, nombre: "Zona 1".into(), orden: 0 }];
+        e.mapas = vec![Mapa {
+            id: 1,
+            id_zona: 1,
+            nombre: "1".into(),
+            url_imagen_fondo: None,
+            ancho: 1000,
+            alto: 1000,
+            rejilla: 50,
+            color_opacidad: vec![255, 255, 255, 76],
+            grosor: 1,
+            orden: 0,
+            compartido: false,
+            batalla: None,
+        }];
         e.ajustar_a_definiciones();
         e
     }
@@ -1224,6 +1240,9 @@ mod tests {
         assert_eq!(nueva.definiciones_parametros, dnd.parametros, "los de la hoja de D&D");
         assert_eq!(nueva.archivos_texto_defecto, dnd.archivos_texto, "y sus archivos de texto");
         assert!(nueva.escala_resultado.is_some());
+        // Y no nace vacía: una zona con un mapa sin imagen, con la rejilla de siempre
+        assert_eq!(nueva.zonas.iter().map(|z| (z.id, z.nombre.as_str())).collect::<Vec<_>>(), [(1, "Zona 1")]);
+        assert_eq!((nueva.mapas.len(), nueva.mapas[0].id_zona, nueva.mapas[0].url_imagen_fondo.clone(), nueva.mapas[0].rejilla), (1, 1, None, 50));
         // Las definiciones vivas SON las del conjunto activo
         assert_eq!(nueva.contenido_de(1).unwrap().variables, nueva.definiciones_variables);
         // El genérico sigue ahí para añadirlo, y `default()` no cambia (es el de las partidas anteriores a los conjuntos)

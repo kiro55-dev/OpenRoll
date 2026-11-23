@@ -1,5 +1,7 @@
 <!-- src/routes/componentes/VentanaColorFlecha.svelte -->
-<!-- Ventana flotante (no modal) para elegir el color de MI flecha y de MI ping en el tablero: los demás me ven con él.
+<!-- «Configuración de usuario»: ventana flotante (no modal) con mis preferencias de este equipo. Hoy: el color de MI flecha y de MI ping en el
+     tablero (los demás me ven con él) y si la rueda cambia los campos de una ficha sin tener que hacer clic en ellos.
+     El color se elige con la rueda de colores del navegador.
      Se elige igual que el color de la rejilla (el selector de color del navegador, con su rueda y sus valores RGB), con
      una muestra de la flecha y un botón para sortear otro. Cambia en vivo y se recuerda en este equipo (ver
      ajustesVista). Lo tienen el host y cada jugador. -->
@@ -29,14 +31,14 @@
   class="ventana-flotante"
   style="left: {pos.x}px; top: {pos.y}px;"
   role="dialog"
-  aria-label="Color de mi flecha"
+  aria-label="Configuración de usuario"
   tabindex="-1"
   onkeydown={alTeclear}
   bind:this={ventana}
 >
   <div class="cabecera" role="presentation" onpointerdown={(e) => moverVentana(e, pos, ventana)}>
     <span class="icono-drag">⋮⋮</span>
-    <span class="titulo">Color de mi flecha</span>
+    <span class="titulo">Configuración de usuario</span>
     <button type="button" class="btn-cerrar" aria-label="Cerrar" onclick={onCerrar}>✕</button>
   </div>
 
@@ -60,7 +62,14 @@
       <button type="button" class="btn-aleatorio" title={ayuda("Sortea otro color")} onclick={() => ajustesVista.colorFlechaAleatorio()}>Aleatorio</button>
     </div>
 
-    <p class="ayuda">Los demás ven tus flechas y tus pings de este color. Se guarda en este equipo.</p>
+    <p class="ayuda">Los demás ven tus flechas y tus pings de este color.</p>
+
+    <label class="check" title={ayuda("Por defecto hay que hacer clic en un campo numérico de la ventana de una ficha para cambiarlo con la rueda: así, hacer scroll por encima no cambia valores sin querer")}>
+      <input type="checkbox" checked={ajustesVista.ruedaSinFoco} onchange={() => ajustesVista.alternarRuedaSinFoco()} />
+      <span>Cambiar valores de una ficha con la rueda sin tener que pulsar</span>
+    </label>
+
+    <p class="ayuda">Se guarda en este equipo.</p>
   </div>
 </div>
 
@@ -93,4 +102,6 @@
   }
   .btn-aleatorio:hover { background: #3f3f46; }
   .ayuda { margin: 0; color: #71717a; font-size: 10px; }
+  .check { display: flex; align-items: flex-start; gap: 6px; font-size: 11px; color: #d4d4d8; cursor: pointer; line-height: 1.3; }
+  .check input { accent-color: #3b82f6; margin: 1px 0 0; flex: none; }
 </style>

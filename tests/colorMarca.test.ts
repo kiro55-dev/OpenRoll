@@ -77,6 +77,21 @@ describe("mi color de flecha (preferencia de pantalla)", () => {
     expect((await cargar()).colorFlecha).toEqual(a.colorFlecha);
   });
 
+  it("la rueda en los campos de una ficha sin pulsar está desactivada por defecto, se activa, se recuerda y no toca el color", async () => {
+    const a = await cargar();
+    expect(a.ruedaSinFoco).toBe(false);
+    const color = [...a.colorFlecha];
+    a.alternarRuedaSinFoco();
+    expect(a.ruedaSinFoco).toBe(true);
+    expect(JSON.parse(guardado["openroll.ajustesVista"])).toMatchObject({ ruedaSinFoco: true, colorFlecha: color });
+    vi.resetModules();
+    const b = await cargar();
+    expect(b.ruedaSinFoco).toBe(true);
+    expect(b.colorFlecha).toEqual(color);
+    b.alternarRuedaSinFoco();
+    expect(b.ruedaSinFoco).toBe(false);
+  });
+
   it("se puede cambiar (limitado a 0–255) y sortear otro, y se recuerda", async () => {
     const a = await cargar();
     a.cambiarColorFlecha([300, -4, 99.4]);

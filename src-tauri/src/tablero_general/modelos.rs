@@ -309,6 +309,30 @@ pub struct DefinicionVariable {
     /// Solo en una derivada: parámetros que cada ficha puede sumar o no (un check «+ armadura»).
     #[serde(default)]
     pub parametros_opcionales: Vec<u16>,
+    /// Solo en una derivada: una fórmula INDIVIDUAL (× ÷ +) para cada entrada que quiera (una base, una opcional o un parámetro): se aplica a
+    /// lo que aporta esa entrada ANTES de sumarlas todas, y luego a la suma entera se le aplica la fórmula de arriba. Una entrada sin fórmula
+    /// aporta lo suyo tal cual.
+    #[serde(default)]
+    pub formulas_entradas: Vec<FormulaEntrada>,
+}
+
+/// De dónde viene una entrada de una derivada: una variable (base u opcional) o un parámetro visual. Van aparte porque sus ids comparten números.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrigenEntrada {
+    Variable(u16),
+    Parametro(u16),
+}
+
+/// La fórmula de UNA entrada de una derivada: `floor(valor · multiplicador / divisor) + constante`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct FormulaEntrada {
+    pub origen: OrigenEntrada,
+    #[serde(default = "uno")]
+    pub multiplicador: i16,
+    #[serde(default = "uno")]
+    pub divisor: i16,
+    #[serde(default)]
+    pub constante: i16,
 }
 
 /// Una opción de una variable derivada con rangos (la competencia de Pathfinder: Entrenado +2, Experto +4...).

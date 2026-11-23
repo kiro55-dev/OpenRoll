@@ -29,7 +29,7 @@ fn base(id: u16, nombre: &str, abreviatura: &str, grupo: u16, neutro: i16, escal
         opciones: vec![],
         rangos: None,
         parametros: vec![],
-        parametros_opcionales: vec![],
+        parametros_opcionales: vec![], formulas_entradas: vec![],
     }
 }
 

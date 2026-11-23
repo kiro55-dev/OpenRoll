@@ -10,7 +10,7 @@ import type { DefinicionParametro, DefinicionVariable, GrupoVariables, Entidad, 
  *  13: grupos de variables (`grupos_variables`; derivadas con `bases`/`opcionales`; `ValorVariable.opcionales`).
  *  15: parámetros visuales como fuente de una derivada (`parametros`/`parametros_opcionales`, `parametros_marcados`).
  *  16: modo batalla (`Mapa.batalla`, la acción `pasar_turno`) y la visión de las fichas (`Entidad.vision`). */
-export const VERSION_PROTOCOLO = 16;
+export const VERSION_PROTOCOLO = 17;
 
 export interface Jugador {
   id: number;

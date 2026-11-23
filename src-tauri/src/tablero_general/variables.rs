@@ -11,7 +11,7 @@
 // números en el chat, y nada de lo que escribe el host puede meter HTML en el desglose de una tirada.
 // Mismo espejo en el front: src/lib/variables.ts.
 use crate::tablero_general::modelos::{
-    CalculoParametro, DefinicionParametro, DefinicionVariable, Entidad, GrupoVariables, Parametro, TipoGrupoVariables,
+    CalculoParametro, DefinicionParametro, DefinicionVariable, Entidad, GrupoVariables, OrigenEntrada, Parametro, TipoGrupoVariables,
     ValorParametro, ValorVariable,
 };
 
@@ -82,12 +82,23 @@ pub fn resultado(defs: &[DefinicionVariable], params: &[Parametro], valores: &[V
     }
     let marcadas: &[u16] = valor_de(def.id).map_or(&[], |v| v.opcionales.as_slice());
     let marcados: &[u16] = valor_de(def.id).map_or(&[], |v| v.parametros_marcados.as_slice());
-    let suma = def.bases.iter().map(|&b| de_base(b)).sum::<i32>()
-        + def.opcionales.iter().filter(|o| marcadas.contains(o)).map(|&o| de_base(o)).sum::<i32>()
-        + def.parametros.iter().map(|&p| valor_de_parametro(params, p)).sum::<i32>()
-        + def.parametros_opcionales.iter().filter(|p| marcados.contains(p)).map(|&p| valor_de_parametro(params, p)).sum::<i32>();
+    // La fórmula individual de una entrada (si la tiene) se aplica a lo que aporta ANTES de sumarlas todas
+    let de_variable = |id: u16| aplicar_a_entrada(def, OrigenEntrada::Variable(id), de_base(id));
+    let de_param = |id: u16| aplicar_a_entrada(def, OrigenEntrada::Parametro(id), valor_de_parametro(params, id));
+    let suma = def.bases.iter().map(|&b| de_variable(b)).sum::<i32>()
+        + def.opcionales.iter().filter(|o| marcadas.contains(o)).map(|&o| de_variable(o)).sum::<i32>()
+        + def.parametros.iter().map(|&p| de_param(p)).sum::<i32>()
+        + def.parametros_opcionales.iter().filter(|p| marcados.contains(p)).map(|&p| de_param(p)).sum::<i32>();
     let bono = bono_elegido(def, valor_de(def.id));
     formula(suma, def.multiplicador, def.divisor, def.constante) + bono
+}
+
+/// Lo que aporta una entrada de la derivada tras su fórmula individual (sin ella, `valor` tal cual).
+pub fn aplicar_a_entrada(def: &DefinicionVariable, origen: OrigenEntrada, valor: i32) -> i32 {
+    match def.formulas_entradas.iter().find(|f| f.origen == origen) {
+        Some(f) => formula(valor, f.multiplicador, f.divisor, f.constante),
+        None => valor,
+    }
 }
 
 /// El bono de la opción que la ficha ha elegido en esta derivada (0 si no tiene opciones).
@@ -281,7 +292,7 @@ pub fn validar_definicion(
             if !d.bases.is_empty() || !d.opcionales.is_empty() || !d.parametros.is_empty() || !d.parametros_opcionales.is_empty() {
                 return Err("Una variable base no depende de otras".into());
             }
-            if (d.multiplicador, d.divisor, d.constante) != (1, 1, 0) || d.rangos.is_some() || !d.opciones.is_empty() {
+            if (d.multiplicador, d.divisor, d.constante) != (1, 1, 0) || d.rangos.is_some() || !d.opciones.is_empty() || !d.formulas_entradas.is_empty() {
                 return Err("Una variable base no lleva fórmula ni rangos".into());
             }
             if !(1..=MAX_ESCALA_VARIABLE).contains(&d.escala) {
@@ -326,6 +337,20 @@ pub fn validar_definicion(
                 return Err("Una derivada solo puede depender de variables base".into());
             }
             validar_formula(d.multiplicador, d.divisor, d.constante)?;
+            // Las fórmulas individuales: de entradas que la derivada usa, una por entrada y con valores válidos
+            for (i, f) in d.formulas_entradas.iter().enumerate() {
+                let usa = match f.origen {
+                    OrigenEntrada::Variable(id) => d.bases.contains(&id) || d.opcionales.contains(&id),
+                    OrigenEntrada::Parametro(id) => d.parametros.contains(&id) || d.parametros_opcionales.contains(&id),
+                };
+                if !usa {
+                    return Err("Una fórmula individual es de una entrada que la variable no usa".into());
+                }
+                if d.formulas_entradas[..i].iter().any(|o| o.origen == f.origen) {
+                    return Err("Una entrada no puede tener dos fórmulas individuales".into());
+                }
+                validar_formula(f.multiplicador, f.divisor, f.constante)?;
+            }
             // Que la lista de rangos exista se comprueba donde están las listas (partida.rs, conjuntos.rs): aquí no se conocen
         }
     }
@@ -346,6 +371,7 @@ pub fn es_la_misma(a: &DefinicionVariable, b: &DefinicionVariable) -> bool {
         && a.escala == b.escala
         && (a.multiplicador, a.divisor, a.constante) == (b.multiplicador, b.divisor, b.constante)
         && a.rangos == b.rangos
+        && a.formulas_entradas == b.formulas_entradas
 }
 
 /// Comprueba el nombre de un grupo contra los DEMÁS (al crear: todos; al renombrar: todos menos él).
@@ -408,6 +434,12 @@ pub fn limpiar_parametros_fuente(defs: &mut Vec<DefinicionVariable>, params: &[D
     for d in defs.iter_mut() {
         d.parametros.retain(vale);
         d.parametros_opcionales.retain(vale);
+        // Una fórmula individual solo vale mientras su entrada siga siendo de la derivada
+        let (bases, opcionales, parametros, opcionales_p) = (d.bases.clone(), d.opcionales.clone(), d.parametros.clone(), d.parametros_opcionales.clone());
+        d.formulas_entradas.retain(|f| match f.origen {
+            OrigenEntrada::Variable(id) => bases.contains(&id) || opcionales.contains(&id),
+            OrigenEntrada::Parametro(id) => parametros.contains(&id) || opcionales_p.contains(&id),
+        });
     }
     defs.retain(|d| !eran.contains(&d.id) || es_derivada(d));
 }
@@ -434,6 +466,7 @@ pub fn asegurar_grupos(grupos: &mut Vec<GrupoVariables>, defs: &mut [DefinicionV
         d.parametros_opcionales.clear();
         d.opciones.clear();
         d.rangos = None;
+        d.formulas_entradas.clear();
         (d.multiplicador, d.divisor, d.constante) = (1, 1, 0);
     }
 }
@@ -447,7 +480,7 @@ pub mod pruebas {
     pub fn var(id: u16, nombre: &str, abreviatura: &str, neutro: i16, escala: i16) -> DefinicionVariable {
         DefinicionVariable {
             id, nombre: nombre.into(), abreviatura: abreviatura.into(), neutro, escala, grupo: 1, bases: vec![], opcionales: vec![],
-            multiplicador: 1, divisor: 1, constante: 0, opciones: vec![], rangos: None, parametros: vec![], parametros_opcionales: vec![],
+            multiplicador: 1, divisor: 1, constante: 0, opciones: vec![], rangos: None, parametros: vec![], parametros_opcionales: vec![], formulas_entradas: vec![],
         }
     }
 
@@ -455,7 +488,7 @@ pub mod pruebas {
     pub fn derivada(id: u16, nombre: &str, abreviatura: &str, bases: &[u16], opcionales: &[u16]) -> DefinicionVariable {
         DefinicionVariable {
             id, nombre: nombre.into(), abreviatura: abreviatura.into(), neutro: 0, escala: 1, grupo: 2,
-            bases: bases.to_vec(), opcionales: opcionales.to_vec(), multiplicador: 1, divisor: 1, constante: 0, opciones: vec![], rangos: None, parametros: vec![], parametros_opcionales: vec![],
+            bases: bases.to_vec(), opcionales: opcionales.to_vec(), multiplicador: 1, divisor: 1, constante: 0, opciones: vec![], rangos: None, parametros: vec![], parametros_opcionales: vec![], formulas_entradas: vec![],
         }
     }
 
@@ -776,6 +809,70 @@ pub mod pruebas {
         assert_eq!((vieja.multiplicador, vieja.divisor, vieja.constante, vieja.opciones.len()), (1, 1, 0, 0));
         let vieja: CalculoParametro = serde_json::from_str(r#"{"variables":[1]}"#).unwrap();
         assert_eq!((vieja.multiplicador, vieja.divisor), (1, 1));
+    }
+
+    #[test]
+    fn cada_entrada_puede_tener_su_formula_y_despues_se_aplica_la_del_resultado() {
+        use crate::tablero_general::modelos::{FormulaEntrada, OrigenEntrada, Parametro, ValorParametro, ID_ARMADURA};
+        let fe = |origen, multiplicador, divisor, constante| FormulaEntrada { origen, multiplicador, divisor, constante };
+        let defs = vec![var(1, "Destreza", "des", 10, 2), var(2, "Fuerza", "fue", 10, 2), var(3, "Competencia", "com", 0, 1)];
+        let mut d = derivada(4, "Mixta", "mix", &[1, 2], &[3]);
+        let mut valores = vec![valor(1, 16), valor(2, 8), valor(3, 3), valor(4, 0)];
+        valores[3].opcionales = vec![3]; // la competencia está marcada
+        let defs_con = |d: &DefinicionVariable| [defs.clone(), vec![d.clone()]].concat();
+        // Sin fórmulas: +3 (des) − 1 (fue) + 3 (com) = 5
+        assert_eq!(resultado(&defs_con(&d), &[], &valores, &d), 5);
+        // Destreza × 2 = 6 y Competencia + 1 = 4; Fuerza tal cual (−1): suma 9. Luego, la del resultado: ÷ 2 + 1 = 5
+        d.formulas_entradas = vec![fe(OrigenEntrada::Variable(1), 2, 1, 0), fe(OrigenEntrada::Variable(3), 1, 1, 1)];
+        assert_eq!(resultado(&defs_con(&d), &[], &valores, &d), 9, "solo las individuales");
+        (d.divisor, d.constante) = (2, 1);
+        assert_eq!(resultado(&defs_con(&d), &[], &valores, &d), 5, "individuales y luego la del resultado");
+        // Una opcional desmarcada no aporta (tampoco su fórmula)
+        valores[3].opcionales.clear();
+        assert_eq!(resultado(&defs_con(&d), &[], &valores, &d), (6 - 1) / 2 + 1);
+        // Redondea hacia abajo cada entrada: Fuerza −1 ÷ 2 = −1 (no 0)
+        d.formulas_entradas.push(fe(OrigenEntrada::Variable(2), 1, 2, 0));
+        (d.divisor, d.constante) = (1, 0);
+        assert_eq!(resultado(&defs_con(&d), &[], &valores, &d), 6 - 1);
+
+        // Un parámetro también: su entrada tiene fórmula propia (armadura ÷ 2 + el modificador de la destreza)
+        let mut p = derivada(5, "Con CA", "ca", &[1], &[]);
+        p.parametros = vec![ID_ARMADURA];
+        p.formulas_entradas = vec![fe(OrigenEntrada::Parametro(ID_ARMADURA), 1, 2, 0)];
+        let params = vec![Parametro { id_definicion: ID_ARMADURA, valor: ValorParametro::Numero(15), publico: false }];
+        assert_eq!(resultado(&defs_con(&p), &params, &valores, &p), 3 + 7);
+    }
+
+    #[test]
+    fn las_formulas_individuales_se_validan_se_limpian_y_una_base_no_las_lleva() {
+        use crate::tablero_general::modelos::{FormulaEntrada, OrigenEntrada};
+        let g = grupos();
+        let otras = vec![var(1, "Destreza", "des", 10, 2), var(3, "Competencia", "com", 0, 1)];
+        let fe = |origen, multiplicador, divisor, constante| FormulaEntrada { origen, multiplicador, divisor, constante };
+        let con = |f: Vec<FormulaEntrada>| DefinicionVariable { formulas_entradas: f, ..derivada(5, "Acrobacias", "acro", &[1], &[3]) };
+        assert!(validar_definicion(&otras, &g, &[], &con(vec![fe(OrigenEntrada::Variable(1), 2, 3, -4), fe(OrigenEntrada::Variable(3), 1, 1, 1)])).is_ok());
+        for mala in [
+            con(vec![fe(OrigenEntrada::Variable(9), 1, 1, 0)]), // una entrada que no usa
+            con(vec![fe(OrigenEntrada::Parametro(1), 1, 1, 0)]),
+            con(vec![fe(OrigenEntrada::Variable(1), 1, 1, 0), fe(OrigenEntrada::Variable(1), 2, 1, 0)]), // dos para la misma
+            con(vec![fe(OrigenEntrada::Variable(1), 0, 1, 0)]),
+            con(vec![fe(OrigenEntrada::Variable(1), 1, 101, 0)]),
+            con(vec![fe(OrigenEntrada::Variable(1), 1, 1, 10_000)]),
+            DefinicionVariable { formulas_entradas: vec![fe(OrigenEntrada::Variable(1), 2, 1, 0)], ..var(6, "Rara", "r", 10, 2) },
+        ] {
+            assert!(validar_definicion(&otras, &g, &[], &mala).is_err(), "{mala:?}");
+        }
+        assert!(!es_la_misma(&con(vec![]), &con(vec![fe(OrigenEntrada::Variable(1), 2, 1, 0)])));
+        // Si la entrada deja de ser de la derivada (se quitó la base), su fórmula se va con ella
+        let mut defs = vec![var(1, "Destreza", "des", 10, 2), var(3, "Competencia", "com", 0, 1), con(vec![fe(OrigenEntrada::Variable(3), 1, 1, 1), fe(OrigenEntrada::Variable(1), 2, 1, 0)])];
+        aplicar_borrado(&mut defs, &[3]);
+        limpiar_parametros_fuente(&mut defs, &[]);
+        assert_eq!(defs[1].formulas_entradas, vec![fe(OrigenEntrada::Variable(1), 2, 1, 0)]);
+        // Una partida o un archivo de antes se lee sin fórmulas individuales
+        let vieja: DefinicionVariable = serde_json::from_str(r#"{"id":1,"nombre":"Fuerza","abreviatura":"f","neutro":10,"escala":2}"#).unwrap();
+        assert!(vieja.formulas_entradas.is_empty());
+        let f: FormulaEntrada = serde_json::from_str(r#"{"origen":{"Parametro":2}}"#).unwrap();
+        assert_eq!((f.origen, f.multiplicador, f.divisor, f.constante), (OrigenEntrada::Parametro(2), 1, 1, 0));
     }
 
     #[test]

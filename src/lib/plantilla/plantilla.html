@@ -225,14 +225,19 @@
     const v = estado.variables[id] ? estado.variables[id].valor : b.neutro;
     return Math.floor((v - b.neutro) / Math.max(1, b.escala));
   }
+  // La fórmula individual de una entrada (si la tiene) se aplica a lo que aporta ANTES de sumarlas todas
+  function deEntrada(d, tipo, id, valor) {
+    const f = (d.formulas_entradas || []).find((x) => x.origen && x.origen[tipo] === id);
+    return f ? Math.floor((valor * (f.multiplicador || 1)) / Math.max(1, f.divisor || 1)) + (f.constante || 0) : valor;
+  }
   function resultado(d) {
     if (!esDerivada(d)) return deBase(d.id);
     const v = estado.variables[d.id];
     let suma = 0;
-    for (const b of d.bases || []) suma += deBase(b);
-    for (const o of d.opcionales || []) if (v.opcionales.has(o)) suma += deBase(o);
-    for (const p of d.parametros || []) suma += valorDeParametro(p);
-    for (const p of d.parametros_opcionales || []) if (v.parametros_marcados.has(p)) suma += valorDeParametro(p);
+    for (const b of d.bases || []) suma += deEntrada(d, "Variable", b, deBase(b));
+    for (const o of d.opcionales || []) if (v.opcionales.has(o)) suma += deEntrada(d, "Variable", o, deBase(o));
+    for (const p of d.parametros || []) suma += deEntrada(d, "Parametro", p, valorDeParametro(p));
+    for (const p of d.parametros_opcionales || []) if (v.parametros_marcados.has(p)) suma += deEntrada(d, "Parametro", p, valorDeParametro(p));
     const m = d.multiplicador || 1, div = Math.max(1, d.divisor || 1), c = d.constante || 0;
     const opciones = d.opciones || [];
     const o = opciones[v.eleccion] || opciones[0];

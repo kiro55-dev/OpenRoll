@@ -7,6 +7,7 @@
   import { miniaturas } from "$lib/miniaturas.svelte";
   import { esImagen, importarImagen } from "$lib/imagenes";
   import { alSoltarArchivos } from "$lib/soltarArchivos";
+  import { zonaSoltar, esImagenArrastrada, esPlantillaArrastrada } from "$lib/arrastreSO";
   import { arrastre } from "$lib/arrastreFicha.svelte";
   import { arrastreJugador } from "$lib/arrastreJugador.svelte";
   import { esJugador } from "$lib/modo";
@@ -154,6 +155,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="banco"
+  use:zonaSoltar={{ acepta: (a) => a.some((x) => esPlantillaArrastrada(x) || esImagenArrastrada(x, esJugador ? "mapa" : "ficha")) }}
   data-destino="banco"
   class:destino={recibeInstancia}
   ondragover={(e) => esJugador && e.preventDefault()}

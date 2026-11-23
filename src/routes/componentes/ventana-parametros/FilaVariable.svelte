@@ -9,7 +9,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { ayuda } from "$lib/ajustesVista.svelte";
-  import { partida, type DefinicionVariable, type TipoGrupoVariables } from "$lib/partida.svelte";
+  import { partida, type DefinicionVariable, type FormulaEntrada, type OrigenEntrada, type TipoGrupoVariables } from "$lib/partida.svelte";
   import { edicionVariables as edicion } from "$lib/edicionVariables.svelte";
   import {
     LIMITE_VALOR_VARIABLE,
@@ -20,6 +20,7 @@
     VARIABLE_NUEVA,
     avisoDeBorrar,
     esDerivada,
+    etiquetaVariable,
     parametroComoFuente
   } from "$lib/variables";
   import SelectorVariables from "./SelectorVariables.svelte";
@@ -87,6 +88,10 @@
   let constante = $state<number | null>(definicion?.constante ?? 0);
   // svelte-ignore state_referenced_locally
   let rangos = $state<number | null>(definicion?.rangos ?? null);
+  /** La fórmula individual de cada entrada (clave «v:id» una variable, «p:id» un parámetro). Sin entrada = lo suyo tal cual (×1 ÷1 +0). */
+  type FormulaEscrita = { m: number | null; d: number | null; c: number | null };
+  // svelte-ignore state_referenced_locally
+  let formulas = $state<Record<string, FormulaEscrita>>(formulasDe(definicion));
   /** El panel de la fórmula y los rangos: se abre solo si la variable ya tiene alguno. */
   // svelte-ignore state_referenced_locally
   let avanzado = $state(tieneAvanzado(definicion));
@@ -107,8 +112,56 @@
   let confirmando = $state<string | null>(null);
 
   function tieneAvanzado(d: DefinicionVariable | null) {
-    return !!d && ((d.multiplicador ?? 1) !== 1 || (d.divisor ?? 1) !== 1 || (d.constante ?? 0) !== 0 || d.rangos != null);
+    return (
+      !!d && ((d.multiplicador ?? 1) !== 1 || (d.divisor ?? 1) !== 1 || (d.constante ?? 0) !== 0 || d.rangos != null || (d.formulas_entradas?.length ?? 0) > 0)
+    );
   }
+
+  function claveEntrada(o: OrigenEntrada): string {
+    return "Variable" in o ? `v:${o.Variable}` : `p:${o.Parametro}`;
+  }
+
+  function formulasDe(d: DefinicionVariable | null): Record<string, FormulaEscrita> {
+    return Object.fromEntries((d?.formulas_entradas ?? []).map((f) => [claveEntrada(f.origen), { m: f.multiplicador, d: f.divisor, c: f.constante }]));
+  }
+
+  /** Las entradas de la derivada tal como están elegidas ahora (con su nombre), para dar a cada una su fórmula. */
+  const entradas = $derived.by(() => {
+    const variable = (id: number, opcional: boolean) => {
+      const v = partida.definicionesVariables.find((x) => x.id === id);
+      return { origen: { Variable: id } as OrigenEntrada, etiqueta: v ? etiquetaVariable(v) : "?", opcional };
+    };
+    const parametro = (id: number, opcional: boolean) => ({
+      origen: { Parametro: id } as OrigenEntrada,
+      etiqueta: partida.definiciones.find((x) => x.id === id)?.clave ?? "?",
+      opcional
+    });
+    return [
+      ...dependeDe.map((id) => variable(id, false)),
+      ...parametrosFijos.map((id) => parametro(id, false)),
+      ...opcionales.map((id) => variable(id, true)),
+      ...parametrosOpcionales.map((id) => parametro(id, true))
+    ];
+  });
+
+  const formulaDe = (o: OrigenEntrada): FormulaEscrita => formulas[claveEntrada(o)] ?? { m: 1, d: 1, c: 0 };
+  function ponerFormula(o: OrigenEntrada, campo: keyof FormulaEscrita, valor: number | null) {
+    formulas[claveEntrada(o)] = { ...formulaDe(o), [campo]: valor !== null && Number.isNaN(valor) ? null : valor };
+  }
+
+  /** Las fórmulas individuales que de verdad cambian algo, solo de las entradas que hay ahora y en un orden fijo. */
+  function formulasLeidas(): FormulaEntrada[] {
+    return entradas
+      .flatMap((e) => {
+        const f = formulas[claveEntrada(e.origen)];
+        if (!f) return [];
+        const n = (v: number | null) => (v !== null && Number.isFinite(v) ? v : 0); // un campo vacío da 0 y Rust lo rechaza con su motivo
+        const hecha = { origen: e.origen, multiplicador: n(f.m), divisor: n(f.d), constante: n(f.c) };
+        return hecha.multiplicador === 1 && hecha.divisor === 1 && hecha.constante === 0 ? [] : [hecha];
+      })
+      .sort((a, b) => claveEntrada(a.origen).localeCompare(claveEntrada(b.origen)));
+  }
+  const ordenadas = (l: FormulaEntrada[] | undefined) => [...(l ?? [])].sort((a, b) => claveEntrada(a.origen).localeCompare(claveEntrada(b.origen)));
 
   /** Vuelve a lo que tiene Rust (tras guardar, o al deshacer con Escape). */
   function deshacer() {
@@ -125,13 +178,14 @@
     divisor = definicion.divisor ?? 1;
     constante = definicion.constante ?? 0;
     rangos = definicion.rangos ?? null;
+    formulas = formulasDe(definicion);
   }
 
   // Si la lista se relee (al guardar esta u otra), se toma lo de Rust, salvo en una fila con cambios sin guardar
   $effect(() => {
     if (!definicion) return;
     const d = definicion;
-    void [d.nombre, d.abreviatura, d.neutro, d.escala, d.bases, d.opcionales, d.parametros, d.parametros_opcionales, d.multiplicador, d.divisor, d.constante, d.rangos];
+    void [d.nombre, d.abreviatura, d.neutro, d.escala, d.bases, d.opcionales, d.parametros, d.parametros_opcionales, d.multiplicador, d.divisor, d.constante, d.rangos, d.formulas_entradas];
     if (sucia) return;
     deshacer();
   });
@@ -163,7 +217,8 @@
       multiplicador: derivada ? Number(multiplicador ?? 0) : 1,
       divisor: derivada ? Number(divisor ?? 0) : 1,
       constante: derivada ? Number(constante ?? 0) : 0,
-      rangos: derivada ? rangos : null
+      rangos: derivada ? rangos : null,
+      formulas_entradas: derivada ? formulasLeidas() : []
     };
   }
 
@@ -181,7 +236,8 @@
       datos.multiplicador === (d.multiplicador ?? 1) &&
       datos.divisor === (d.divisor ?? 1) &&
       datos.constante === (d.constante ?? 0) &&
-      datos.rangos === (d.rangos ?? null)
+      datos.rangos === (d.rangos ?? null) &&
+      JSON.stringify(datos.formulas_entradas) === JSON.stringify(ordenadas(d.formulas_entradas))
     );
   }
 
@@ -377,7 +433,7 @@
       <button
         type="button"
         class="btn-avanzado"
-        class:con-datos={tieneAvanzado(definicion) || rangos !== null || multiplicador !== 1 || divisor !== 1 || constante !== 0}
+        class:con-datos={tieneAvanzado(definicion) || rangos !== null || multiplicador !== 1 || divisor !== 1 || constante !== 0 || formulasLeidas().length > 0}
         aria-expanded={avanzado}
         title={ayuda("Fórmula (× ÷ +) y rangos de esta variable")}
         onclick={() => (avanzado = !avanzado)}
@@ -385,8 +441,23 @@
     </div>
     {#if avanzado}
       <div class="avanzado">
+        <!-- Con más de una entrada (incluidas las opcionales), cada una puede llevar su propia fórmula ANTES de sumarlas todas -->
+        {#if entradas.length > 1}
+          <div class="entradas">
+            <span class="texto" title={ayuda("Se aplica a lo que aporta cada entrada antes de sumarlas todas (redondeando hacia abajo). Las opcionales solo cuentan si la ficha las marca")}>Fórmula de cada entrada:</span>
+            {#each entradas as e (claveEntrada(e.origen))}
+              {@const f = formulaDe(e.origen)}
+              <div class="fila-entrada">
+                <span class="nombre-entrada">{e.etiqueta}{e.opcional ? " (opc.)" : ""}</span>
+                <label>× <input type="number" class="campo numero" min="1" max={MAX_FACTOR_FORMULA} aria-label="Multiplicador de {e.etiqueta}" value={f.m} oninput={(ev) => ponerFormula(e.origen, "m", ev.currentTarget.valueAsNumber)} /></label>
+                <label>÷ <input type="number" class="campo numero" min="1" max={MAX_FACTOR_FORMULA} aria-label="Divisor de {e.etiqueta}" title={ayuda("Redondea hacia abajo")} value={f.d} oninput={(ev) => ponerFormula(e.origen, "d", ev.currentTarget.valueAsNumber)} /></label>
+                <label>+ <input type="number" class="campo numero" min={-LIMITE_VALOR_VARIABLE} max={LIMITE_VALOR_VARIABLE} aria-label="Constante de {e.etiqueta}" value={f.c} oninput={(ev) => ponerFormula(e.origen, "c", ev.currentTarget.valueAsNumber)} /></label>
+              </div>
+            {/each}
+          </div>
+        {/if}
         <div class="formula">
-          <span class="texto">Resultado = (suma de las variables)</span>
+          <span class="texto">{entradas.length > 1 ? "Resultado final = (suma de las entradas)" : "Resultado = (suma de las variables)"}</span>
           <label>× <input type="number" class="campo numero" min="1" max={MAX_FACTOR_FORMULA} aria-label="Multiplicador" bind:value={multiplicador} /></label>
           <label>÷ <input type="number" class="campo numero" min="1" max={MAX_FACTOR_FORMULA} aria-label="Divisor" title={ayuda("Redondea hacia abajo")} bind:value={divisor} /></label>
           <label>+ <input type="number" class="campo numero" min={-LIMITE_VALOR_VARIABLE} max={LIMITE_VALOR_VARIABLE} aria-label="Constante" bind:value={constante} /></label>
@@ -430,6 +501,11 @@
   }
   .btn-avanzado:hover, .btn-avanzado.con-datos { color: #93c5fd; }
   .avanzado { display: flex; flex-direction: column; gap: 5px; padding: 5px 6px; background: #0c0c0e; border-radius: 4px; cursor: default; }
+  .entradas { display: flex; flex-direction: column; gap: 3px; }
+  .fila-entrada { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; padding-left: 6px; }
+  .fila-entrada label { display: flex; align-items: center; gap: 3px; color: #a1a1aa; font-size: 11px; }
+  .fila-entrada .numero { width: 48px; }
+  .nombre-entrada { min-width: 90px; color: #d4d4d8; font-size: 11px; }
   .formula, .rangos { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
   .formula label { display: flex; align-items: center; gap: 3px; color: #a1a1aa; font-size: 11px; }
   .formula .numero { width: 48px; }

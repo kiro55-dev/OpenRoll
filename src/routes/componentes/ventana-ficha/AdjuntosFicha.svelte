@@ -6,6 +6,7 @@
   import { tick } from "svelte";
   import { esTexto, nombreArchivo, type EditorFicha } from "$lib/editorFicha.svelte";
   import { esJugador } from "$lib/modo";
+  import { zonaSoltar, esCualquierArchivo } from "$lib/arrastreSO";
   import { MAX_CARACTERES_ARCHIVO } from "$lib/plantillaFicha";
 
   let { editor }: { editor: EditorFicha } = $props();
@@ -134,7 +135,7 @@
   }
 </script>
 
-<div class="zona-archivos">
+<div class="zona-archivos" use:zonaSoltar={{ acepta: (a) => !esJugador && a.some(esCualquierArchivo) }}>
   <div class="barra-pestanas">
     {#if puedeIzq}
       <button type="button" class="btn-flecha" onclick={() => desplazar(-100)} title={ayuda("Desplazar a la izquierda")}>◀</button>

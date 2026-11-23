@@ -534,6 +534,7 @@ fn limpiar_variable(d: DefinicionVariable, grupos: &[GrupoVariables]) -> Definic
         constante: if derivada { d.constante } else { 0 },
         // La lista de rangos solo en una derivada; sus opciones son una copia que Rust rellena (`rangos::normalizar_rangos`)
         rangos: if derivada { d.rangos } else { None },
+        formulas_entradas: if derivada { d.formulas_entradas } else { vec![] },
         opciones: vec![],
         ..d
     }
@@ -2182,7 +2183,9 @@ mod tests_partidas {
 
         cambiar_de_partida(&state, "B").unwrap();
         assert_eq!(nombre_partida_actual(&state), "B");
-        assert!(zonas(&state).is_empty(), "B está vacía");
+        assert_eq!(zonas(&state), [1], "B nace con su zona (con un mapa vacío), sin lo de A");
+        assert_eq!(state.lock().mapas.len(), 1);
+        assert!(state.lock().mapas[0].url_imagen_fondo.is_none());
         assert_eq!(state.lock().definiciones_parametros, crate::tablero_general::conjuntos_serie::dnd5e().parametros, "B nace con los de D&D");
         let dir_a = partidas::ruta_partida(&state.raiz, "A");
         assert!(dir_a.join("partida.json").is_file(), "A se guardó antes de cambiar");
@@ -2198,7 +2201,7 @@ mod tests_partidas {
         assert_eq!(zonas(&state), [1]);
         assert_eq!(state.lock().definiciones_parametros.len(), 3);
         cambiar_de_partida(&state, "B").unwrap();
-        assert_eq!(zonas(&state), [2], "lo de B también se guardó");
+        assert_eq!(zonas(&state), [1, 2], "lo de B también se guardó");
         assert_eq!(partidas::leer_ultima(&state.raiz).as_deref(), Some("B"));
     }
 
@@ -2274,7 +2277,7 @@ mod tests_partidas {
         // La abierta se borra: se pasa a B (con lo suyo) y la carpeta de A desaparece
         borrar_partida_en(&state, "A").unwrap();
         assert_eq!(nombre_partida_actual(&state), "B");
-        assert_eq!(zonas(&state), [2], "ahora es B");
+        assert_eq!(zonas(&state), [1, 2], "ahora es B");
         assert_eq!(partidas::listar(&state.raiz), ["B"]);
         assert!(!dir_a.exists());
         assert_eq!(partidas::leer_ultima(&state.raiz).as_deref(), Some("B"));
@@ -2282,11 +2285,11 @@ mod tests_partidas {
         procesar_delta(&state, DeltaPartida::ZonaCreada(zona(3)));
         assert!(std::fs::read_to_string(partidas::ruta_partida(&state.raiz, "B").join("deltas.jsonl")).unwrap().contains("ZonaCreada"));
 
-        // Era la única: queda una vacía, con los parámetros de serie
+        // Era la única: queda una nueva (su zona con un mapa vacío), con los parámetros de serie
         borrar_partida_en(&state, "B").unwrap();
         assert_eq!(partidas::listar(&state.raiz), ["Partida 1"]);
         assert_eq!(nombre_partida_actual(&state), "Partida 1");
-        assert!(zonas(&state).is_empty());
+        assert_eq!(zonas(&state), [1]);
         assert_eq!(state.lock().definiciones_parametros, crate::tablero_general::conjuntos_serie::dnd5e().parametros);
 
         // Y si la única se llamaba «Partida 1», la nueva usa otro nombre (no hay choque con la que se va)

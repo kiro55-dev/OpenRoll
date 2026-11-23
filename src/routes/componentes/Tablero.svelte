@@ -623,6 +623,9 @@
 
   // Casillas del mapa (lo mismo que calcula Rust en tablero.rs). Se usa el tamaño que se está
   // editando, aunque aún no se haya guardado, para ver el cambio al momento.
+  // Sin ningún mapa (no hay uno creado o se borraron todos) no se dibuja rejilla y se enseña «Crea un mapa»
+  const hayMapa = $derived(typeof mapa?.id === 'number');
+
   const casillas = $derived.by(() => {
     const { w, h } = dimsMundo();
     return rejillaDe(w, h, rejilla.tamano);
@@ -633,7 +636,7 @@
     pendiente.rejilla = {
       cam, ancho, alto, dpr, casillas,
       estilo: {
-        visible: rejilla.visible,
+        visible: rejilla.visible && hayMapa,
         color: rejilla.color,
         grosor: rejilla.grosor,
         opacidad: rejilla.opacidad
@@ -978,6 +981,9 @@
   <canvas bind:this={canvasRejilla}></canvas>
   <canvas bind:this={canvasFichas}></canvas>
   <canvas bind:this={canvasMarcas}></canvas>
+  {#if !hayMapa}
+    <div class="sin-mapa">Crea un mapa</div>
+  {/if}
 </div>
 
 <style>
@@ -989,6 +995,11 @@
     background-color: #121212;
     cursor: grab;
     touch-action: none;
+  }
+  /* Sin mapa: un mensaje gris centrado de fondo (no recoge el ratón) */
+  .sin-mapa {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #3f3f46; font-size: 28px; font-weight: 600; pointer-events: none; user-select: none;
   }
   .tablero.arrastrando {
     cursor: grabbing;

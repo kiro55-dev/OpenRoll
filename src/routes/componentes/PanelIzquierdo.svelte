@@ -56,9 +56,9 @@
     texto: ajustesVista.tutoriales ? "Quitar tutoriales" : "Mostrar tutoriales",
     accion: () => ajustesVista.alternarTutoriales()
   });
-  // El color de mi flecha y de mi ping en el tablero: cada uno el suyo (host y jugadores)
+  // Mis preferencias (color de mi flecha y de mi ping, la rueda en los campos de una ficha...): cada uno las suyas (host y jugadores)
   const opcionColor = {
-    texto: "Color de mi flecha…",
+    texto: "Configuración de usuario…",
     accion: () => (colorAbierto = true)
   };
   const opciones = $derived(esJugador ? [opcionColor, opcionTutoriales] : [...opcionesHost, opcionColor, opcionTutoriales]);

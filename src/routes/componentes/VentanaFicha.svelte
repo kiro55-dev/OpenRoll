@@ -13,6 +13,7 @@
   import { EditorFicha } from "$lib/editorFicha.svelte";
   import { esImagen } from "$lib/imagenes";
   import { alSoltarArchivos } from "$lib/soltarArchivos";
+  import { zonaSoltar, esPlantillaArrastrada } from "$lib/arrastreSO";
   import { open } from "@tauri-apps/plugin-dialog";
   import { moverVentana } from "$lib/moverVentana";
   import { esJugador } from "$lib/modo";
@@ -412,6 +413,7 @@
   role="dialog"
   aria-label="Ficha"
   data-ventana-ficha
+  use:zonaSoltar={{ acepta: (a) => a.some(esPlantillaArrastrada) }}
   ondragover={(e) => esJugador && e.preventDefault()}
   ondrop={alSoltarEnElNavegador}
   tabindex="-1"

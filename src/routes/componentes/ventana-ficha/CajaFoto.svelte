@@ -9,6 +9,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { EXTENSIONES_IMAGEN, urlDeImagen } from "$lib/imagenes";
   import { esJugador } from "$lib/modo";
+  import { zonaSoltar, esImagenArrastrada } from "$lib/arrastreSO";
   import { ZOOM_MAX, ZOOM_MIN, tamanoEnCaja, type Encuadre } from "$lib/recorteFoto";
 
   let {
@@ -124,6 +125,7 @@
 
 <div
   class="caja-foto"
+  use:zonaSoltar={{ acepta: (a) => a.some((x) => esImagenArrastrada(x, esJugador ? "mapa" : "ficha")) }}
   class:movible={hayFoto}
   class:arrastrando
   role="button"

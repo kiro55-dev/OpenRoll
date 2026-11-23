@@ -4,6 +4,7 @@
      es el que siguen las fichas. -->
 <script lang="ts">
   import { ayuda } from "$lib/ajustesVista.svelte";
+  import { zonaSoltar, esPlantillaArrastrada } from "$lib/arrastreSO";
   import { flip } from "svelte/animate";
   import { partida, type DefinicionParametro } from "$lib/partida.svelte";
   import { onDestroy } from "svelte";
@@ -191,6 +192,7 @@
   style:max-height="min(66.667vh, calc(100vh - {pos.y}px - 12px))"
   role="dialog"
   data-ventana-parametros
+  use:zonaSoltar={{ acepta: (a) => a.some(esPlantillaArrastrada) }}
   aria-label="Parámetros de la partida"
   tabindex="-1"
   onkeydown={alTeclear}

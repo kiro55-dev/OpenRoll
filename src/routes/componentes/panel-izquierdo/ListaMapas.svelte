@@ -10,6 +10,10 @@
   import { ListaOrdenable } from "$lib/ordenable.svelte";
   import { esImagen, EXTENSIONES_IMAGEN } from "$lib/imagenes";
   import { alSoltarArchivos } from "$lib/soltarArchivos";
+  import { zonaSoltar, esImagenArrastrada } from "$lib/arrastreSO";
+
+  // Soltar una imagen de mapa del sistema (solo el host): crea un mapa nuevo en la lista o cambia la imagen de una tarjeta
+  const aceptaImagenDeMapa = (a: Parameters<typeof esImagenArrastrada>[0][]) => !esJugador && a.some((x) => esImagenArrastrada(x, "mapa"));
   import MenuContextual from "../comunes/MenuContextual.svelte";
   import ArrastreFlotante from "../comunes/ArrastreFlotante.svelte";
   import VentanaReemplazoImagen from "./VentanaReemplazoImagen.svelte";
@@ -94,7 +98,7 @@
   }
 </script>
 
-<div class="lista sub-mapas">
+<div class="lista sub-mapas" use:zonaSoltar={{ acepta: aceptaImagenDeMapa }}>
   <span class="titulo-mini">MAPAS</span>
   <div class="scroll">
     {#each lista.visuales as m, i (m.id)}
@@ -102,6 +106,7 @@
         <button
           type="button"
           class="tarjeta-mapa"
+          use:zonaSoltar={{ acepta: aceptaImagenDeMapa }}
           class:seleccionado={partida.mapaActual?.id === m.id}
           class:fantasma-origen={lista.activo && lista.item?.id === m.id}
           data-mapa-id={m.id}

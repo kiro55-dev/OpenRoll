@@ -2,7 +2,7 @@
 <!-- Campo numérico que también se ajusta con la rueda del ratón, pero SOLO cuando tiene el foco (has hecho clic dentro): así, hacer scroll por
      la ventana pasando por encima de los campos no cambia ningún valor sin querer. -->
 <script lang="ts">
-  import { ayuda } from "$lib/ajustesVista.svelte";
+  import { ajustesVista, ayuda } from "$lib/ajustesVista.svelte";
   let {
     value = $bindable(),
     etiqueta = "",
@@ -29,8 +29,8 @@
   } = $props();
 
   function alRueda(e: WheelEvent) {
-    // Sin el foco, la rueda hace scroll como en el resto de la ventana
-    if (document.activeElement !== e.currentTarget) return;
+    // Sin el foco, la rueda hace scroll como en el resto de la ventana (salvo que el usuario lo haya pedido en su configuración)
+    if (!ajustesVista.ruedaSinFoco && document.activeElement !== e.currentTarget) return;
     e.preventDefault();
     if (soloLectura) return;
     const paso = e.deltaY < 0 ? 1 : -1;

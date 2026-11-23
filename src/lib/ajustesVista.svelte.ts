@@ -13,6 +13,7 @@ interface Guardado {
   soloMapaActual?: boolean;
   tutoriales?: boolean;
   colorFlecha?: unknown;
+  ruedaSinFoco?: boolean;
 }
 
 function leer(): Guardado {
@@ -39,6 +40,12 @@ class AjustesVista {
    */
   colorFlecha = $state<ColorMarca>(esColor(leer().colorFlecha) ? (leer().colorFlecha as ColorMarca) : colorAleatorio());
 
+  /**
+   * Si la rueda del ratón cambia los campos numéricos de la ventana de una ficha con solo pasar por encima. Por defecto NO: hace falta
+   * hacer clic en el campo (tener el foco), así hacer scroll por la ventana no cambia ningún valor sin querer. Preferencia de este equipo.
+   */
+  ruedaSinFoco = $state(leer().ruedaSinFoco ?? false);
+
   constructor() {
     // Recién sorteado: que se quede el mismo la próxima vez
     if (!esColor(leer().colorFlecha)) this.#guardar();
@@ -53,6 +60,11 @@ class AjustesVista {
   /** Sortea otro color. */
   colorFlechaAleatorio() {
     this.cambiarColorFlecha(colorAleatorio());
+  }
+
+  alternarRuedaSinFoco() {
+    this.ruedaSinFoco = !this.ruedaSinFoco;
+    this.#guardar();
   }
 
   alternarTutoriales() {
@@ -77,7 +89,8 @@ class AjustesVista {
         edicionRejilla: this.edicionRejilla,
         soloMapaActual: this.soloMapaActual,
         tutoriales: this.tutoriales,
-        colorFlecha: [...this.colorFlecha]
+        colorFlecha: [...this.colorFlecha],
+        ruedaSinFoco: this.ruedaSinFoco
       };
       localStorage.setItem(CLAVE, JSON.stringify(guardado));
     } catch {

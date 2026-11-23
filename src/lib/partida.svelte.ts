@@ -135,12 +135,25 @@ export interface DefinicionVariable {
   constante?: number;
   /** Solo derivadas: la lista de rangos (`ListaRangos.id`) de la que cada ficha elige uno (`ValorVariable.eleccion`) y cuyo bono se suma. */
   rangos?: number | null;
+  /** Solo derivadas: fórmula individual (× ÷ +) de las entradas que quieran (base, opcional o parámetro); se aplica a lo que aporta cada una ANTES de sumarlas. */
+  formulas_entradas?: FormulaEntrada[];
   /** Una copia de las opciones de su lista (la deja Rust al día: no se escribe a mano). */
   opciones?: OpcionVariable[];
   /** Solo derivadas: parámetros visuales (numéricos, escritos a mano) cuyo valor se suma tal cual. */
   parametros?: number[];
   /** Solo derivadas: parámetros que cada ficha puede sumar o no (un check «+ armadura»). */
   parametros_opcionales?: number[];
+}
+
+/** De dónde viene una entrada de una derivada: una variable (base u opcional) o un parámetro visual (sus ids comparten números). */
+export type OrigenEntrada = { Variable: number } | { Parametro: number };
+
+/** La fórmula de UNA entrada de una derivada: `floor(valor · multiplicador / divisor) + constante`, antes de sumarlas todas. */
+export interface FormulaEntrada {
+  origen: OrigenEntrada;
+  multiplicador: number;
+  divisor: number;
+  constante: number;
 }
 
 /** Una lista de rangos con nombre («Competencia»: Sin entrenar +0, Entrenado +2...) que comparten las variables derivadas. */

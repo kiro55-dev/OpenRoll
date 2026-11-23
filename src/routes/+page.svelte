@@ -1,6 +1,7 @@
 <!-- src/routes/+page.svelte -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { iniciarArrastreSO } from "$lib/arrastreSO";
   import { partida } from "$lib/partida.svelte";
   import { tiradas } from "$lib/tiradas.svelte";
   import { ajustesVista } from "$lib/ajustesVista.svelte";
@@ -75,6 +76,9 @@
       (document.activeElement as HTMLElement | null)?.blur?.();
     }
   }
+
+  // Al arrastrar un archivo desde el ordenador, se marcan en azul las zonas donde ese tipo de archivo se puede soltar
+  onMount(() => iniciarArrastreSO());
 
   // El foco de otro jugador (aviso por red, no se guarda) se dibuja aparte del propio
   onMount(() =>
@@ -206,6 +210,15 @@
     position: absolute; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 900;
     background: #7f1d1d; color: #fecaca; border: 1px solid #b91c1c; border-radius: 6px;
     padding: 4px 10px; font-size: 11px; max-width: 80%;
+  }
+  /* Zonas donde se puede soltar el archivo que se arrastra desde el ordenador (ver lib/arrastreSO.ts): un velo azul fijo, por ENCIMA de todo (fotos,
+     botones, ventanas) y sin recoger el ratón. La zona bajo el cursor, un poco más clara. */
+  :global(.so-velo) {
+    position: fixed; z-index: 100000; pointer-events: none; box-sizing: border-box;
+    background: rgba(59, 130, 246, 0.2); border: 2px dashed #3b82f6;
+  }
+  :global(.so-velo.so-velo-encima) {
+    background: rgba(96, 165, 250, 0.38); border: 2px solid #93c5fd;
   }
   :global(body, html) {
     margin: 0; padding: 0; width: 100vw; height: 100vh;

@@ -4,7 +4,16 @@
 // neutro y escala, y cada ficha pone su valor) o de derivadas (suman el resultado de sus bases y, si la ficha las marca,
 // el de sus opcionales). Lo que cuenta en el chat (`2d6 + f`) es el RESULTADO, que se calcula.
 // Espejo de src-tauri/src/tablero_general/variables.rs (Rust lo vuelve a comprobar y es quien tira).
-import type { CalculoParametro, DefinicionParametro, DefinicionVariable, Entidad, Parametro, ValorVariable } from "./partida.svelte";
+import type {
+  CalculoParametro,
+  DefinicionParametro,
+  DefinicionVariable,
+  Entidad,
+  FormulaEntrada,
+  OrigenEntrada,
+  Parametro,
+  ValorVariable
+} from "./partida.svelte";
 
 /** Con lo que nace una variable nueva en el formulario del host. */
 export const VARIABLE_NUEVA = { neutro: 10, escala: 2 } as const;
@@ -65,6 +74,25 @@ function valorDeParametro(fuentes: FuentesParametros, id: number): number {
   return v && typeof v === "object" && "Numero" in v && typeof v.Numero === "number" && Number.isFinite(v.Numero) ? v.Numero : 0;
 }
 
+/** ¿Es el mismo origen de entrada? (una variable y un parámetro con el mismo número NO lo son) */
+export function mismoOrigen(a: OrigenEntrada, b: OrigenEntrada): boolean {
+  if ("Variable" in a && "Variable" in b) return a.Variable === b.Variable;
+  if ("Parametro" in a && "Parametro" in b) return a.Parametro === b.Parametro;
+  return false;
+}
+
+/** La fórmula individual que tiene esa entrada de la derivada (`undefined` = aporta lo suyo tal cual). */
+export const formulaDeEntrada = (def: Pick<DefinicionVariable, "formulas_entradas">, origen: OrigenEntrada): FormulaEntrada | undefined =>
+  (def.formulas_entradas ?? []).find((f) => mismoOrigen(f.origen, origen));
+
+/** Una fórmula dicha corta: «×2 ÷3 +1» (solo lo que no es neutro). */
+export function textoFormula(f: { multiplicador?: number; divisor?: number; constante?: number }): string {
+  const m = f.multiplicador ?? 1;
+  const d = f.divisor ?? 1;
+  const c = f.constante ?? 0;
+  return [m !== 1 ? `×${m}` : "", d !== 1 ? `÷${d}` : "", c !== 0 ? (c > 0 ? `+${c}` : `-${-c}`) : ""].filter(Boolean).join(" ");
+}
+
 /** Cómo se nombra una variable en pantalla y en el desglose: su abreviatura o, sin ella, su nombre. */
 export const etiquetaVariable = (d: Pick<DefinicionVariable, "nombre" | "abreviatura">) => d.abreviatura || d.nombre;
 
@@ -75,7 +103,7 @@ export function partesResultado(
   valores: ValorVariable[],
   def: DefinicionVariable,
   fuentes: FuentesParametros = { definiciones: [], valores: [] }
-): { etiqueta: string; valor: number }[] {
+): { etiqueta: string; valor: number; antes?: number; formula?: string }[] {
   const valorDe = (id: number) => valores.find((v) => v.id_definicion === id);
   const deBase = (id: number) => {
     const b = defs.find((d) => d.id === id && !esDerivada(d));
@@ -91,9 +119,16 @@ export function partesResultado(
     const p = fuentes.definiciones.find((d) => d.id === id);
     return p ? [{ etiqueta: p.clave, valor: valorDeParametro(fuentes, id) }] : [];
   };
+  // La fórmula individual de una entrada (si la tiene) se aplica a lo que aporta ANTES de sumarlas todas
+  const conFormula = (origen: OrigenEntrada, partes: { etiqueta: string; valor: number }[]) => {
+    const f = formulaDeEntrada(def, origen);
+    return partes.map((p) =>
+      f ? { etiqueta: p.etiqueta, valor: formulaVariable(p.valor, f.multiplicador, f.divisor, f.constante), antes: p.valor, formula: textoFormula(f) } : p
+    );
+  };
   return [
-    ...[...(def.bases ?? []), ...(def.opcionales ?? []).filter((o) => marcadas.includes(o))].flatMap((id) => deBase(id) ?? []),
-    ...[...(def.parametros ?? []), ...(def.parametros_opcionales ?? []).filter((p) => marcados.includes(p))].flatMap(deParametro)
+    ...[...(def.bases ?? []), ...(def.opcionales ?? []).filter((o) => marcadas.includes(o))].flatMap((id) => conFormula({ Variable: id }, deBase(id) ? [deBase(id)!] : [])),
+    ...[...(def.parametros ?? []), ...(def.parametros_opcionales ?? []).filter((p) => marcados.includes(p))].flatMap((id) => conFormula({ Parametro: id }, deParametro(id)))
   ];
 }
 
@@ -119,7 +154,10 @@ export function desgloseResultado(
   def: DefinicionVariable,
   fuentes?: FuentesParametros
 ): string {
-  const partes = partesResultado(defs, valores, def, fuentes).map((p) => `${p.etiqueta} (${textoModificador(p.valor)})`);
+  // Una entrada con fórmula individual se escribe «des (+3 ×2 = +6)»
+  const partes = partesResultado(defs, valores, def, fuentes).map((p) =>
+    p.formula ? `${p.etiqueta} (${textoModificador(p.antes ?? 0)} ${p.formula} = ${textoModificador(p.valor)})` : `${p.etiqueta} (${textoModificador(p.valor)})`
+  );
   let texto = partes.join(" + ");
   if (!esDerivada(def)) return texto;
   const m = def.multiplicador ?? 1;

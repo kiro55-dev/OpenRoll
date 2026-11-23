@@ -1338,7 +1338,7 @@ pub(crate) mod tests {
         a.escribir_partida("{ esto no es json").unwrap();
 
         let (e, informe) = cargar(&a).unwrap();
-        assert!(e.zonas.is_empty());
+        assert_eq!(e.zonas.len(), 1, "una partida nueva nace con su zona");
         let respaldo = informe.partida_corrupta_respaldada_en.expect("debe haberse respaldado");
         assert_eq!(fs::read_to_string(respaldo).unwrap(), "{ esto no es json");
         assert!(a.leer_partida().unwrap().is_none(), "partida.json ya no debe estar en medio");

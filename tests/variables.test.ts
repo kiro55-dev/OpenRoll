@@ -14,6 +14,9 @@ import {
   esDerivada,
   parametroComoFuente,
   etiquetaVariable,
+  formulaDeEntrada,
+  mismoOrigen,
+  textoFormula,
   modificadorVariable,
   normalizarVariables,
   partesResultado,
@@ -218,6 +221,60 @@ describe("parámetros visuales como fuente de una derivada", () => {
     expect(efectoDeBorrar([des, defensa], [1]).borradas).toEqual([1]);
     const sinParametros = derivada(7, "Otra", "ot", [1]);
     expect(efectoDeBorrar([des, sinParametros], [1]).borradas).toEqual([1, 7]);
+  });
+});
+
+describe("fórmula individual de cada entrada de una derivada (igual que variables::resultado en Rust)", () => {
+  const defs = [base(1, "Destreza", "des", 10, 2), base(2, "Fuerza", "fue", 10, 2), base(3, "Competencia", "com", 0, 1)];
+  const valores = [
+    { id_definicion: 1, valor: 16 },
+    { id_definicion: 2, valor: 8 },
+    { id_definicion: 3, valor: 3 },
+    { id_definicion: 4, valor: 0, opcionales: [3] }
+  ];
+  const mixta = (extra: Partial<DefinicionVariable>): DefinicionVariable => ({ ...derivada(4, "Mixta", "mix", [1, 2], [3]), ...extra });
+
+  it("cada entrada aplica su fórmula antes de sumar y después se aplica la del resultado", () => {
+    const sin = mixta({});
+    expect(resultadoVariable([...defs, sin], valores, sin)).toBe(3 - 1 + 3);
+    const con = mixta({
+      formulas_entradas: [
+        { origen: { Variable: 1 }, multiplicador: 2, divisor: 1, constante: 0 },
+        { origen: { Variable: 3 }, multiplicador: 1, divisor: 1, constante: 1 }
+      ]
+    });
+    expect(resultadoVariable([...defs, con], valores, con)).toBe(6 - 1 + 4);
+    const final = { ...con, divisor: 2, constante: 1 };
+    expect(resultadoVariable([...defs, final], valores, final)).toBe(Math.floor(9 / 2) + 1);
+    // Una opcional sin marcar no aporta, ni su fórmula
+    const desmarcada = [valores[0], valores[1], valores[2], { id_definicion: 4, valor: 0, opcionales: [] }];
+    expect(resultadoVariable([...defs, con], desmarcada, con)).toBe(6 - 1);
+  });
+
+  it("un parámetro es otra entrada: su fórmula es suya aunque una variable tenga el mismo número", () => {
+    const d = mixta({
+      bases: [1],
+      opcionales: [],
+      parametros: [1],
+      formulas_entradas: [{ origen: { Parametro: 1 }, multiplicador: 1, divisor: 2, constante: 0 }]
+    });
+    const fuentes = {
+      definiciones: [{ id: 1, clave: "Armadura", valor_por_defecto: { Numero: 10 }, tiene_maximo: false, representar_mapa: null, visibilidad: "Variable", unidad: null, atenuar_si_negativo: false }] as any,
+      valores: [{ id_definicion: 1, valor: { Numero: 15 }, publico: false }] as any
+    };
+    expect(resultadoVariable([...defs, d], valores, d, fuentes)).toBe(3 + 7);
+    expect(desgloseResultado([...defs, d], valores, d, fuentes)).toBe("des (+3) + Armadura (+15 ÷2 = +7)");
+  });
+
+  it("el desglose enseña lo que hizo la fórmula de cada entrada y mismoOrigen distingue variable de parámetro", () => {
+    const con = mixta({ formulas_entradas: [{ origen: { Variable: 1 }, multiplicador: 2, divisor: 1, constante: -1 }] });
+    expect(desgloseResultado([...defs, con], valores, con)).toBe("des (+3 ×2 -1 = +5) + fue (-1) + com (+3)");
+    expect(formulaDeEntrada(con, { Variable: 1 })?.multiplicador).toBe(2);
+    expect(formulaDeEntrada(con, { Parametro: 1 })).toBeUndefined();
+    expect(mismoOrigen({ Variable: 1 }, { Parametro: 1 })).toBe(false);
+    expect(mismoOrigen({ Variable: 2 }, { Variable: 2 })).toBe(true);
+    expect(textoFormula({ multiplicador: 1, divisor: 1, constante: 0 })).toBe("");
+    expect(textoFormula({ multiplicador: 3, divisor: 2, constante: 4 })).toBe("×3 ÷2 +4");
   });
 });
 
