@@ -13,7 +13,7 @@
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; background: #0f0f11; color: #f4f4f5; font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .pagina { max-width: 860px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .pagina { max-width: 860px; margin: 0 auto; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 14px; }
   header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   header h1 { margin: 0; font-size: 17px; flex: 1; min-width: 200px; }
   header .conjunto { color: #a1a1aa; font-weight: normal; font-size: 13px; }
@@ -84,11 +84,13 @@
   textarea { width: 100%; min-height: 240px; resize: vertical; font: 12px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; background: #09090b; border: 1px solid #3f3f46; color: white; border-radius: 4px; padding: 8px; }
   textarea:focus { outline: none; border-color: #3b82f6; }
   .error { color: #f87171; font-size: 12px; }
+  /* La cabecera lleva TODO el aire de arriba (la página no tiene padding superior): así, al hacer scroll, se queda quieta con el mismo margen */
+  .cabecera { position: sticky; top: 0; z-index: 10; background: #0f0f11; padding: 10px 0; }
 </style>
 </head>
 <body>
 <div class="pagina">
-  <header>
+  <header class="cabecera">
     <h1>Ficha <span class="conjunto" id="conjunto"></span></h1>
     <span class="estado" id="estado">Sin cambios</span>
     <button type="button" class="guardar" id="guardar">Guardar</button>
