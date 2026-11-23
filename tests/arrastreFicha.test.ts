@@ -123,6 +123,26 @@ describe("fichas del tablero", () => {
     expect(fichas.fichasDelMapa(lista, null)).toEqual([]);
   });
 
+  it("una ficha grande que tapa del todo a una pequeña queda debajo; si no, manda la capa", () => {
+    const ids = (l: ReturnType<typeof instancia>[]) => fichas.fichasDelMapa(l, 1).map((f) => f.instancia.id_instancia);
+    const grande = (capa: number) => ({ ...instancia(1, 1, { x: 5, y: 5 }, { Grande: [3, 3] }), capa }); // 4..6
+    const pequenaDentro = (capa: number) => ({ ...instancia(2, 1, { x: 5, y: 5 }), capa });
+    // La grande se puso después (más capa) y taparía a la pequeña: la pequeña se queda encima
+    expect(ids([pequenaDentro(0), grande(1)])).toEqual([1, 2]);
+    expect(ids([grande(0), pequenaDentro(1)])).toEqual([1, 2]);
+    // Solape parcial (la pequeña asoma por un lado): lo de siempre, la de más capa encima
+    const asoma = (capa: number) => ({ ...instancia(3, 1, { x: 7, y: 5 }), capa });
+    expect(ids([asoma(0), grande(1)])).toEqual([3, 1]);
+    expect(ids([grande(0), asoma(1)])).toEqual([1, 3]);
+    // Mismo cuerpo exacto: lo de siempre
+    const igual = (capa: number) => ({ ...instancia(4, 1, { x: 5, y: 5 }, { Grande: [3, 3] }), capa });
+    expect(ids([igual(0), grande(1)])).toEqual([4, 1]);
+    expect(ids([grande(0), igual(1)])).toEqual([1, 4]);
+    // Tres tamaños anidados: de mayor a menor, aunque lleguen al revés
+    const media = { ...instancia(5, 1, { x: 5, y: 5 }, { Grande: [2, 2] }), capa: 5 }; // 4..5 o 5..6, dentro de la grande
+    expect(ids([pequenaDentro(0), media, grande(9)])).toEqual([1, 5, 2]);
+  });
+
   it("una ficha girada ocupa sus casillas giradas", () => {
     const tumbada = { ...instancia(1, 1, { x: 5, y: 5 }, { Grande: [1, 3] }), rotacion: 1 }; // 3×1: x 4..6
     const enMapa = fichas.fichasDelMapa([tumbada], 1);

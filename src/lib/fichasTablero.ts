@@ -5,6 +5,7 @@
 // Las fichas con el foco dibujan además las formas de sus parámetros (rombo, círculo...).
 import type { Casilla, DefinicionParametro, Forma, Instancia, TipoEntidad } from "$lib/partida.svelte";
 import {
+  extremos,
   extremosForma,
   ladosInstancia,
   mundoAPantalla,
@@ -39,18 +40,46 @@ export function parametroOculto(tipo: TipoEntidad, d: DefinicionParametro): bool
 export type FichaEnMapa = { instancia: Instancia; casilla: Casilla };
 
 /**
+ * Pone encima de cada ficha grande las pequeñas que quedan TAPADAS del todo por ella (todo su cuerpo dentro del de la grande y
+ * el de la grande mayor), para que una ficha grande puesta sobre una pequeña no la esconda. Entre el resto (solape parcial,
+ * mismo cuerpo, sin relación) manda el orden que llega (la `capa`). Es un orden topológico: de lo disponible, la de menos capa.
+ */
+export function pequenasSobreGrandes(fichas: FichaEnMapa[]): FichaEnMapa[] {
+  const cajas = fichas.map((f) => extremos(f.casilla, ladosInstancia(f.instancia)));
+  const area = (k: number) => (cajas[k].x1 - cajas[k].x0 + 1) * (cajas[k].y1 - cajas[k].y0 + 1);
+  // contiene[g][p]: la grande g tapa del todo a la pequeña p
+  const tapa = (g: number, p: number) =>
+    area(g) > area(p) && cajas[g].x0 <= cajas[p].x0 && cajas[g].y0 <= cajas[p].y0 && cajas[g].x1 >= cajas[p].x1 && cajas[g].y1 >= cajas[p].y1;
+  const n = fichas.length;
+  const debajo = Array.from({ length: n }, (_, p) => Array.from({ length: n }, (_, g) => g !== p && tapa(g, p)));
+  if (!debajo.some((fila) => fila.some(Boolean))) return fichas;
+  const puesta = new Array<boolean>(n).fill(false);
+  const salida: FichaEnMapa[] = [];
+  while (salida.length < n) {
+    // La primera (menor capa, porque ya vienen ordenadas) a la que no le falta ninguna grande por dibujar
+    const k = puesta.findIndex((hecha, p) => !hecha && !debajo[p].some((tapada, g) => tapada && !puesta[g]));
+    puesta[k] = true;
+    salida.push(fichas[k]);
+  }
+  return salida;
+}
+
+/**
  * Las instancias que están en una casilla de ese mapa, en orden de dibujo (la última, encima): por su
- * `capa` (la última que se puso o movió, arriba) y, a igual capa, en el orden en que llegan.
+ * `capa` (la última que se puso o movió, arriba) y, a igual capa, en el orden en que llegan; salvo que una ficha grande tape del
+ * todo a una pequeña: entonces la pequeña va encima (`pequenasSobreGrandes`).
  */
 export function fichasDelMapa(instancias: readonly Instancia[], idMapa: number | null): FichaEnMapa[] {
   if (idMapa === null) return [];
-  return instancias
-    .flatMap((instancia) =>
-      instancia.id_mapa === idMapa && typeof instancia.coordenadas === "object"
-        ? [{ instancia, casilla: instancia.coordenadas.Casilla }]
-        : []
-    )
-    .sort((a, b) => (a.instancia.capa ?? 0) - (b.instancia.capa ?? 0)); // sort es estable
+  return pequenasSobreGrandes(
+    instancias
+      .flatMap((instancia) =>
+        instancia.id_mapa === idMapa && typeof instancia.coordenadas === "object"
+          ? [{ instancia, casilla: instancia.coordenadas.Casilla }]
+          : []
+      )
+      .sort((a, b) => (a.instancia.capa ?? 0) - (b.instancia.capa ?? 0)) // sort es estable
+  );
 }
 
 /**
