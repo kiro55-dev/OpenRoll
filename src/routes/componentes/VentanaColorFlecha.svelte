@@ -9,6 +9,7 @@
   import { ajustesVista, ayuda } from "$lib/ajustesVista.svelte";
   import { aHex, deHex, rgbCss } from "$lib/colorMarca";
   import { moverVentana } from "$lib/moverVentana";
+  import { redimensionable } from "$lib/redimensionarVentana";
 
   let { onCerrar }: { onCerrar: () => void } = $props();
 
@@ -29,7 +30,9 @@
 
 <div
   class="ventana-flotante"
-  style="left: {pos.x}px; top: {pos.y}px;"
+  style:left="{pos.x}px"
+  style:top="{pos.y}px"
+  use:redimensionable={{ pos }}
   role="dialog"
   aria-label="Configuración de usuario"
   tabindex="-1"

@@ -11,6 +11,7 @@
   import { ListaOrdenable } from "$lib/ordenable.svelte";
   import { edicionVariables as edicion } from "$lib/edicionVariables.svelte";
   import { moverVentana } from "$lib/moverVentana";
+  import { redimensionable } from "$lib/redimensionarVentana";
   import { FormularioParametro, formasDisponibles, VISIBILIDADES, resumenDefinicion } from "$lib/formularioParametro.svelte";
   import ArrastreFlotante from "./comunes/ArrastreFlotante.svelte";
   import TablaVariables from "./ventana-parametros/TablaVariables.svelte";
@@ -187,7 +188,9 @@
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
   class="ventana-flotante"
-  style="left: {pos.x}px; top: {pos.y}px;"
+  style:left="{pos.x}px"
+  style:top="{pos.y}px"
+  use:redimensionable={{ pos }}
   style:width={pestana === "variables" || pestana === "resultados" || pestana === "txt" ? "560px" : null}
   style:max-height="min(66.667vh, calc(100vh - {pos.y}px - 12px))"
   role="dialog"

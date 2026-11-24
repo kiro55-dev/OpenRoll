@@ -9,6 +9,7 @@
   import { invoke } from "$lib/backend";
   import { tiradas } from "$lib/tiradas.svelte";
   import { moverVentana } from "$lib/moverVentana";
+  import { redimensionable } from "$lib/redimensionarVentana";
   import { arrastre } from "$lib/arrastreFicha.svelte";
 
   let { onCerrar }: { onCerrar: () => void } = $props();
@@ -152,7 +153,9 @@
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
   class="ventana-flotante"
-  style="left: {pos.x}px; top: {pos.y}px;"
+  style:left="{pos.x}px"
+  style:top="{pos.y}px"
+  use:redimensionable={{ pos }}
   role="dialog"
   aria-label="Empezar batalla"
   tabindex="-1"

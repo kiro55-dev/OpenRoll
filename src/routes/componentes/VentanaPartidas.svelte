@@ -6,6 +6,7 @@
   import { partida } from "$lib/partida.svelte";
   import { GestorPartidas } from "$lib/gestorPartidas.svelte";
   import { moverVentana } from "$lib/moverVentana";
+  import { redimensionable } from "$lib/redimensionarVentana";
 
   let { onCerrar }: { onCerrar: () => void } = $props();
 
@@ -51,7 +52,9 @@
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
   class="ventana-flotante"
-  style="left: {pos.x}px; top: {pos.y}px;"
+  style:left="{pos.x}px"
+  style:top="{pos.y}px"
+  use:redimensionable={{ pos }}
   role="dialog"
   aria-label="Partidas"
   tabindex="-1"

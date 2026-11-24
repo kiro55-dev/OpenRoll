@@ -5,6 +5,7 @@
 <script lang="ts">
   import { ayuda } from "$lib/ajustesVista.svelte";
   import { moverVentana } from "$lib/moverVentana";
+  import { redimensionable } from "$lib/redimensionarVentana";
   import { esJugador } from "$lib/modo";
   import { untrack } from "svelte";
   import { macros, macrosEditables, type Comprobacion } from "$lib/macros.svelte";
@@ -140,7 +141,9 @@
 
 <div
   class="ventana-flotante"
-  style="left: {pos.x}px; top: {pos.y}px;"
+  style:left="{pos.x}px"
+  style:top="{pos.y}px"
+  use:redimensionable={{ pos }}
   role="dialog"
   aria-label="Macros"
   tabindex="-1"

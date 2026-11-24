@@ -16,6 +16,7 @@
   import { zonaSoltar, esPlantillaArrastrada } from "$lib/arrastreSO";
   import { open } from "@tauri-apps/plugin-dialog";
   import { moverVentana } from "$lib/moverVentana";
+  import { redimensionable } from "$lib/redimensionarVentana";
   import { esJugador } from "$lib/modo";
   import { LIMITE_VALOR_VARIABLE, etiquetaVariable, textoModificador } from "$lib/variables";
   import CajaFoto from "./ventana-ficha/CajaFoto.svelte";
@@ -409,7 +410,9 @@
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
   class="ventana-flotante"
-  style="left: {pos.x}px; top: {pos.y}px;"
+  style:left="{pos.x}px"
+  style:top="{pos.y}px"
+  use:redimensionable={{ pos }}
   role="dialog"
   aria-label="Ficha"
   data-ventana-ficha
