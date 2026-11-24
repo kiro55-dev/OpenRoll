@@ -864,7 +864,7 @@ pub struct Tiradas {
     /// El nombre del jugador al tirar, para escribirlo en el chat («Ana: 1d20 = 7»). Vacío si tiró el host.
     #[serde(default)]
     pub autor: String,
-    /// Si los jugadores la ven. Solo el host puede tirar en privado; las de los jugadores son siempre públicas.
+    /// Si los demás jugadores la ven. Una privada la ven solo el host y quien la hizo.
     #[serde(default = "tirada_publica")]
     pub publica: bool,
     /// Solo en una comparación (`1d100 <= acro`): el resultado frente al objetivo, con el nombre que le da la escala del conjunto
@@ -884,6 +884,52 @@ pub struct Tiradas {
 
 fn tirada_publica() -> bool {
     true
+}
+
+// ========================================================
+// MACROS (ver macros/)
+// ========================================================
+
+/// Una macro de la partida: su código en el lenguaje de macros (palabras clave en inglés) y quién la escribió. El tipo
+/// (`al_pulsar` = ONCLICK, `en_turno` = ONTURN) lo saca Rust de la cabecera al guardarla; nunca lo decide el front.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Macro {
+    pub id: u16,
+    pub nombre: String,
+    /// El código. Un jugador solo recibe el de sus macros (ver `visibilidad::macros_para`).
+    #[serde(default)]
+    pub codigo: String,
+    pub autor: IdJugador,
+    #[serde(default)]
+    pub al_pulsar: bool,
+    #[serde(default)]
+    pub en_turno: bool,
+}
+
+/// A qué está asociada una macro: a una FICHA (todas sus instancias; desde la caja «Parámetros») o a una INSTANCIA (lo que reparte
+/// `SPREAD MACROS`: envenenar a un goblin no envenena a los demás).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DestinoMacro {
+    Ficha(u16),
+    Instancia(u16),
+}
+
+/// Un atributo que guarda una macro con `SAVE`: vive en la asociación, así se conserva entre turnos.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct AtributoMacro {
+    pub nombre: String,
+    pub valor: i32,
+}
+
+/// Una macro asociada a una ficha o instancia. `autor` es quien la asoció (o la repartió con SPREAD): la macro corre con su autoridad.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct AsociacionMacro {
+    pub id: u32,
+    pub id_macro: u16,
+    pub destino: DestinoMacro,
+    pub autor: IdJugador,
+    #[serde(default)]
+    pub atributos: Vec<AtributoMacro>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

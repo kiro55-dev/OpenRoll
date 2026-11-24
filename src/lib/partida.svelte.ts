@@ -366,6 +366,34 @@ export interface Instancia {
   atenuada?: boolean;
 }
 
+/** Una macro (`Macro` en modelos.rs). `al_pulsar` = ONCLICK, `en_turno` = ONTURN: los decide Rust al guardarla. A un jugador le
+ *  llega sin código si no es suya. */
+export interface Macro {
+  id: number;
+  nombre: string;
+  codigo: string;
+  autor: number;
+  al_pulsar: boolean;
+  en_turno: boolean;
+}
+
+/** A qué está asociada una macro: a una ficha (todas sus instancias) o a una instancia (lo que reparte un SPREAD). */
+export type DestinoMacro = { Ficha: number } | { Instancia: number };
+
+export interface AtributoMacro {
+  nombre: string;
+  valor: number;
+}
+
+export interface AsociacionMacro {
+  id: number;
+  id_macro: number;
+  destino: DestinoMacro;
+  /** Quien la asoció: la macro corre con su autoridad. */
+  autor: number;
+  atributos: AtributoMacro[];
+}
+
 export interface Rejilla {
   visible: boolean;
   tamano: number;
@@ -1030,6 +1058,8 @@ class Partida {
     try {
       await invoke("pasar_turno", { idMapa, idGrupo });
       await this.recargarBatallas();
+      // Al que le llega el turno puede tener macros ONTURN: cambian fichas y chat
+      if (!esJugador) await Promise.all([this.recargarEntidades(), tiradas.cargar()]);
     } catch (err) {
       this.avisar(String(err));
     }

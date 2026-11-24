@@ -287,6 +287,13 @@ su pantalla relee. Las peticiones de un jugador se ejecutan **en orden**, una a 
 - **Grupos de variables (protocolo 13).** `VistaJugador.grupos_variables` / `Cambios.grupos_variables` (la lista entera si
   cambia); `DefinicionVariable` lleva `grupo`, `bases` y `opcionales`, y `ValorVariable.opcionales` los checks de una
   ficha (solo llegan a host y propietarios, como los valores). Definir grupos y variables sigue siendo solo del host.
+- **Macros (protocolo 18).** `VistaJugador.macros` (las suyas con código; las demás asociadas a lo suyo, solo nombre y tipo, sin
+  código) y `VistaJugador.asociaciones_macro` (las de sus fichas e instancias), enteras en `Cambios` cuando cambian. Acciones de la
+  lista blanca: `validar_macro` (solo comprueba, no cambia nada), `guardar_macro` / `borrar_macro` (las suyas), `asociar_macro` (una
+  suya a una ficha suya), `desasociar_macro` (de lo suyo) y `ejecutar_macro` (una ONCLICK de una instancia suya). La macro la
+  interpreta el host con sus topes (2000 caracteres, 1000 pasos, 999 dados, 100 objetivos por SPREAD, 20 macros por jugador, 10 por
+  ficha) y, con SPREAD, puede afectar a fichas ajenas que no estén ocultas. Una tirada privada (`EXECUTEP`) la ven el host y quien la
+  hizo (`vista_para` filtra por `Tiradas.jugador`). Ver docs/macros.md.
 - **Modo batalla (protocolo 16).** `Mapa.batalla` (grupos con sus miembros, turno y vuelta) viaja con el mapa, así que llega a los
   jugadores en `VistaJugador.mapas` y `Cambios.mapas` sin mensajes nuevos; nunca lleva instancias ocultas (el saneado las quita en
   cuanto se ocultan). Un jugador pasa el turno con la acción `pasar_turno` (`PasarTurno { idMapa, idGrupo }`, lista blanca): solo si

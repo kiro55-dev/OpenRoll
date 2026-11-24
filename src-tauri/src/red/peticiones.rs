@@ -74,6 +74,9 @@ pub enum Peticion {
         comando: String,
         #[serde(default)]
         id_instancia: Option<u16>,
+        /// `false` = tirada privada (solo la ven el host y él). Sin él, pública.
+        #[serde(default)]
+        publica: Option<bool>,
     },
     /// Sus comandos de dados anteriores (las flechas ↑ ↓ al reconectar).
     ObtenerHistorialPersonal,
@@ -100,6 +103,17 @@ pub enum Peticion {
     RenombrarArchivoAdjunto { adjunto: ArchivoAdjunto, nuevo_nombre: String },
     DescartarArchivosBorrador { rutas: Vec<String> },
     AvisarTablero { aviso: AvisoTablero },
+    /// Solo comprueba el código de una macro (el editor lo llama al escribir): no cambia nada.
+    ValidarMacro { codigo: String },
+    /// Crea o edita una macro suya (`datos.id` 0 = nueva).
+    GuardarMacro { datos: crate::tablero_general::macros::DatosMacro },
+    BorrarMacro { id: u16 },
+    /// Asocia una macro suya a una ficha suya.
+    AsociarMacro { id_macro: u16, id_entidad: u16 },
+    /// Quita una macro de una ficha o instancia suya.
+    DesasociarMacro { id_asociacion: u32 },
+    /// El botón de una macro ONCLICK de una instancia suya.
+    EjecutarMacro { id_asociacion: u32, id_instancia: u16 },
 }
 
 /// Lo que mandó el navegador (`{ cmd, ...args }`) como una petición de la lista blanca.
@@ -207,6 +221,34 @@ pub fn permitida_con(est: &EstadoPartida, jugador: IdJugador, p: &Peticion, subi
     }
     match p {
         Peticion::TirarDado { .. } | Peticion::ObtenerHistorialPersonal => Ok(()), // cualquiera tira; `tirar_dado_de` rechaza el `clean`
+        // Las macros: lo mismo que comprueban sus `_en` (que lo vuelven a mirar con el estado ya bloqueado)
+        Peticion::ValidarMacro { codigo } => {
+            if codigo.chars().count() > crate::tablero_general::macros::sintaxis::MAX_CARACTERES { Err("La macro es demasiado larga".into()) } else { Ok(()) }
+        }
+        Peticion::GuardarMacro { datos } => {
+            if datos.id != 0 && !est.macros.iter().any(|m| m.id == datos.id && m.autor == jugador) {
+                return Err("Esa macro no es tuya".into());
+            }
+            if datos.codigo.chars().count() > crate::tablero_general::macros::sintaxis::MAX_CARACTERES {
+                return Err("La macro es demasiado larga".into());
+            }
+            Ok(())
+        }
+        Peticion::BorrarMacro { id } => {
+            if est.macros.iter().any(|m| m.id == *id && m.autor == jugador) { Ok(()) } else { Err("Esa macro no es tuya".into()) }
+        }
+        Peticion::AsociarMacro { id_macro, id_entidad } => {
+            ficha_suya(est, jugador, *id_entidad)?;
+            if est.macros.iter().any(|m| m.id == *id_macro && m.autor == jugador) { Ok(()) } else { Err("Esa macro no es tuya".into()) }
+        }
+        Peticion::DesasociarMacro { id_asociacion } => {
+            let a = est.asociaciones_macro.iter().find(|a| a.id == *id_asociacion).ok_or("Esa macro ya no está asociada")?;
+            match a.destino {
+                crate::tablero_general::modelos::DestinoMacro::Ficha(id) => ficha_suya(est, jugador, id),
+                crate::tablero_general::modelos::DestinoMacro::Instancia(id) => instancia_suya(est, jugador, id),
+            }
+        }
+        Peticion::EjecutarMacro { id_instancia, .. } => instancia_suya(est, jugador, *id_instancia),
         Peticion::PasarTurno { id_mapa, id_grupo } => {
             mapa_compartido(est, *id_mapa)?;
             crate::tablero_general::batalla::pasar_turno_de(est, jugador, *id_mapa, *id_grupo).map(|_| ())
@@ -394,8 +436,17 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
     if matches!(p, Peticion::ObtenerHistorialPersonal) {
         return json(state.almacen.leer_historial_de(jugador));
     }
+    if let Peticion::ValidarMacro { codigo } = &p {
+        return json(crate::tablero_general::macros::comprobar(codigo)?);
+    }
     // Qué tiene que volver a leer la pantalla del host: el chat, o las fichas (banco e instancias)
-    let partes = if matches!(p, Peticion::TirarDado { .. }) {
+    let partes = if matches!(
+        p,
+        Peticion::GuardarMacro { .. } | Peticion::BorrarMacro { .. } | Peticion::AsociarMacro { .. } | Peticion::DesasociarMacro { .. } | Peticion::EjecutarMacro { .. }
+    ) {
+        // Una macro puede tocar las fichas y el chat
+        serde_json::json!({ "macros": true, "tiradas": true, "entidades": true })
+    } else if matches!(p, Peticion::TirarDado { .. }) {
         serde_json::json!({ "tiradas": true })
     } else if matches!(p, Peticion::PasarTurno { .. }) {
         serde_json::json!({ "mapas": true })
@@ -404,8 +455,15 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
     };
     let resultado = match p {
         // Las variables, solo de una ficha suya (lo comprueba `tirar_dado_de`)
-        Peticion::TirarDado { comando, id_instancia } => json(tirar_dado_de(state, jugador, &comando, true, id_instancia)?),
-        Peticion::ObtenerHistorialPersonal => unreachable!("se contesta antes"),
+        Peticion::TirarDado { comando, id_instancia, publica } => json(tirar_dado_de(state, jugador, &comando, publica.unwrap_or(true), id_instancia)?),
+        Peticion::ObtenerHistorialPersonal | Peticion::ValidarMacro { .. } => Err("Se contesta antes".to_string()),
+        Peticion::GuardarMacro { datos } => json(crate::tablero_general::macros::guardar_macro_en(state, jugador, datos)?),
+        Peticion::BorrarMacro { id } => json(crate::tablero_general::macros::borrar_macro_en(state, jugador, id)?),
+        Peticion::AsociarMacro { id_macro, id_entidad } => json(crate::tablero_general::macros::asociar_macro_en(state, jugador, id_macro, id_entidad)?),
+        Peticion::DesasociarMacro { id_asociacion } => json(crate::tablero_general::macros::desasociar_macro_en(state, jugador, id_asociacion)?),
+        Peticion::EjecutarMacro { id_asociacion, id_instancia } => {
+            json(crate::tablero_general::macros::ejecutar_macro_en(state, jugador, id_asociacion, id_instancia)?)
+        }
         Peticion::MoverInstancia { id_instancia, destino } => json(partida::mover_instancia_en(id_instancia, destino, state)?),
         Peticion::MoverInstancias { ids, id_mapa, dx, dy } => json(partida::mover_instancias_en(ids, id_mapa, dx, dy, state)?),
         Peticion::RotarInstancia { id_instancia } => json(partida::rotar_instancia_en(id_instancia, state)?),
@@ -710,7 +768,8 @@ mod tests {
             Peticion::TirarDado { id_instancia: Some(1), .. }
         ));
         // Un navegador antiguo no la manda: sin foco
-        assert!(matches!(pet(json!({ "cmd": "tirar_dado", "comando": "1d6" })), Peticion::TirarDado { id_instancia: None, .. }));
+        assert!(matches!(pet(json!({ "cmd": "tirar_dado", "comando": "1d6" })), Peticion::TirarDado { id_instancia: None, publica: None, .. }));
+        assert!(matches!(pet(json!({ "cmd": "tirar_dado", "comando": "1d6", "publica": false })), Peticion::TirarDado { publica: Some(false), .. }));
         // El propietario cambia los valores de las variables de su ficha (el host las define)
         let mut e = estado();
         e.definiciones_variables = vec![crate::tablero_general::variables::pruebas::var(1, "Fuerza", "f", 10, 2)];

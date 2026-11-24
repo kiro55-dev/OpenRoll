@@ -26,6 +26,7 @@ use crate::tablero_general::recursos;
 use crate::tablero_general::tablero::{self, AvisoTablero};
 use crate::tablero_general::variables::{self, normalizar_variables};
 use crate::tablero_general::visibilidad;
+use crate::tablero_general::macros;
 
 pub struct AppState {
     /// En `Arc` para que el servidor de la sala (red/) también pueda leer y registrar cambios.
@@ -72,6 +73,8 @@ impl AppState {
 /// bajo el mismo lock: el orden de lo que reciben es el del log.
 pub(crate) fn registrar(est: &mut EstadoPartida, almacen: &Almacen, delta: DeltaPartida) {
     let antes = recursos::afecta_a_recursos(&delta).then(|| recursos::referencias(est));
+    // Quién tenía el turno, para lanzar las macros ONTURN de quien lo recibe (aquí y no en `aplicar_delta`, que se repite al cargar)
+    let turnos = macros::vigilar_turnos(est).then(|| macros::turnos(est));
 
     match est.registrar(almacen, delta) {
         Ok(()) => {
@@ -80,6 +83,9 @@ pub(crate) fn registrar(est: &mut EstadoPartida, almacen: &Almacen, delta: Delta
                 if !liberadas.is_empty() {
                     eprintln!("[recursos] liberados: {liberadas:?}");
                 }
+            }
+            if let Some(turnos) = turnos {
+                macros::tras_cambio_de_turno(est, almacen, &turnos);
             }
         }
         Err(e) => eprintln!("[partida] {e}"),

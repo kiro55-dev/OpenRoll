@@ -6,10 +6,28 @@
   import { partida, numeroDe, veParametro, PASO_VALOR_MAX, type Cuerpo } from "$lib/partida.svelte";
   import { arrastreTirada } from "$lib/arrastreTirada.svelte";
   import { parametroOculto } from "$lib/fichasTablero";
+  import { macros, macrosDeInstancia, macrosEditables } from "$lib/macros.svelte";
+  import { esJugador } from "$lib/modo";
 
   const textoCuerpo = (c: Cuerpo) => (typeof c === "object" ? `${c.Grande[0] ?? 1}×${c.Grande[1] ?? 1}` : "1×1");
 
   const ficha = $derived(partida.instanciaSeleccionada);
+
+  // Las macros de la ficha: las ONCLICK como botón, las de turno como etiqueta (ver macros.svelte.ts)
+  $effect(() => macros.iniciar());
+  // El host no recibe avisos de lo que hace él mismo: al releer sus fichas (un turno que pasa, una macro...) relee también las macros
+  $effect(() => {
+    void partida.instancias;
+    if (!esJugador) void macros.recargar();
+  });
+  const asociadas = $derived(ficha ? macrosDeInstancia(ficha, macros.asociaciones, macros.lista) : []);
+  /** Abre el editor de macros para esta ficha (con `idMacro`, ya con esa macro: clic derecho sobre ella). */
+  function abrirMacros(idMacro?: number) {
+    if (!ficha) return;
+    // Una macro ajena (sin código) no se puede editar: se abre el editor solo con la ficha
+    const editable = idMacro !== undefined && macrosEditables(macros.lista, esJugador).some((m) => m.id === idMacro);
+    macros.abrirVentana({ entidad: { id: ficha.base.id, nombre: ficha.base.nombre }, idMacro: editable ? idMacro : undefined });
+  }
 
   // El parámetro cuyo paso (lo que suman o restan − y +) se está editando, con lo escrito
   // El paso es de la ENTIDAD (lo guarda Rust): lo comparten sus instancias y lo conserva una que se quite y se vuelva a poner
@@ -132,6 +150,48 @@
         <span class="valor">{ficha.base.vision ? `${ficha.base.vision} m` : "—"}</span>
       </div>
     </div>
+    {#if asociadas.length || partida.controla(ficha)}
+      <div class="macros">
+        {#each asociadas as a (a.asociacion.id)}
+          <span class="macro">
+            {#if a.boton}
+              <button
+                type="button"
+                class="btn-macro"
+                disabled={!partida.controla(ficha) || macros.ejecutando.includes(a.asociacion.id)}
+                title={ayuda(a.macro.en_turno ? "Pulsa para ejecutarla (también va sola al empezar su turno)" : "Pulsa para ejecutarla")}
+                onclick={() => macros.ejecutar(a.asociacion.id, ficha.id_instancia)}
+                oncontextmenu={(e) => {
+                  e.preventDefault();
+                  abrirMacros(a.macro.id);
+                }}
+              >
+                {a.macro.nombre}
+              </button>
+            {:else}
+              <span
+                class="etiqueta"
+                role="presentation"
+                title={ayuda("Va sola al empezar su turno en batalla. Clic derecho: editarla")}
+                oncontextmenu={(e) => {
+                  e.preventDefault();
+                  abrirMacros(a.macro.id);
+                }}>⟳ {a.macro.nombre}</span>
+            {/if}
+            {#if partida.controla(ficha)}
+              <button type="button" class="quitar" aria-label="Quitar la macro de la ficha" title="Quitar de la ficha" onclick={() => macros.desasociar(a.asociacion.id)}>✕</button>
+            {/if}
+          </span>
+        {/each}
+        {#if partida.controla(ficha)}
+          <button
+            type="button"
+            class="anadir"
+            title={ayuda("Abre el editor de macros para esta ficha: pulsa una para asociársela, busca por nombre o crea una nueva")}
+            onclick={() => abrirMacros()}>+ Macro</button>
+        {/if}
+      </div>
+    {/if}
   {:else}
     <div class="sin-seleccion">Pulsa una ficha activa para ver sus parámetros</div>
   {/if}
@@ -168,4 +228,13 @@
   }
   .control button:hover { background: #52525b; }
   .sin-seleccion { color: #71717a; text-align: center; margin: auto 0; font-size: 11px; }
+  .macros { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; flex: none; }
+  .macro { display: inline-flex; align-items: stretch; border-radius: 4px; overflow: hidden; border: 1px solid #3f3f46; }
+  .btn-macro { background: #1e3a8a; color: #dbeafe; border: none; padding: 3px 8px; font-size: 11px; font-weight: bold; cursor: pointer; }
+  .btn-macro:hover:not(:disabled) { background: #1d4ed8; }
+  .btn-macro:disabled { opacity: 0.55; cursor: default; }
+  .etiqueta { background: #27272a; color: #fde68a; padding: 3px 7px; font-size: 11px; }
+  .quitar { background: #27272a; color: #a1a1aa; border: none; border-left: 1px solid #3f3f46; padding: 0 5px; cursor: pointer; font-size: 10px; }
+  .quitar:hover { color: #f87171; }
+  .anadir { background: #18181b; color: #a1a1aa; border: 1px dashed #3f3f46; border-radius: 4px; font-size: 11px; padding: 2px 4px; cursor: pointer; }
 </style>

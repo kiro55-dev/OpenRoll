@@ -13,7 +13,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::tablero_general::estado::EstadoPartida;
-use crate::tablero_general::modelos::{DefinicionParametro, DefinicionVariable, Entidad, GrupoVariables, IdJugador, Instancia, Mapa, Tiradas, Zona, ID_HOST};
+use crate::tablero_general::macros;
+use crate::tablero_general::modelos::{
+    AsociacionMacro, DefinicionParametro, DefinicionVariable, Entidad, GrupoVariables, IdJugador, Instancia, Macro, Mapa, Tiradas, Zona, ID_HOST,
+};
 use crate::tablero_general::visibilidad;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -41,6 +44,12 @@ pub struct VistaJugador {
     /// elige mapa. `None`: ninguno aún (abre el primero compartido).
     #[serde(default)]
     pub mapa_visible: Option<u16>,
+    /// Sus macros (con código) y, de las demás, solo las asociadas a lo suyo (sin código). Ver `macros::macros_para`.
+    #[serde(default)]
+    pub macros: Vec<Macro>,
+    /// Las macros asociadas a las fichas e instancias que controla.
+    #[serde(default)]
+    pub asociaciones_macro: Vec<AsociacionMacro>,
 }
 
 /// Lo que cambió en la vista de un jugador. Lo que no aparece, sigue igual.
@@ -80,6 +89,11 @@ pub struct Cambios {
     pub mapa_visible_cambiado: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mapa_visible: Option<u16>,
+    /// Las listas enteras cuando cambian (son cortas).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macros: Option<Vec<Macro>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asociaciones_macro: Option<Vec<AsociacionMacro>>,
 }
 
 impl Cambios {
@@ -106,9 +120,11 @@ pub fn vista_para(jugador: IdJugador, est: &EstadoPartida) -> VistaJugador {
         zonas, mapas, instancias, entidades, definiciones,
         definiciones_variables: est.definiciones_variables.clone(),
         grupos_variables: est.grupos_variables.clone(),
-        // Las tiradas privadas del host no salen (las de los jugadores son siempre públicas)
-        historial_tiradas: est.historial_tiradas.iter().filter(|t| t.publica || jugador == ID_HOST).cloned().collect(),
+        // Una tirada privada solo la ven el host y quien la hizo (un EXECUTEP de una macro)
+        historial_tiradas: est.historial_tiradas.iter().filter(|t| t.publica || jugador == ID_HOST || t.jugador == jugador).cloned().collect(),
         mapa_visible: visibilidad::mapa_visible(est),
+        macros: macros::macros_para(jugador, est),
+        asociaciones_macro: macros::asociaciones_para(jugador, est),
     }
 }
 
@@ -130,6 +146,12 @@ pub fn diferencias(antes: &VistaJugador, despues: &VistaJugador) -> Option<Cambi
     }
     if antes.historial_tiradas != despues.historial_tiradas {
         c.historial_tiradas = Some(despues.historial_tiradas.clone());
+    }
+    if antes.macros != despues.macros {
+        c.macros = Some(despues.macros.clone());
+    }
+    if antes.asociaciones_macro != despues.asociaciones_macro {
+        c.asociaciones_macro = Some(despues.asociaciones_macro.clone());
     }
     if antes.mapa_visible != despues.mapa_visible {
         c.mapa_visible_cambiado = true;
@@ -180,6 +202,12 @@ pub fn aplicar(vista: &mut VistaJugador, cambios: &Cambios) {
     }
     if cambios.mapa_visible_cambiado {
         vista.mapa_visible = cambios.mapa_visible;
+    }
+    if let Some(m) = &cambios.macros {
+        vista.macros = m.clone();
+    }
+    if let Some(a) = &cambios.asociaciones_macro {
+        vista.asociaciones_macro = a.clone();
     }
 }
 

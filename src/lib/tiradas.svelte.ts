@@ -396,9 +396,9 @@ class Tiradas {
 
     try {
       // Las variables (`2d6 + f`) salen de la ficha con el foco: Rust solo la mira si el comando usa alguna.
-      // Solo el host puede tirar en privado (las de los jugadores son siempre públicas)
+      // En privado solo la ven el host y quien tira (un jugador también puede)
       const idInstancia = this.fichaConFoco();
-      await invoke<string>("tirar_dado", esJugador ? { comando: cmd, idInstancia } : { comando: cmd, publica: this.publica, idInstancia });
+      await invoke<string>("tirar_dado", { comando: cmd, publica: this.publica, idInstancia });
       // La tirada ya está en el chat de la partida (con el nombre de quien tira): se vuelve a leer, así sale
       // igual para todos y no se duplica cuando llega también como cambio
       await this.cargar();

@@ -199,7 +199,14 @@ describe("tirar", () => {
     const { tiradas } = await nuevoStore(true);
     tiradas.fichaConFoco = () => 3;
     await tiradas.tirar("1d20 + f");
-    expect(llamadas.find((l) => l.cmd === "tirar_dado")?.args).toEqual({ comando: "1d20 + f", idInstancia: 3 });
+    expect(llamadas.find((l) => l.cmd === "tirar_dado")?.args).toEqual({ comando: "1d20 + f", publica: true, idInstancia: 3 });
+  });
+
+  it("un jugador también puede tirar en privado", async () => {
+    const { tiradas } = await nuevoStore(true);
+    tiradas.publica = false;
+    await tiradas.tirar("1d20");
+    expect(llamadas.find((l) => l.cmd === "tirar_dado")?.args).toMatchObject({ comando: "1d20", publica: false });
   });
 
   it("un total 0 real se muestra como total, no como error", async () => {

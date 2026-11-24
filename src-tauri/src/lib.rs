@@ -22,6 +22,9 @@ use tablero_general::batalla::{
     renombrar_grupo_batalla, terminar_batalla,
 };
 use tablero_general::dados::{limpiar_chat, tirar_dado};
+use tablero_general::macros::{
+    asociar_macro, borrar_macro, desasociar_macro, ejecutar_macro, guardar_macro, obtener_asociaciones_macro, obtener_macros, validar_macro,
+};
 use tablero_general::plantilla::{guardar_plantilla, importar_imagen_base64, leer_plantilla};
 use tablero_general::estado;
 use tablero_general::partidas;
@@ -126,6 +129,14 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             tirar_dado,
+            obtener_macros,
+            obtener_asociaciones_macro,
+            validar_macro,
+            guardar_macro,
+            borrar_macro,
+            asociar_macro,
+            desasociar_macro,
+            ejecutar_macro,
             limpiar_chat,
             guardar_plantilla,
             leer_plantilla,

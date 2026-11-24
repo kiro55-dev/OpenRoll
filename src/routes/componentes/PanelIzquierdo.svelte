@@ -11,6 +11,8 @@
   import VentanaPartidas from "./VentanaPartidas.svelte";
   import VentanaSala from "./VentanaSala.svelte";
   import VentanaColorFlecha from "./VentanaColorFlecha.svelte";
+  import VentanaMacros from "./VentanaMacros.svelte";
+  import { macros } from "$lib/macros.svelte";
   import { sala } from "$lib/sala.svelte";
   import { esJugador } from "$lib/modo";
 
@@ -61,7 +63,11 @@
     texto: "Configuración de usuario…",
     accion: () => (colorAbierto = true)
   };
-  const opciones = $derived(esJugador ? [opcionColor, opcionTutoriales] : [...opcionesHost, opcionColor, opcionTutoriales]);
+  // Las macros: el host y cada jugador escriben las suyas
+  const opcionMacros = { texto: "Macros…", accion: () => macros.abrirVentana() };
+  const opciones = $derived(
+    esJugador ? [opcionMacros, opcionColor, opcionTutoriales] : [...opcionesHost, opcionMacros, opcionColor, opcionTutoriales]
+  );
 </script>
 
 <aside class="panel-izquierdo">
@@ -93,6 +99,10 @@
 
 {#if colorAbierto}
   <VentanaColorFlecha onCerrar={() => (colorAbierto = false)} />
+{/if}
+
+{#if macros.ventana}
+  <VentanaMacros onCerrar={() => (macros.ventana = null)} />
 {/if}
 
 <style>

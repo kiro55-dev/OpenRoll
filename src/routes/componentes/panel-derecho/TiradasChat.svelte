@@ -10,22 +10,20 @@
 
 <div class="cabecera">
   <span class="titulo-mini">TIRADAS</span>
-  {#if !esJugador}
-    <!-- Solo el host: en privado, las tiradas que haga no llegan a los jugadores -->
-    <button
+  <!-- En privado, las tiradas que haga no llegan a los demás jugadores (las ven el host y quien tira) -->
+  <button
       type="button"
       class="filtro"
       class:activo={!tiradas.publica}
       aria-pressed={!tiradas.publica}
       data-conserva-foco
       title={ayuda(tiradas.publica
-        ? "Los jugadores ven tus tiradas. Pulsa para tirar en privado"
-        : "Solo tú ves tus tiradas. Pulsa para que las vean los jugadores")}
+        ? esJugador ? "Los demás ven tus tiradas. Pulsa para tirar en privado" : "Los jugadores ven tus tiradas. Pulsa para tirar en privado"
+        : esJugador ? "Solo tú y el host veis tus tiradas. Pulsa para que las vean todos" : "Solo tú ves tus tiradas. Pulsa para que las vean los jugadores")}
       onclick={() => (tiradas.publica = !tiradas.publica)}
     >
       {tiradas.publica ? "Tirada pública" : "Tirada privada"}
-    </button>
-  {/if}
+  </button>
 </div>
 <!-- data-conserva-foco: escribir o pulsar en el chat no quita el foco a la ficha (de ella salen las variables) -->
 <div class="recuadro-chat-tiradas" data-conserva-foco>

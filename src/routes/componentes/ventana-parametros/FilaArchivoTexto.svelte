@@ -5,7 +5,7 @@
      guardan todas, Escape deshace. Sin `archivo` es una fila nueva (borrador): se crea en Rust al guardarla. «Borrar» y arrastrar para
      reordenar se aplican al momento. -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { ayuda } from "$lib/ajustesVista.svelte";
   import { partida, type ArchivoTextoDefecto } from "$lib/partida.svelte";
   import { edicionVariables as edicion } from "$lib/edicionVariables.svelte";
@@ -59,11 +59,20 @@
     contenido = archivo.contenido;
   }
 
-  // Si la lista se relee (al guardar esta u otra, o al cambiar de conjunto), se toma lo de Rust, salvo en una fila con cambios sin guardar
+  // Lo último que se vio de Rust (sin reactividad), para saber si la fila estaba editada ANTES de que llegara el archivo nuevo
+  // svelte-ignore state_referenced_locally
+  let previa: ArchivoTextoDefecto | null = archivo;
+
+  // Si la lista se relee (al guardar esta u otra, o al cambiar de conjunto), se toma lo de Rust, salvo en una fila con cambios sin
+  // guardar. «Con cambios» es respecto a lo que tenía antes: al cambiar de conjunto la misma fila (mismo id) recibe otro archivo, y
+  // comparada con el nuevo lo escrito siempre parecía editado.
   $effect(() => {
     if (!archivo) return;
     void [archivo.nombre, archivo.contenido];
-    if (sucia) return;
+    const anterior = previa;
+    previa = archivo;
+    const sinTocar = anterior !== null && anterior !== archivo && untrack(() => nombre.trim() === anterior.nombre && contenido === anterior.contenido);
+    if (sucia && !sinTocar) return;
     deshacer();
   });
 

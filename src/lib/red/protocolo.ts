@@ -3,14 +3,15 @@
 // Espejo a mano de src-tauri/src/red/protocolo.rs y red/vista.rs. Si cambia algo allí, cámbialo aquí y
 // sube VERSION_PROTOCOLO en los dos lados (y publica la página a la vez que la app).
 import type { AvisoTablero } from "$lib/avisosTablero";
-import type { DefinicionParametro, DefinicionVariable, GrupoVariables, Entidad, Instancia, Mapa, Zona } from "$lib/partida.svelte";
+import type { AsociacionMacro, DefinicionParametro, DefinicionVariable, GrupoVariables, Entidad, Instancia, Macro, Mapa, Zona } from "$lib/partida.svelte";
 
 /** 11: variables de las fichas (`definiciones_variables`, `Entidad.variables`, `idInstancia` en `tirar_dado`).
  *  12: `Entidad.pasos_valor` y la acción `poner_paso_valor` (el paso de los botones − / +, por ficha).
  *  13: grupos de variables (`grupos_variables`; derivadas con `bases`/`opcionales`; `ValorVariable.opcionales`).
  *  15: parámetros visuales como fuente de una derivada (`parametros`/`parametros_opcionales`, `parametros_marcados`).
- *  16: modo batalla (`Mapa.batalla`, la acción `pasar_turno`) y la visión de las fichas (`Entidad.vision`). */
-export const VERSION_PROTOCOLO = 17;
+ *  16: modo batalla (`Mapa.batalla`, la acción `pasar_turno`) y la visión de las fichas (`Entidad.vision`).
+ *  18: macros (`macros` y `asociaciones_macro` en la vista y sus acciones) y tiradas privadas de un jugador. */
+export const VERSION_PROTOCOLO = 18;
 
 export interface Jugador {
   id: number;
@@ -48,6 +49,10 @@ export interface VistaJugador {
   historial_tiradas: TiradaChat[];
   /** El mapa que debe tener abierto (el del host, si lo comparte). `null`/ausente: aún ninguno. */
   mapa_visible?: number | null;
+  /** Sus macros (con código) y las de otros asociadas a lo suyo (sin código). */
+  macros?: Macro[];
+  /** Las macros asociadas a sus fichas e instancias. */
+  asociaciones_macro?: AsociacionMacro[];
 }
 
 /** `red::vista::Cambios`: lo que no aparece, sigue igual. */
@@ -67,6 +72,8 @@ export interface Cambios {
   /** Cambió el mapa que debe ver (`mapa_visible` puede venir vacío: ninguno). */
   mapa_visible_cambiado?: boolean;
   mapa_visible?: number | null;
+  macros?: Macro[];
+  asociaciones_macro?: AsociacionMacro[];
 }
 
 export type MensajeCliente =

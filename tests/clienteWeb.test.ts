@@ -127,11 +127,27 @@ describe("réplica: aplicar los cambios del host", () => {
   });
 
   it("dice qué partes de la app tienen que releer", () => {
-    expect(partesCambiadas({ instancias_quitadas: [1] })).toEqual({ zonas: false, mapas: false, entidades: true, definiciones: false, tiradas: false });
-    expect(partesCambiadas({ mapas: [mapa(1)], definiciones: [] })).toEqual({ zonas: false, mapas: true, entidades: false, definiciones: true, tiradas: false });
-    expect(partesCambiadas({ zonas_quitadas: [3], entidades: [] })).toEqual({ zonas: true, mapas: false, entidades: false, definiciones: false, tiradas: false });
-    expect(partesCambiadas({ historial_tiradas: [] })).toEqual({ zonas: false, mapas: false, entidades: false, definiciones: false, tiradas: true });
-    expect(partesCambiadas({ mapa_visible_cambiado: true, mapa_visible: 3 })).toEqual({ zonas: false, mapas: true, entidades: false, definiciones: false, tiradas: false });
+    const nada = { zonas: false, mapas: false, entidades: false, definiciones: false, tiradas: false, macros: false };
+    expect(partesCambiadas({ instancias_quitadas: [1] })).toEqual({ ...nada, entidades: true });
+    expect(partesCambiadas({ mapas: [mapa(1)], definiciones: [] })).toEqual({ ...nada, mapas: true, definiciones: true });
+    expect(partesCambiadas({ zonas_quitadas: [3], entidades: [] })).toEqual({ ...nada, zonas: true });
+    expect(partesCambiadas({ historial_tiradas: [] })).toEqual({ ...nada, tiradas: true });
+    expect(partesCambiadas({ mapa_visible_cambiado: true, mapa_visible: 3 })).toEqual({ ...nada, mapas: true });
+    expect(partesCambiadas({ asociaciones_macro: [] })).toEqual({ ...nada, macros: true });
+  });
+
+  it("las macros llegan enteras cuando cambian y se leen de la réplica", () => {
+    const m = { id: 1, nombre: "Veneno", codigo: "", autor: 0, al_pulsar: false, en_turno: true };
+    const a = { id: 3, id_macro: 1, destino: { Instancia: 7 }, autor: 0, atributos: [] };
+    let v = aplicarCambios(vistaVacia(), { macros: [m], asociaciones_macro: [a] });
+    v = aplicarCambios(v, { zonas: [zona(1)] }); // otros cambios no las tocan
+    expect(responder("obtener_macros", {}, v)).toEqual([m]);
+    expect(responder("obtener_asociaciones_macro", {}, v)).toEqual([a]);
+    v = aplicarCambios(v, { asociaciones_macro: [] });
+    expect(responder("obtener_asociaciones_macro", {}, v)).toEqual([]);
+    for (const cmd of ["guardar_macro", "borrar_macro", "asociar_macro", "desasociar_macro", "ejecutar_macro", "validar_macro"]) {
+      expect(PETICIONES.has(cmd)).toBe(true);
+    }
   });
 
   it("el mapa que debe ver el jugador es el del host: llega por los cambios, y puede quedarse en ninguno", () => {

@@ -12,6 +12,7 @@ pub mod estado;
 pub mod imagenes;
 pub mod instancias;
 pub mod jugadores;
+pub mod macros;
 pub mod miniaturas;
 pub mod partidas;
 pub mod modelos;

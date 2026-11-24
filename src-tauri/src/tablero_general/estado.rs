@@ -120,6 +120,16 @@ pub enum DeltaPartida {
     TurnoPasado { id_mapa: u16, id_grupo: u16, turno: u16, ronda: u32 },
     /// Los grupos de la batalla del mapa cambian (ya resueltos): una ficha que pasa a otro grupo, un grupo nuevo o fusionado...
     GruposBatallaCambiados { id_mapa: u16, grupos: Vec<GrupoBatalla>, siguiente_id: u16 },
+    /// Una macro nueva o editada (entera, ya validada; ver macros/).
+    MacroGuardada(Macro),
+    /// Se borra una macro, y con ella todas sus asociaciones.
+    MacroBorrada(u16),
+    /// Una macro pasa a estar asociada a una ficha o a una instancia.
+    MacroAsociada(AsociacionMacro),
+    /// Se quita una asociación (a mano o con `QUIT`).
+    MacroDesasociada(u32),
+    /// `SAVE` de una macro: el atributo de esa asociación pasa a valer `valor` (se crea si no existía).
+    AtributoMacroGuardado { id_asociacion: u32, nombre: String, valor: i32 },
 }
 
 /// Línea de deltas.jsonl al LEER.
@@ -191,9 +201,18 @@ pub struct EstadoPartida {
     /// Jugadores registrados (sin el host). Sus ids son los de `Entidad.propietarios`.
     #[serde(default)]
     pub jugadores: Vec<Jugador>,
+    /// Las macros de la partida (las del host y las de los jugadores). Ver macros/.
+    #[serde(default)]
+    pub macros: Vec<Macro>,
+    /// A qué fichas e instancias está asociada cada macro, con sus atributos (`SAVE`).
+    #[serde(default)]
+    pub asociaciones_macro: Vec<AsociacionMacro>,
     /// Qué mapa tiene abierto el host (lo ven los jugadores). Efímero: no se guarda ni va al log, como el foco.
     #[serde(skip)]
     pub mapa_del_host: MapaDelHost,
+    /// Hay una macro ejecutándose: lo que ella cambia no vuelve a disparar las de turno (ver `partida::registrar`). Efímero.
+    #[serde(skip)]
+    pub macros_en_curso: bool,
 }
 
 /// El mapa que el host tiene abierto y el último COMPARTIDO que abrió: el jugador sigue al host, pero si este entra
@@ -205,6 +224,17 @@ pub struct MapaDelHost {
 }
 
 impl EstadoPartida {
+    /// Quita las asociaciones de macro cuya ficha o instancia ya no existe (tras vaciar la papelera: mientras algo está en ella
+    /// se conserva lo suyo, porque puede volver con Ctrl+Z y sus ids están reservados).
+    fn podar_asociaciones_macro(&mut self) {
+        let fichas: Vec<u16> = self.banco_entidades.iter().map(|e| e.id).collect();
+        let instancias: Vec<u16> = self.instancias_activas.iter().map(|i| i.id_instancia).collect();
+        self.asociaciones_macro.retain(|a| match a.destino {
+            DestinoMacro::Ficha(id) => fichas.contains(&id),
+            DestinoMacro::Instancia(id) => instancias.contains(&id),
+        });
+    }
+
     /// Quita `jugador` de los propietarios de todas las fichas: el banco, las instancias y la papelera.
     fn quitar_propietario(&mut self, jugador: IdJugador) {
         let limpiar = |e: &mut Entidad| e.propietarios.retain(|p| *p != jugador);
@@ -251,7 +281,10 @@ impl Default for EstadoPartida {
             papelera: Vec::new(),
             imagenes_sustituidas: Vec::new(),
             jugadores: Vec::new(),
+            macros: Vec::new(),
+            asociaciones_macro: Vec::new(),
             mapa_del_host: MapaDelHost::default(),
+            macros_en_curso: false,
         }
     }
 }
@@ -491,6 +524,7 @@ impl EstadoPartida {
             }
             DeltaPartida::InstanciaBorrada(id) => {
                 self.instancias_activas.retain(|i| i.id_instancia != *id);
+                self.asociaciones_macro.retain(|a| a.destino != DestinoMacro::Instancia(*id));
                 self.podar_valores_guardados(); // su id puede reutilizarse: la nueva no hereda lo de la vieja en otros conjuntos
             }
             DeltaPartida::InstanciasReordenadas(ids) => {
@@ -574,6 +608,7 @@ impl EstadoPartida {
                 self.papelera.clear();
                 self.imagenes_sustituidas.clear();
                 self.podar_valores_guardados(); // las fichas y instancias que se iban a restaurar ya no existen
+                self.podar_asociaciones_macro();
             }
             DeltaPartida::JugadorRegistrado(jugador) => match self.jugadores.iter().position(|j| j.id == jugador.id) {
                 Some(pos) => self.jugadores[pos] = jugador.clone(),
@@ -582,6 +617,32 @@ impl EstadoPartida {
             DeltaPartida::JugadorEliminado(id) => {
                 self.jugadores.retain(|j| j.id != *id);
                 self.quitar_propietario(*id);
+                // Sus macros se van con él (y las asociaciones de esas macros)
+                let suyas: Vec<u16> = self.macros.iter().filter(|m| m.autor == *id).map(|m| m.id).collect();
+                self.macros.retain(|m| m.autor != *id);
+                self.asociaciones_macro.retain(|a| !suyas.contains(&a.id_macro));
+            }
+            DeltaPartida::MacroGuardada(m) => match self.macros.iter().position(|x| x.id == m.id) {
+                Some(pos) => self.macros[pos] = m.clone(),
+                None => self.macros.push(m.clone()),
+            },
+            DeltaPartida::MacroBorrada(id) => {
+                self.macros.retain(|m| m.id != *id);
+                self.asociaciones_macro.retain(|a| a.id_macro != *id);
+            }
+            DeltaPartida::MacroAsociada(a) => {
+                if self.macros.iter().any(|m| m.id == a.id_macro) && !self.asociaciones_macro.iter().any(|x| x.id == a.id) {
+                    self.asociaciones_macro.push(a.clone());
+                }
+            }
+            DeltaPartida::MacroDesasociada(id) => self.asociaciones_macro.retain(|a| a.id != *id),
+            DeltaPartida::AtributoMacroGuardado { id_asociacion, nombre, valor } => {
+                if let Some(a) = self.asociaciones_macro.iter_mut().find(|a| a.id == *id_asociacion) {
+                    match a.atributos.iter_mut().find(|x| x.nombre.eq_ignore_ascii_case(nombre)) {
+                        Some(x) => x.valor = *valor,
+                        None => a.atributos.push(AtributoMacro { nombre: nombre.clone(), valor: *valor }),
+                    }
+                }
             }
             DeltaPartida::MapaPublicoCambiado(id) => {
                 for m in self.mapas.iter_mut() {

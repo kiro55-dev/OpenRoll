@@ -15,7 +15,9 @@ export const vistaVacia = (): VistaJugador => ({
   definiciones_variables: [],
   grupos_variables: [],
   historial_tiradas: [],
-  mapa_visible: null
+  mapa_visible: null,
+  macros: [],
+  asociaciones_macro: []
 });
 
 function poner<T>(lista: readonly T[], nuevas: readonly T[] = [], quitadas: readonly number[] = [], id: (x: T) => number): T[] {
@@ -38,7 +40,9 @@ export function aplicarCambios(vista: VistaJugador, c: Cambios): VistaJugador {
     definiciones_variables: c.definiciones_variables ?? vista.definiciones_variables ?? [],
     grupos_variables: c.grupos_variables ?? vista.grupos_variables ?? [],
     historial_tiradas: c.historial_tiradas ?? vista.historial_tiradas,
-    mapa_visible: c.mapa_visible_cambiado ? (c.mapa_visible ?? null) : (vista.mapa_visible ?? null)
+    mapa_visible: c.mapa_visible_cambiado ? (c.mapa_visible ?? null) : (vista.mapa_visible ?? null),
+    macros: c.macros ?? vista.macros ?? [],
+    asociaciones_macro: c.asociaciones_macro ?? vista.asociaciones_macro ?? []
   };
 }
 
@@ -49,6 +53,8 @@ export interface PartesCambiadas {
   entidades: boolean;
   definiciones: boolean;
   tiradas: boolean;
+  /** Las macros o sus asociaciones (ver macros.svelte.ts). */
+  macros?: boolean;
 }
 
 export function partesCambiadas(c: Cambios): PartesCambiadas {
@@ -58,7 +64,8 @@ export function partesCambiadas(c: Cambios): PartesCambiadas {
     mapas: algo(c.mapas, c.mapas_quitados) || !!c.mapa_visible_cambiado,
     entidades: algo(c.instancias, c.instancias_quitadas) || algo(c.entidades, c.entidades_quitadas),
     definiciones: c.definiciones !== undefined || c.definiciones_variables !== undefined || c.grupos_variables !== undefined,
-    tiradas: c.historial_tiradas !== undefined
+    tiradas: c.historial_tiradas !== undefined,
+    macros: c.macros !== undefined || c.asociaciones_macro !== undefined
   };
 }
 
@@ -106,7 +113,13 @@ export const PETICIONES = new Set([
   "crear_documento_texto",
   "renombrar_archivo_adjunto",
   "descartar_archivos_borrador",
-  "avisar_tablero"
+  "avisar_tablero",
+  "validar_macro",
+  "guardar_macro",
+  "borrar_macro",
+  "asociar_macro",
+  "desasociar_macro",
+  "ejecutar_macro"
 ]);
 
 /**
@@ -142,6 +155,10 @@ export function responder(cmd: string, args: Record<string, unknown>, vista: Vis
     }
     case "obtener_historial_tiradas":
       return copia(vista.historial_tiradas);
+    case "obtener_macros":
+      return copia(vista.macros ?? []);
+    case "obtener_asociaciones_macro":
+      return copia(vista.asociaciones_macro ?? []);
     case "obtener_historial_personal":
       return [...personales];
     case "obtener_partidas":

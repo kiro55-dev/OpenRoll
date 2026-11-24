@@ -323,6 +323,94 @@ impl AvisoTablero {
     }
 }
 
+// ------------------------------------------------------------------
+// Zonas de los parámetros y distancias (las macros: `ENTITIES IN @rango`, `DISTANCE`)
+// ------------------------------------------------------------------
+
+/// La forma que dibuja un parámetro alrededor de un cuerpo (lo que pinta `dibujarFormas` en el front).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FormaZona {
+    Cuadrado,
+    Rombo,
+    Circulo,
+}
+
+/// Límites de la forma de un parámetro de valor `n` alrededor de un cuerpo, como LÍNEAS de la rejilla: `n` casillas desde cada
+/// borde. Igual que `extremosForma` del front (src/lib/tablero.ts). Devuelve (izquierda, derecha, arriba, abajo).
+pub fn extremos_forma(centro: Casilla, lados: (u16, u16), n: i32) -> (i32, i32, i32, i32) {
+    let (x0, y0, x1, y1) = rectangulo(centro, lados);
+    (x0 - n, x1 + 1 + n, y0 - n, y1 + 1 + n)
+}
+
+/// ¿El CENTRO de la casilla `(x, y)` cae dentro de la forma (los bordes cuentan)? Con `n <= 0` no hay forma.
+pub fn casilla_en_forma(forma: FormaZona, centro: Casilla, lados: (u16, u16), n: i32, x: i32, y: i32) -> bool {
+    if n <= 0 {
+        return false;
+    }
+    let (izq, der, arr, abj) = extremos_forma(centro, lados, n);
+    let (px, py) = (f64::from(x) + 0.5, f64::from(y) + 0.5);
+    let (cx, cy) = (f64::from(izq + der) / 2.0, f64::from(arr + abj) / 2.0);
+    let (rx, ry) = (f64::from(der - izq) / 2.0, f64::from(abj - arr) / 2.0);
+    match forma {
+        FormaZona::Cuadrado => px >= f64::from(izq) && px <= f64::from(der) && py >= f64::from(arr) && py <= f64::from(abj),
+        FormaZona::Rombo => (px - cx).abs() / rx + (py - cy).abs() / ry <= 1.0,
+        FormaZona::Circulo => ((px - cx) / rx).powi(2) + ((py - cy) / ry).powi(2) <= 1.0,
+    }
+}
+
+/// ¿Algo del cuerpo `(otro, lados_otro)` cae dentro de la forma del primero?
+pub fn cuerpo_en_forma(forma: FormaZona, centro: Casilla, lados: (u16, u16), n: i32, otro: Casilla, lados_otro: (u16, u16)) -> bool {
+    let (x0, y0, x1, y1) = rectangulo(otro, lados_otro);
+    (y0..=y1).any(|y| (x0..=x1).any(|x| casilla_en_forma(forma, centro, lados, n, x, y)))
+}
+
+/// Distancia en casillas entre dos cuerpos, contada como se mueve un rey de ajedrez (la mayor de las dos separaciones): 0 si se
+/// solapan, 1 si están pegados (también en diagonal), 2 si queda una casilla libre entre medias...
+pub fn distancia_cuerpos(a: Casilla, lados_a: (u16, u16), b: Casilla, lados_b: (u16, u16)) -> i32 {
+    let (ax0, ay0, ax1, ay1) = rectangulo(a, lados_a);
+    let (bx0, by0, bx1, by1) = rectangulo(b, lados_b);
+    let dx = (bx0 - ax1).max(ax0 - bx1).max(0);
+    let dy = (by0 - ay1).max(ay0 - by1).max(0);
+    dx.max(dy)
+}
+
+#[cfg(test)]
+mod tests_zonas {
+    use super::*;
+
+    const C: Casilla = Casilla { x: 10, y: 10 };
+
+    #[test]
+    fn cada_forma_tiene_su_zona_alrededor_del_cuerpo() {
+        // Un cuerpo 1×1 en (10,10) con n = 2: líneas 8..13
+        assert_eq!(extremos_forma(C, (1, 1), 2), (8, 13, 8, 13));
+        // Cuadrado: las esquinas entran
+        assert!(casilla_en_forma(FormaZona::Cuadrado, C, (1, 1), 2, 8, 8));
+        assert!(!casilla_en_forma(FormaZona::Cuadrado, C, (1, 1), 2, 7, 10));
+        // Rombo: la esquina no, el eje sí
+        assert!(!casilla_en_forma(FormaZona::Rombo, C, (1, 1), 2, 8, 8));
+        assert!(casilla_en_forma(FormaZona::Rombo, C, (1, 1), 2, 8, 10));
+        assert!(casilla_en_forma(FormaZona::Rombo, C, (1, 1), 2, 9, 9));
+        // Círculo: más que el rombo, menos que el cuadrado
+        assert!(casilla_en_forma(FormaZona::Circulo, C, (1, 1), 2, 9, 9));
+        assert!(!casilla_en_forma(FormaZona::Circulo, C, (1, 1), 2, 8, 8));
+        // Sin valor, no hay zona
+        assert!(!casilla_en_forma(FormaZona::Cuadrado, C, (1, 1), 0, 10, 10));
+    }
+
+    #[test]
+    fn un_cuerpo_entra_si_alguna_de_sus_casillas_cae_dentro_y_la_distancia_es_entre_bordes() {
+        let grande = Casilla { x: 14, y: 10 }; // 3×3: x 13..15
+        // Con n = 3 la zona llega a la línea 14: el centro de su casilla 13 (13.5) entra; con n = 2 (línea 13) no
+        assert!(cuerpo_en_forma(FormaZona::Cuadrado, C, (1, 1), 3, grande, (3, 3)));
+        assert!(!cuerpo_en_forma(FormaZona::Cuadrado, C, (1, 1), 2, grande, (3, 3)));
+        assert_eq!(distancia_cuerpos(C, (1, 1), Casilla { x: 11, y: 10 }, (1, 1)), 1);
+        assert_eq!(distancia_cuerpos(C, (1, 1), grande, (3, 3)), 3);
+        assert_eq!(distancia_cuerpos(C, (1, 1), C, (1, 1)), 0);
+        assert_eq!(distancia_cuerpos(C, (1, 1), Casilla { x: 13, y: 15 }, (1, 1)), 5);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

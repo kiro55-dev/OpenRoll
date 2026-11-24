@@ -7,7 +7,7 @@
      fila nueva (borrador): se crea en Rust al guardarla (con nombre y, si es derivada, al menos una base o un parámetro). Borrar una base
      que usan derivadas pide confirmar y dice qué pasará (en cascada). -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { ayuda } from "$lib/ajustesVista.svelte";
   import { partida, type DefinicionVariable, type FormulaEntrada, type OrigenEntrada, type TipoGrupoVariables } from "$lib/partida.svelte";
   import { edicionVariables as edicion } from "$lib/edicionVariables.svelte";
@@ -181,12 +181,21 @@
     formulas = formulasDe(definicion);
   }
 
-  // Si la lista se relee (al guardar esta u otra), se toma lo de Rust, salvo en una fila con cambios sin guardar
+  // Lo último que se vio de Rust (sin reactividad): lo que la fila tenía ANTES de que llegara la definición nueva
+  // svelte-ignore state_referenced_locally
+  let previa: DefinicionVariable | null = definicion;
+
+  // Si la lista se relee (al guardar esta u otra, o al cambiar de conjunto), se toma lo de Rust, salvo en una fila con cambios
+  // sin guardar. «Con cambios» es respecto a lo que la fila tenía ANTES: al cambiar de conjunto la misma fila (mismo id) recibe otra
+  // definición, y comparada con la nueva lo escrito siempre parecía editado (y dejaba la fila roja sin que nadie la tocara).
   $effect(() => {
     if (!definicion) return;
     const d = definicion;
     void [d.nombre, d.abreviatura, d.neutro, d.escala, d.bases, d.opcionales, d.parametros, d.parametros_opcionales, d.multiplicador, d.divisor, d.constante, d.rangos, d.formulas_entradas];
-    if (sucia) return;
+    const anterior = previa;
+    previa = d;
+    const sinTocar = anterior !== null && anterior !== d && untrack(() => igualA(leerDatos(), anterior));
+    if (sucia && !sinTocar) return;
     deshacer();
   });
 

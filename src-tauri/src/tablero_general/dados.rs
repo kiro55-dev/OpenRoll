@@ -57,12 +57,12 @@ pub(crate) fn valor_en_ficha(est: &EstadoPartida, inst: &Instancia, texto: &str)
 }
 
 /// Un nombre de parámetro para compararlo: sin mayúsculas y con los espacios de dentro reducidos a uno.
-fn clave_parametro(texto: &str) -> String {
+pub(crate) fn clave_parametro(texto: &str) -> String {
     texto.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
 /// El valor del parámetro visual `nombre` (lo que sigue a la `@`) en la ficha `inst`. Ver `valor_en_ficha`.
-fn valor_de_parametro(est: &EstadoPartida, inst: &Instancia, nombre: &str) -> Result<(String, i32), String> {
+pub(crate) fn valor_de_parametro(est: &EstadoPartida, inst: &Instancia, nombre: &str) -> Result<(String, i32), String> {
     let buscado = clave_parametro(nombre);
     if buscado.is_empty() {
         return Err("Falta el nombre del parámetro detrás de la @".into());
@@ -253,6 +253,7 @@ pub(crate) fn parsear_comando(
 
 /// Devuelve el desglose (sin el total) y el total. Se calcula en i64 y se comprueba al final que cabe
 /// en i32: con dados de muchas caras el total se desbordaba (panic en debug, número basura en release).
+#[cfg(test)]
 fn ejecutar_tiradas(tiradas: &[Tirada]) -> Result<(String, i32), String> {
     ejecutar_con_natural(tiradas).map(|(desglose, total, _)| (desglose, total))
 }
@@ -260,6 +261,7 @@ fn ejecutar_tiradas(tiradas: &[Tirada]) -> Result<(String, i32), String> {
 /// Como `ejecutar_tiradas`, y además el resultado natural `(cara, caras)` cuando la tirada es UN solo dado normal, sin
 /// ventaja ni multiplicador (lo que hace falta para los críticos y las pifias de una tirada `vs`).
 fn ejecutar_con_natural(tiradas: &[Tirada]) -> Result<(String, i32, Option<(i32, i32)>), String> {
+    let mut tirar = |caras: i32| rand::random_range(1..=caras);
     let mut natural: Option<(i32, i32)> = None;
     let mut resultado = String::new();
     let mut total: i64 = 0;
@@ -270,90 +272,91 @@ fn ejecutar_con_natural(tiradas: &[Tirada]) -> Result<(String, i32, Option<(i32,
             if t.signo < 0 {
                 resultado.push_str("- ");
             }
+        } else if t.signo < 0 {
+            resultado.push_str(" - ");
         } else {
-            if t.signo < 0 {
-                resultado.push_str(" - ");
-            } else {
-                resultado.push_str(" + ");
-            }
+            resultado.push_str(" + ");
         }
         primero = false;
 
-        // Bonificadores numéricos directos
-        if let Some(bonificador) = t.bonificador {
-            match &t.variable {
-                Some(abreviatura) => {
-                    let _ = write!(resultado, "{abreviatura} ({bonificador:+})");
-                }
-                None => {
-                    let _ = write!(resultado, "{bonificador}");
-                }
-            }
-            total += i64::from(t.signo) * i64::from(bonificador);
-            continue;
+        let (texto, valor, nat) = tirar_termino(t, &mut tirar)?;
+        resultado.push_str(&texto);
+        if nat.is_some() {
+            natural = nat;
         }
-
-        // Encabezado del dado (ej: 1d20, 1d20adv, 1d20desv)
-        let mod_tipo = if t.ventaja {
-            "adv"
-        } else if t.desventaja {
-            "desv"
-        } else {
-            ""
-        };
-        if t.multiplicador != 1 {
-            let _ = write!(resultado, "{}*", t.multiplicador);
-        }
-        let _ = write!(resultado, "{}d{}{} (", t.veces, t.d, mod_tipo);
-
-        let mut subtotal_dados: i64 = 0;
-
-        for roll_idx in 0..t.veces {
-            if roll_idx > 0 {
-                resultado.push_str(", ");
-            }
-
-            if t.ventaja || t.desventaja {
-                // Tiramos 2 dados directamente sin alocar memoria
-                let r1 = rand::random_range(1..=t.d);
-                let r2 = rand::random_range(1..=t.d);
-
-                let (ganador, perdedor) = if t.ventaja {
-                    if r1 >= r2 { (r1, r2) } else { (r2, r1) }
-                } else {
-                    if r1 <= r2 { (r1, r2) } else { (r2, r1) }
-                };
-
-                subtotal_dados += i64::from(ganador);
-
-                // El ganador se muestra en negrita <b>
-                if t.veces == 1 {
-                    let _ = write!(resultado, "<b>{ganador}</b>, {perdedor}");
-                } else {
-                    let _ = write!(resultado, "[<b>{ganador}</b>, {perdedor}]");
-                }
-            } else {
-                // Tirada normal directa
-                let r = rand::random_range(1..=t.d);
-                natural = Some((r, t.d));
-                subtotal_dados += i64::from(r);
-                let _ = write!(resultado, "{}", formatear_num(r, t.d));
-            }
-        }
-        resultado.push(')');
-
-        let multiplicado = subtotal_dados
-            .checked_mul(i64::from(t.multiplicador))
-            .ok_or("El resultado es demasiado grande")?;
-        total = total
-            .checked_add(i64::from(t.signo) * multiplicado)
-            .ok_or("El resultado es demasiado grande")?;
+        total = total.checked_add(i64::from(t.signo) * valor).ok_or("El resultado es demasiado grande")?;
     }
 
     let total = i32::try_from(total).map_err(|_| "El resultado es demasiado grande".to_string())?;
     let un_dado_normal = tiradas.iter().filter(|t| t.bonificador.is_none()).count() == 1
         && tiradas.iter().any(|t| t.bonificador.is_none() && t.veces == 1 && t.signo > 0 && t.multiplicador == 1 && !t.ventaja && !t.desventaja);
     Ok((resultado, total, if un_dado_normal { natural } else { None }))
+}
+
+/// Tira UN término (sin su signo): su texto para el desglose, su valor (sin signo) y la última cara de un dado normal. `tirar(caras)`
+/// da una cara entre 1 y `caras`: en el chat es aleatoria; las macros (macros/) pasan la suya, y sus pruebas una con semilla.
+pub(crate) fn tirar_termino(t: &Tirada, tirar: &mut dyn FnMut(i32) -> i32) -> Result<(String, i64, Option<(i32, i32)>), String> {
+    let mut resultado = String::new();
+    // Bonificadores numéricos directos
+    if let Some(bonificador) = t.bonificador {
+        match &t.variable {
+            Some(abreviatura) => {
+                let _ = write!(resultado, "{abreviatura} ({bonificador:+})");
+            }
+            None => {
+                let _ = write!(resultado, "{bonificador}");
+            }
+        }
+        return Ok((resultado, i64::from(bonificador), None));
+    }
+
+    // Encabezado del dado (ej: 1d20, 1d20adv, 1d20desv)
+    let mod_tipo = if t.ventaja {
+        "adv"
+    } else if t.desventaja {
+        "desv"
+    } else {
+        ""
+    };
+    if t.multiplicador != 1 {
+        let _ = write!(resultado, "{}*", t.multiplicador);
+    }
+    let _ = write!(resultado, "{}d{}{} (", t.veces, t.d, mod_tipo);
+
+    let mut natural = None;
+    let mut subtotal_dados: i64 = 0;
+    for roll_idx in 0..t.veces {
+        if roll_idx > 0 {
+            resultado.push_str(", ");
+        }
+        if t.ventaja || t.desventaja {
+            // Dos dados: con ventaja cuenta el mayor, con desventaja el menor
+            let r1 = tirar(t.d);
+            let r2 = tirar(t.d);
+            let (ganador, perdedor) = if t.ventaja {
+                if r1 >= r2 { (r1, r2) } else { (r2, r1) }
+            } else if r1 <= r2 {
+                (r1, r2)
+            } else {
+                (r2, r1)
+            };
+            subtotal_dados += i64::from(ganador);
+            // El ganador se muestra en negrita <b>
+            if t.veces == 1 {
+                let _ = write!(resultado, "<b>{ganador}</b>, {perdedor}");
+            } else {
+                let _ = write!(resultado, "[<b>{ganador}</b>, {perdedor}]");
+            }
+        } else {
+            let r = tirar(t.d);
+            natural = Some((r, t.d));
+            subtotal_dados += i64::from(r);
+            let _ = write!(resultado, "{}", formatear_num(r, t.d));
+        }
+    }
+    resultado.push(')');
+    let multiplicado = subtotal_dados.checked_mul(i64::from(t.multiplicador)).ok_or("El resultado es demasiado grande")?;
+    Ok((resultado, multiplicado, natural))
 }
 
 /// Parte un comando en sus dos lados por una comparación suelta: `<=`, `>=`, `<`, `>` o `vs` (azúcar de `<=`): `1d100 vs acro`,
@@ -442,7 +445,7 @@ pub fn tirar_dado(
 /// La tirada de `jugador` (el host o un jugador de la sala, que la pide por la red). Rust la procesa y la
 /// registra con el nombre de quien tira; el chat de tiradas llega así a todos. Un `clean` no es una tirada
 /// (`limpiar_chat` es solo del host).
-/// `publica`: si los jugadores ven la tirada (solo el host puede tirar en privado).
+/// `publica`: si los demás jugadores ven la tirada (el host y quien la hace la ven siempre).
 /// `id_instancia`: la ficha con el foco, de la que salen las variables (`2d6 + f`); solo se mira si hay alguna.
 pub fn tirar_dado_de(
     state: &AppState,
@@ -477,7 +480,8 @@ pub fn tirar_dado_de(
     };
 
     // 1. Registra en el estado de la partida / deltas (con el total tal cual, sin releerlo de un texto)
-    registrar_tirada(state, jugador, &desglose, total, publica || jugador != ID_HOST, valoracion.as_ref());
+    // Cada uno elige si la suya es pública: una privada de un jugador la ven él y el host (`vista_para`)
+    registrar_tirada(state, jugador, &desglose, total, publica, valoracion.as_ref());
 
     // 2. El historial personal (↑ ↓) es de quien tira: se guarda en el disco del host, uno por jugador (así lo
     //    recupera al reconectar; se borra al quitarlo de la partida)
