@@ -380,18 +380,12 @@ export interface Macro {
 /** A qué está asociada una macro: a una ficha (todas sus instancias) o a una instancia (lo que reparte un SPREAD). */
 export type DestinoMacro = { Ficha: number } | { Instancia: number };
 
-export interface AtributoMacro {
-  nombre: string;
-  valor: number;
-}
-
 export interface AsociacionMacro {
   id: number;
   id_macro: number;
   destino: DestinoMacro;
   /** Quien la asoció: la macro corre con su autoridad. */
   autor: number;
-  atributos: AtributoMacro[];
 }
 
 export interface Rejilla {

@@ -914,13 +914,6 @@ pub enum DestinoMacro {
     Instancia(u16),
 }
 
-/// Un atributo que guarda una macro con `SAVE`: vive en la asociación, así se conserva entre turnos.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct AtributoMacro {
-    pub nombre: String,
-    pub valor: i32,
-}
-
 /// Una macro asociada a una ficha o instancia. `autor` es quien la asoció (o la repartió con SPREAD): la macro corre con su autoridad.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct AsociacionMacro {
@@ -928,8 +921,6 @@ pub struct AsociacionMacro {
     pub id_macro: u16,
     pub destino: DestinoMacro,
     pub autor: IdJugador,
-    #[serde(default)]
-    pub atributos: Vec<AtributoMacro>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

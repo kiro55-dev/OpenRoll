@@ -127,7 +127,75 @@ pub fn leer(codigo: &str) -> Result<Programa, ErrorMacro> {
     }
     let piezas = trocear(codigo)?;
     let mut p = Parser { piezas, pos: 0, profundidad: 0, en_reparto: false };
-    p.programa()
+    let programa = p.programa()?;
+    comprobar_atributos(&programa)?;
+    Ok(programa)
+}
+
+/// Un atributo solo lo escribe el `SAVE` de la propia macro: leer uno que ningún `SAVE` de ella guarda es siempre un despiste (`SAVE daño …`
+/// y luego `-dano`), y sin esta comprobación se leería un valor viejo de otra versión de la macro sin avisar.
+fn comprobar_atributos(p: &Programa) -> Result<(), ErrorMacro> {
+    fn expr(e: &Expr, leidos: &mut Vec<String>) {
+        match e {
+            Expr::Atributo(n) => leidos.push(n.clone()),
+            Expr::Neg(a) | Expr::Grupo(a) => expr(a, leidos),
+            Expr::Suma(a, b) | Expr::Resta(a, b) => {
+                expr(a, leidos);
+                expr(b, leidos);
+            }
+            _ => {}
+        }
+    }
+    fn condicion(c: &Condicion, leidos: &mut Vec<String>) {
+        match c {
+            Condicion::Comparar { izq, der, .. } => {
+                expr(izq, leidos);
+                expr(der, leidos);
+            }
+            Condicion::Y(a, b) | Condicion::O(a, b) => {
+                condicion(a, leidos);
+                condicion(b, leidos);
+            }
+            Condicion::Dentro { .. } => {}
+        }
+    }
+    fn sentencias(l: &[Sentencia], guardados: &mut Vec<String>, leidos: &mut Vec<String>) {
+        for s in l {
+            match s {
+                Sentencia::Mostrar { expr: e, .. } => expr(e, leidos),
+                Sentencia::Guardar { nombre, expr: e } => {
+                    guardados.push(nombre.clone());
+                    expr(e, leidos);
+                }
+                Sentencia::Cambiar { expr: e, .. } => expr(e, leidos),
+                Sentencia::Si { cuerpo, condicion: c, sino, .. } => {
+                    if let Some(c) = c {
+                        condicion(c, leidos);
+                    }
+                    sentencias(cuerpo, guardados, leidos);
+                    sentencias(sino, guardados, leidos);
+                }
+                Sentencia::Repartir { accion, condicion: c } => {
+                    condicion(c, leidos);
+                    sentencias(std::slice::from_ref(&**accion), guardados, leidos);
+                }
+                Sentencia::Quitar | Sentencia::Asociar(_) => {}
+            }
+        }
+    }
+    let (mut guardados, mut leidos) = (Vec::new(), Vec::new());
+    sentencias(&p.cuerpo, &mut guardados, &mut leidos);
+    for n in &leidos {
+        if !guardados.iter().any(|g| g.eq_ignore_ascii_case(n)) {
+            let parecido = guardados.first().map(|g| format!(" (esta macro guarda «{g}»: ¿es ese?)")).unwrap_or_default();
+            return Err(ErrorMacro {
+                linea: 1,
+                columna: 1,
+                mensaje: format!("«{n}» se usa como atributo pero ningún SAVE de esta macro lo guarda{parecido}. Un nombre de parámetro va con @ y uno de variable con ."),
+            });
+        }
+    }
+    Ok(())
 }
 
 pub struct Parser {
@@ -343,7 +411,19 @@ impl Parser {
     }
 
     fn repartir_dentro(&mut self) -> Result<Sentencia, ErrorMacro> {
-        let accion = match self.avanzar() {
+        // La acción puede ser un bloque `[ … ]` con varias sentencias, que se hacen en cada entidad (cada una con sus propios dados)
+        let accion = if self.ver() == Some(&Tok::AbreC) {
+            self.pos += 1;
+            self.entrar()?;
+            let l = self.sentencias(Some(Tok::CierraC));
+            self.salir();
+            let l = l?;
+            if l.is_empty() {
+                return self.error("Un bloque «[ ]» vacío no hace nada");
+            }
+            Sentencia::Si { cuerpo: l, condicion: None, negada: false, sino: vec![] }
+        } else {
+            match self.avanzar() {
             Some(Tok::Clave(Clave::Execute)) => self.mostrar(false)?,
             Some(Tok::Clave(Clave::ExecuteP)) => self.mostrar(true)?,
             Some(Tok::Clave(Clave::Change)) => {
@@ -375,7 +455,8 @@ impl Parser {
             }
             _ => {
                 self.pos -= 1;
-                return self.error("SPREAD va con EXECUTE, EXECUTEP, CHANGE ENTITIES@… o MACROS.…");
+                return self.error("SPREAD va con EXECUTE, EXECUTEP, CHANGE ENTITIES@…, MACROS.… o un bloque [ … ]");
+            }
             }
         };
         if !self.sigue_con(&[Clave::To]) {
@@ -632,6 +713,25 @@ mod tests {
         assert_eq!(sino, &vec![Sentencia::Quitar]);
         let p = leer("ONCLICK\nDO QUIT IF 1 = 1").unwrap();
         assert!(matches!(&p.cuerpo[0], Sentencia::Si { negada: false, .. }));
+    }
+
+    #[test]
+    fn spread_admite_un_bloque_como_accion() {
+        let p = leer("ONCLICK\nSPREAD [\n  SAVE dano 1d20\n  CHANGE ENTITIES@vida -dano\n  EXECUTE -dano\n] TO ENTITIES IN @rangoarma").unwrap();
+        let Sentencia::Repartir { accion, .. } = &p.cuerpo[0] else { panic!() };
+        let Sentencia::Si { cuerpo, condicion: None, .. } = &**accion else { panic!("{accion:?}") };
+        assert_eq!(cuerpo.len(), 3);
+        assert!(leer("ONCLICK\nSPREAD [ ] TO 1 = 1").is_err());
+        assert!(leer("ONCLICK\nSPREAD [ SPREAD EXECUTE 1 TO 1 = 1 ] TO 1 = 1").is_err());
+    }
+
+    #[test]
+    fn un_atributo_que_ningun_save_guarda_es_un_error() {
+        // El despiste de verdad: guardar «daño» y leer «dano»
+        let e = leer("ONCLICK\nSPREAD [\n SAVE daño 1d20\n CHANGE ENTITIES@vida -dano\n] TO 1 = 1").unwrap_err();
+        assert!(e.mensaje.contains("«dano»") && e.mensaje.contains("«daño»"), "{e}");
+        assert!(leer("ONCLICK\nEXECUTE veces").is_err());
+        assert!(leer("ONCLICK\nSAVE a 1\nDO EXECUTE A IF 1 = 1").is_ok(), "sin distinguir mayúsculas, y en cualquier sitio");
     }
 
     #[test]

@@ -30,8 +30,10 @@ Un argumento es una suma (o resta) de términos; se pueden agrupar con paréntes
 | Dados | `2d6`, `d20`, `1d20adv`, `1d20desv`, `2*1d8` | Lo que salga, como en el chat. |
 | Variable de la ficha | `.fue`, `.destreza` | Su resultado (por nombre o abreviatura). |
 | Parámetro visual | `@vida`, `@vida.max`, `@rangoarma` | Su valor (con máximo, el actual; `.max` el máximo). |
-| Atributo | `dano` | Lo que guardó `SAVE` en esta macro. |
+| Atributo | `dano` | Lo que guardó `SAVE` antes, en esta misma ejecución. |
 | `TURN` | `TURN` | La vuelta de la batalla en la que va su grupo (error fuera de batalla). |
+
+Un atributo solo vale si la propia macro lo guarda con `SAVE` (si lees `dano` y guardas `daño`, el editor lo marca como error).
 
 Los nombres van **juntos, sin espacios**: «Rango arma» se escribe `@rangoarma` (da igual mayúsculas). Las palabras en
 mayúsculas de esta página están reservadas: no valen como nombre de atributo.
@@ -51,7 +53,7 @@ Una línea que empieza por `IF`, `ELSE`, `AND`, `OR` o `TO` sigue la anterior. `
 |---|---|
 | `EXECUTE x` | Calcula `x` y lo pone en el chat (lo ven todos). Con una comparación (`EXECUTE 1d20 + .des >= 12`) la enseña con su resultado. |
 | `EXECUTEP x` | Igual, pero privado: solo lo ven el host y quien la ejecuta. |
-| `SAVE nombre x` | Guarda el número en el atributo `nombre` (lo crea o lo sustituye). Se conserva entre ejecuciones. |
+| `SAVE nombre x` | Guarda el número en el atributo `nombre` (lo crea o lo sustituye). Vale solo durante esa ejecución: la siguiente empieza sin nada. |
 | `CHANGE @param x` | Con `+` o `-` delante, **suma**: `CHANGE @vida -1d4`. Sin signo, **pone** ese valor: `CHANGE @vida 10`. Solo parámetros con máximo (cambia el valor actual de esa ficha). |
 | `QUIT` | Quita la macro de la ficha y para. |
 | `DO cuerpo IF condición ELSE cuerpo` | Si se cumple, el primer cuerpo; si no, el del `ELSE` (opcional). Sin `IF`, siempre. |
@@ -70,7 +72,8 @@ se puede mirar a cada una:
   rombo o círculo).
 - `DISTANCE`: casillas entre tu ficha y la suya (pegadas = 1, también en diagonal).
 
-La acción puede ser `EXECUTE x` / `EXECUTEP x`, `CHANGE ENTITIES@param x` o `MACROS.nombre, MACROS.otra` (asocia esas
+La acción puede ser `EXECUTE x` / `EXECUTEP x`, `CHANGE ENTITIES@param x`, un bloque `[ … ]` con varias sentencias (se hacen
+en cada ficha, cada una con sus dados) o `MACROS.nombre, MACROS.otra` (asocia esas
 macros tuyas a cada una; una que ya la tiene no la recibe dos veces). **Cada ficha tira sus propios dados**; para una
 tirada común (la misma para todas), guárdala antes con `SAVE`. Si la condición no mira a ninguna ficha, se evalúa una vez y
 vale para todas o para ninguna.
@@ -92,6 +95,24 @@ Ataque en área (cada objetivo con su tirada de ataque y su daño):
 ```
 ONCLICK
 SPREAD CHANGE ENTITIES@vida -(2d8 + .fue) TO ENTITIES@armadura <= 1d20 + .destreza AND ENTITIES IN @rangoarma
+```
+
+Ver lo que pierde cada uno (un bloque: cada ficha tira su `1d20`, lo guarda, se lo quita y lo enseña en el chat):
+
+```
+ONCLICK
+SPREAD [
+  SAVE dano 1d20
+  CHANGE ENTITIES@vida -dano
+  EXECUTE -dano
+] TO ENTITIES IN @rangoarma
+```
+
+Daño que baja con la distancia (`DISTANCE` sirve para esto, donde `IN` solo dice dentro o fuera):
+
+```
+ONCLICK
+SPREAD CHANGE ENTITIES@vida -(4d6 - DISTANCE) TO DISTANCE <= 5
 ```
 
 Bola de fuego (el mismo daño para todos los que no superen la salvación):

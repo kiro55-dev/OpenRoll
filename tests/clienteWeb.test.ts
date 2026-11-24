@@ -138,7 +138,7 @@ describe("réplica: aplicar los cambios del host", () => {
 
   it("las macros llegan enteras cuando cambian y se leen de la réplica", () => {
     const m = { id: 1, nombre: "Veneno", codigo: "", autor: 0, al_pulsar: false, en_turno: true };
-    const a = { id: 3, id_macro: 1, destino: { Instancia: 7 }, autor: 0, atributos: [] };
+    const a = { id: 3, id_macro: 1, destino: { Instancia: 7 }, autor: 0 };
     let v = aplicarCambios(vistaVacia(), { macros: [m], asociaciones_macro: [a] });
     v = aplicarCambios(v, { zonas: [zona(1)] }); // otros cambios no las tocan
     expect(responder("obtener_macros", {}, v)).toEqual([m]);

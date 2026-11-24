@@ -85,7 +85,7 @@ fn con_macro(est: &mut EstadoPartida, id: u16, nombre: &str, codigo: &str, desti
         id, nombre: nombre.into(), codigo: codigo.into(), autor: ID_HOST, al_pulsar: tipo.al_pulsar, en_turno: tipo.en_turno,
     }));
     est.aplicar_delta(&DeltaPartida::MacroAsociada(AsociacionMacro {
-        id: u32::from(id), id_macro: id, destino: DestinoMacro::Instancia(destino), autor: ID_HOST, atributos: vec![],
+        id: u32::from(id), id_macro: id, destino: DestinoMacro::Instancia(destino), autor: ID_HOST,
     }));
 }
 
@@ -133,16 +133,18 @@ fn change_sin_signo_pone_el_valor_y_solo_vale_con_maximo() {
 }
 
 #[test]
-fn save_guarda_atributos_que_duran_entre_ejecuciones() {
+fn save_guarda_atributos_solo_durante_la_ejecucion() {
     let mut p = Prueba { est: partida(), caras: vec![4, 5], chat: vec![] };
     con_macro(&mut p.est, 1, "Contar", "ONCLICK\nDO SAVE veces 0 IF 1 = 2\nSAVE dano 2d6 + .fue\nEXECUTEP dano", 1);
     correr(&mut p, 1, 1).unwrap();
     assert_eq!(p.chat, vec![("Contar: dano (+11)".into(), 11, false)]);
-    let a = &p.est.asociaciones_macro[0];
-    assert_eq!(a.atributos, vec![AtributoMacro { nombre: "dano".into(), valor: 11 }]);
+    // Otra ejecución con otros dados: el atributo se vuelve a calcular, no arrastra nada de la anterior
+    p.caras = vec![1, 1];
+    correr(&mut p, 1, 1).unwrap();
+    assert_eq!(p.chat[1], ("Contar: dano (+4)".into(), 4, false));
 
-    con_macro(&mut p.est, 2, "Leer", "ONCLICK\nEXECUTE veces", 1);
-    assert!(correr(&mut p, 2, 1).unwrap_err().contains("no existe"));
+    // Leer un atributo que la macro no guarda ya no pasa ni la comprobación del código
+    assert!(comprobar("ONCLICK\nEXECUTE veces").unwrap_err().contains("ningún SAVE"));
 }
 
 #[test]
@@ -169,6 +171,17 @@ fn el_ataque_en_area_llega_solo_a_quien_esta_en_la_zona_cada_uno_con_su_tirada()
     correr(&mut p, 1, 1).unwrap();
     assert_eq!((vida(&p.est, 1), vida(&p.est, 2), vida(&p.est, 3), vida(&p.est, 4)), (20, 11, 20, 20));
     assert!(p.chat.is_empty());
+}
+
+#[test]
+fn un_bloque_en_spread_ensena_lo_que_quita_a_cada_uno() {
+    // Cada entidad tira su propio d20 (4 al goblin, 9 al lejano), lo guarda, se lo quita y lo enseña
+    let codigo = "ONCLICK\nSPREAD [\n  SAVE dano 1d20\n  CHANGE ENTITIES@vida -dano\n  EXECUTE -dano\n] TO ENTITIES@armadura >= 0";
+    let mut p = Prueba { est: partida(), caras: vec![4, 9], chat: vec![] };
+    con_macro(&mut p.est, 1, "Rafaga", codigo, 1);
+    correr(&mut p, 1, 1).unwrap();
+    assert_eq!((vida(&p.est, 2), vida(&p.est, 3)), (16, 11));
+    assert_eq!(p.chat, vec![("Rafaga → Goblin: - dano (+4)".into(), -4, true), ("Rafaga → Lejano: - dano (+9)".into(), -9, true)]);
 }
 
 #[test]

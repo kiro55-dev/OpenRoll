@@ -63,6 +63,8 @@ struct Ejecucion {
     pasos: u32,
     dados: i64,
     parar: bool,
+    /// Los atributos de `SAVE`: valen solo durante esta ejecución (no se guardan en la partida ni pasan a la siguiente).
+    atributos: Vec<(String, i32)>,
 }
 
 /// Quita del texto lo que pudiera pasar por una etiqueta en el desglose (el chat lo escapa igual).
@@ -125,7 +127,7 @@ pub fn ejecutar(mundo: &mut dyn Mundo, id_asociacion: u32, id_instancia: u16, qu
     let nombre = limpio(&mac.nombre);
     instancia(est, id_instancia)?;
     let programa = leer(&mac.codigo).map_err(|e| format!("{nombre}: {e}"))?;
-    let mut ej = Ejecucion { id_asociacion, autoridad: asoc.autor, quien, nombre, propia: id_instancia, pasos: 0, dados: 0, parar: false };
+    let mut ej = Ejecucion { id_asociacion, autoridad: asoc.autor, quien, nombre, propia: id_instancia, pasos: 0, dados: 0, parar: false, atributos: Vec::new() };
     match ej.bloque(mundo, &programa.cuerpo, None) {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -173,14 +175,14 @@ impl Ejecucion {
             }
             Sentencia::Guardar { nombre, expr } => {
                 let v = self.evaluar(m, expr, candidata)?;
-                let asoc = m.estado().asociaciones_macro.iter().find(|a| a.id == self.id_asociacion);
-                let Some(asoc) = asoc else { return Err("Esta macro ya no está asociada".into()) };
-                let existe = asoc.atributos.iter().any(|a| a.nombre.eq_ignore_ascii_case(nombre));
-                if !existe && asoc.atributos.len() >= MAX_ATRIBUTOS {
-                    return Err(format!("Una macro no puede guardar más de {MAX_ATRIBUTOS} atributos"));
-                }
                 let valor = v.total.clamp(-LIMITE_ATRIBUTO, LIMITE_ATRIBUTO) as i32;
-                m.aplicar(DeltaPartida::AtributoMacroGuardado { id_asociacion: self.id_asociacion, nombre: nombre.clone(), valor });
+                match self.atributos.iter().position(|(n, _)| n.eq_ignore_ascii_case(nombre)) {
+                    Some(i) => self.atributos[i].1 = valor,
+                    None if self.atributos.len() >= MAX_ATRIBUTOS => {
+                        return Err(format!("Una macro no puede guardar más de {MAX_ATRIBUTOS} atributos"));
+                    }
+                    None => self.atributos.push((nombre.clone(), valor)),
+                }
             }
             Sentencia::Cambiar { de, param, expr, relativo } => {
                 let objetivo = match de {
@@ -286,7 +288,6 @@ impl Ejecucion {
             id_macro,
             destino: DestinoMacro::Instancia(destino),
             autor: self.autoridad,
-            atributos: Vec::new(),
         }));
         Ok(())
     }
@@ -360,14 +361,12 @@ impl Ejecucion {
                 simple(format!("{etq} ({v:+})"), i64::from(v))
             }
             Expr::Atributo(nombre) => {
-                let est = m.estado();
-                let v = est
-                    .asociaciones_macro
+                let v = self
+                    .atributos
                     .iter()
-                    .find(|a| a.id == self.id_asociacion)
-                    .and_then(|a| a.atributos.iter().find(|x| x.nombre.eq_ignore_ascii_case(nombre)))
-                    .map(|x| x.valor)
-                    .ok_or_else(|| format!("El atributo «{nombre}» no existe todavía (se crea con SAVE {nombre} …)"))?;
+                    .find(|(n, _)| n.eq_ignore_ascii_case(nombre))
+                    .map(|(_, v)| *v)
+                    .ok_or_else(|| format!("El atributo «{nombre}» aún no tiene valor en esta ejecución (se le da con SAVE {nombre} … antes de usarlo)"))?;
                 simple(format!("{} ({:+})", limpio(nombre), v), i64::from(v))
             }
             Expr::Turno => {

@@ -128,8 +128,6 @@ pub enum DeltaPartida {
     MacroAsociada(AsociacionMacro),
     /// Se quita una asociación (a mano o con `QUIT`).
     MacroDesasociada(u32),
-    /// `SAVE` de una macro: el atributo de esa asociación pasa a valer `valor` (se crea si no existía).
-    AtributoMacroGuardado { id_asociacion: u32, nombre: String, valor: i32 },
 }
 
 /// Línea de deltas.jsonl al LEER.
@@ -204,7 +202,7 @@ pub struct EstadoPartida {
     /// Las macros de la partida (las del host y las de los jugadores). Ver macros/.
     #[serde(default)]
     pub macros: Vec<Macro>,
-    /// A qué fichas e instancias está asociada cada macro, con sus atributos (`SAVE`).
+    /// A qué fichas e instancias está asociada cada macro.
     #[serde(default)]
     pub asociaciones_macro: Vec<AsociacionMacro>,
     /// Qué mapa tiene abierto el host (lo ven los jugadores). Efímero: no se guarda ni va al log, como el foco.
@@ -636,14 +634,6 @@ impl EstadoPartida {
                 }
             }
             DeltaPartida::MacroDesasociada(id) => self.asociaciones_macro.retain(|a| a.id != *id),
-            DeltaPartida::AtributoMacroGuardado { id_asociacion, nombre, valor } => {
-                if let Some(a) = self.asociaciones_macro.iter_mut().find(|a| a.id == *id_asociacion) {
-                    match a.atributos.iter_mut().find(|x| x.nombre.eq_ignore_ascii_case(nombre)) {
-                        Some(x) => x.valor = *valor,
-                        None => a.atributos.push(AtributoMacro { nombre: nombre.clone(), valor: *valor }),
-                    }
-                }
-            }
             DeltaPartida::MapaPublicoCambiado(id) => {
                 for m in self.mapas.iter_mut() {
                     m.compartido = Some(m.id) == *id;

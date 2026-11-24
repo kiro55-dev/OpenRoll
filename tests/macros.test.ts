@@ -7,7 +7,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 const { macrosDeInstancia, macrosEditables, nombreNuevaMacro, CODIGO_NUEVA_MACRO, macros } = await import("$lib/macros.svelte");
 
 const macro = (id: number, al_pulsar: boolean, en_turno: boolean, codigo = "x") => ({ id, nombre: `M${id}`, codigo, autor: 0, al_pulsar, en_turno });
-const asoc = (id: number, id_macro: number, destino: { Ficha: number } | { Instancia: number }) => ({ id, id_macro, destino, autor: 0, atributos: [] });
+const asoc = (id: number, id_macro: number, destino: { Ficha: number } | { Instancia: number }) => ({ id, id_macro, destino, autor: 0 });
 
 describe("macro nueva y borradores", () => {
   it("se llama «Macro N», con el primer número libre (sin importar espacios ni mayúsculas)", () => {

@@ -114,11 +114,11 @@
     return () => clearTimeout(temporizador);
   });
 
-  /** Un clic en la lista: la abre en el editor y, si se abrió desde una ficha, se la asocia; si ya la tenía, se la quita (alterna). */
-  async function elegir(id: number) {
-    abrir(id);
+  /** La casilla ✓ de una macro: la asocia a la ficha de la ventana o, si ya la tenía, se la quita. Pulsar el nombre solo la abre. */
+  async function alternarAsociacion(id: number) {
     if (!entidad) return;
     const aso = deLaFicha(id);
+    error = "";
     try {
       if (aso) await macros.desasociar(aso.id);
       else await macros.asociar(id, entidad.id);
@@ -221,20 +221,27 @@
       <button type="button" class="item nueva" disabled={guardando} onclick={crear}>+ Nueva macro</button>
       {#each visibles as m (m.id)}
         {@const aso = deLaFicha(m.id)}
-        <button
-          type="button"
-          class="item"
-          class:activa={idActual === m.id}
-          class:asociada={!!aso}
-          title={ayuda(entidad ? (aso ? `Asociada a ${entidad.nombre}. Pulsa para quitársela` : `Pulsa para asociarla a ${entidad.nombre} y abrirla`) : "Pulsa para abrirla")}
-          onclick={() => elegir(m.id)}
-        >
-          <span class="nombre">{aso ? "✓ " : ""}{m.nombre}</span>
-          <span class="tipos">
-            {#if m.al_pulsar}<span class="tipo">CLICK</span>{/if}
-            {#if m.en_turno}<span class="tipo turno">TURNO</span>{/if}
-          </span>
-        </button>
+        <div class="fila" class:activa={idActual === m.id} class:asociada={!!aso}>
+          {#if entidad}
+            <!-- Asociar a la ficha es esta casilla, aparte: pulsar el nombre solo abre la macro para editarla -->
+            <button
+              type="button"
+              class="marca"
+              class:puesta={!!aso}
+              aria-pressed={!!aso}
+              aria-label={aso ? `Quitar «${m.nombre}» de ${entidad.nombre}` : `Asociar «${m.nombre}» a ${entidad.nombre}`}
+              title={ayuda(aso ? `Asociada a ${entidad.nombre}. Pulsa para quitársela` : `Pulsa para asociarla a ${entidad.nombre}`)}
+              onclick={() => alternarAsociacion(m.id)}
+            >{aso ? "✓" : ""}</button>
+          {/if}
+          <button type="button" class="item" title={ayuda("Pulsa para abrirla y editarla")} onclick={() => abrir(m.id)}>
+            <span class="nombre">{m.nombre}</span>
+            <span class="tipos">
+              {#if m.al_pulsar}<span class="tipo">CLICK</span>{/if}
+              {#if m.en_turno}<span class="tipo turno">TURNO</span>{/if}
+            </span>
+          </button>
+        </div>
       {:else}
         <span class="vacio">{mias.length ? "Ninguna coincide" : "Aún no hay ninguna"}</span>
       {/each}
@@ -319,7 +326,7 @@
         <li><code>SAVE nombre x</code>: guarda un atributo.</li>
         <li><code>CHANGE @vida -1d4</code>: con signo suma; sin signo pone el valor (solo parámetros con máximo).</li>
         <li><code>DO … IF … ELSE …</code> · <code>DO … IFNOT … ELSE …</code> (el cuerpo es para cuando NO se cumple) · <code>QUIT</code>: quita la macro de la ficha.</li>
-        <li><code>SPREAD acción TO condición</code>: a cada entidad del mapa que cumpla (<code>ENTITIES@armadura</code>, <code>ENTITIES.fue</code>, <code>ENTITIES IN @rangoarma</code>, <code>DISTANCE</code>). Acción: <code>EXECUTE</code>, <code>CHANGE ENTITIES@vida …</code> o <code>MACROS.veneno, MACROS.lento</code>.</li>
+        <li><code>SPREAD acción TO condición</code>: a cada entidad del mapa que cumpla (<code>ENTITIES@armadura</code>, <code>ENTITIES.fue</code>, <code>ENTITIES IN @rangoarma</code>, <code>DISTANCE</code>). Acción: <code>EXECUTE</code>, <code>CHANGE ENTITIES@vida …</code>, <code>MACROS.veneno, MACROS.lento</code> o un bloque <code>[ … ]</code> que se hace en cada una.</li>
       </ul>
       <pre>ONCLICK
 SPREAD CHANGE ENTITIES@vida -(2d8 + .fue) TO ENTITIES@armadura &lt;= 1d20 + .des AND ENTITIES IN @rangoarma</pre>
@@ -352,14 +359,22 @@ SPREAD CHANGE ENTITIES@vida -(2d8 + .fue) TO ENTITIES@armadura &lt;= 1d20 + .des
     background: #1f1f23; border: 1px solid #3f3f46; border-radius: 4px; color: inherit; font: inherit; padding: 4px 6px; cursor: pointer;
   }
   .item:hover { background: #27272a; }
-  .item.activa { border-color: #3b82f6; background: #2a2a32; }
   .item.nueva { border-style: dashed; color: #a1a1aa; }
+  .fila { display: flex; align-items: stretch; gap: 3px; }
+  .fila .item { flex: 1; min-width: 0; }
+  .fila.activa .item { border-color: #3b82f6; background: #2a2a32; }
+  .fila.asociada .item { border-color: #16a34a; }
+  .fila.activa.asociada .item { border-color: #3b82f6; }
+  .marca {
+    flex: none; width: 20px; background: #1f1f23; border: 1px solid #3f3f46; border-radius: 4px; color: #4ade80; font-size: 12px; cursor: pointer; padding: 0;
+  }
+  .marca:hover { border-color: #60a5fa; }
+  .marca.puesta { background: #14532d; border-color: #16a34a; }
   .item:disabled { opacity: 0.5; cursor: default; }
   .sin-macro { color: #a1a1aa; font-size: 12px; }
   .sin-macro p { margin: 0 0 6px; }
   .sin-macro pre { margin: 0; background: #09090b; border-radius: 4px; padding: 6px; color: #93c5fd; font-family: ui-monospace, Consolas, monospace; white-space: pre-wrap; }
   .aviso { color: #fbbf24; }
-  .item.asociada { border-color: #16a34a; }
   .buscar { background: #09090b; border: 1px solid #3f3f46; color: white; padding: 3px 5px; border-radius: 4px; font-size: 11px; }
   .buscar:focus { outline: none; border-color: #60a5fa; }
   .vacio { color: #71717a; font-size: 11px; padding: 4px; }

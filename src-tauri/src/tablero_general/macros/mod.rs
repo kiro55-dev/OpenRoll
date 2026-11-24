@@ -265,7 +265,7 @@ pub fn asociar_macro_en(state: &AppState, jugador: IdJugador, id_macro: u16, id_
         return Err(format!("Una ficha no puede tener más de {MAX_ASOCIACIONES_POR_DESTINO} macros"));
     }
     let id = est.asociaciones_macro.iter().map(|a| a.id).max().unwrap_or(0) + 1;
-    registrar(&mut est, &state.almacen, DeltaPartida::MacroAsociada(AsociacionMacro { id, id_macro, destino, autor: jugador, atributos: Vec::new() }));
+    registrar(&mut est, &state.almacen, DeltaPartida::MacroAsociada(AsociacionMacro { id, id_macro, destino, autor: jugador }));
     Ok(id)
 }
 
