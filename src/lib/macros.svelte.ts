@@ -7,6 +7,19 @@ import { EVENTO_PARTIDA_CAMBIADA, invoke, listen } from "$lib/backend";
 import type { AsociacionMacro, Instancia, Macro } from "$lib/partida.svelte";
 import { partida } from "$lib/partida.svelte";
 import { tiradas } from "$lib/tiradas.svelte";
+import { carpetaDePartida } from "$lib/imagenes";
+import { esJugador } from "$lib/modo";
+
+/** Lo que tiene una macro recién creada (Rust no admite una vacía: tiene que empezar con ONCLICK u ONTURN y hacer algo). */
+export const CODIGO_NUEVA_MACRO = "ONCLICK\n# Escribe aquí lo que hace la macro\nEXECUTE 1d20";
+
+/** El nombre de una macro nueva: «Macro 1», «Macro 2»... el primero que no tenga ya una de las `existentes`. */
+export function nombreNuevaMacro(existentes: readonly string[]): string {
+  const usados = new Set(existentes.map((n) => n.trim().toLowerCase().replace(/\s+/g, "")));
+  let n = 1;
+  while (usados.has(`macro${n}`)) n++;
+  return `Macro ${n}`;
+}
 
 /** Cómo es una macro que se puede leer (lo que devuelve `validar_macro`). */
 export interface Comprobacion {
@@ -55,6 +68,43 @@ export interface FichaDeMacro {
 }
 
 class Macros {
+  /**
+   * El texto que alguien ha escrito en una macro y todavía no ha aplicado con «Guardar», por id. Se conserva aunque cierre la ventana,
+   * cambie de macro o cierre la aplicación (en este equipo, por partida), así una macro larga a medias sigue ahí al volver.
+   */
+  borradores = $state<Record<number, string>>({});
+  #claveBorradores = "";
+
+  /** Se llama al abrir la ventana: carga los borradores de esta partida (si cambió de partida, los de la otra ya no valen). */
+  cargarBorradores() {
+    const clave = `openroll.macros.borradores:${esJugador ? "jugador" : carpetaDePartida()}`;
+    if (clave === this.#claveBorradores) return;
+    this.#claveBorradores = clave;
+    try {
+      this.borradores = JSON.parse(localStorage.getItem(clave) ?? "{}") ?? {};
+    } catch {
+      this.borradores = {};
+    }
+  }
+
+  #guardarBorradores() {
+    try {
+      if (this.#claveBorradores) localStorage.setItem(this.#claveBorradores, JSON.stringify(this.borradores));
+    } catch {
+      // sin almacenamiento: los borradores viven solo mientras la aplicación está abierta
+    }
+  }
+
+  /** Apunta el texto escrito; `undefined` (o igual a lo guardado) lo quita. */
+  ponerBorrador(id: number, texto: string | undefined) {
+    if (this.borradores[id] === texto) return;
+    const nuevo = { ...this.borradores };
+    if (texto === undefined) delete nuevo[id];
+    else nuevo[id] = texto;
+    this.borradores = nuevo;
+    this.#guardarBorradores();
+  }
+
   /**
    * La ventana de macros, si está abierta. Con `entidad` se abrió desde la caja «Parámetros» de una ficha: ahí pulsar una macro la
    * asocia a esa ficha y la que se cree nueva se le asocia sola. Con `idMacro`, abre ya esa macro (clic derecho sobre ella).
@@ -108,6 +158,7 @@ class Macros {
 
   async borrar(id: number) {
     await invoke("borrar_macro", { id });
+    this.ponerBorrador(id, undefined);
     await this.recargar();
   }
 

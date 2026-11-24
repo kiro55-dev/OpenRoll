@@ -44,9 +44,19 @@ export interface TeclaEnter {
 /** Elementos donde el Enter es suyo (escribir, aceptar un formulario, pulsar el botón que tiene el foco...). */
 const ENTER_DE_OTROS = "input, textarea, select, button, a, summary, [contenteditable='true']";
 
-/** ¿Es un Enter «suelto» que no pertenece a un campo, un botón ni un enlace? Solo entonces mueve la ficha. */
+/** Lo que se marca con `data-enter-tablero` (la tarjeta de una ficha en «Fichas activas», que es un botón): su Enter sigue siendo del tablero. */
+const ENTER_DEL_TABLERO = "[data-enter-tablero]";
+
+/**
+ * ¿Es un Enter «suelto» que no pertenece a un campo, un botón ni un enlace? Solo entonces mueve la ficha o pasa el turno. La tarjeta de una
+ * ficha de «Fichas activas» es un botón que se queda con el foco al pulsarla: ese Enter también cuenta (otro botón DENTRO de ella, como el
+ * ojo, sigue siendo suyo).
+ */
 export function enterEsDelTablero(e: TeclaEnter): boolean {
   if (e.key !== "Enter" || e.repeat) return false;
   if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return false;
-  return !(e.target as { closest?: (selector: string) => unknown } | null | undefined)?.closest?.(ENTER_DE_OTROS);
+  const objetivo = e.target as { closest?: (selector: string) => unknown } | null | undefined;
+  const de_otros = objetivo?.closest?.(ENTER_DE_OTROS);
+  if (!de_otros) return true;
+  return de_otros === objetivo?.closest?.(ENTER_DEL_TABLERO);
 }

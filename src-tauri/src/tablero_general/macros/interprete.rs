@@ -208,10 +208,11 @@ impl Ejecucion {
                 m.aplicar(DeltaPartida::MacroDesasociada(self.id_asociacion));
                 self.parar = true;
             }
-            Sentencia::Si { cuerpo, condicion, sino } => {
+            Sentencia::Si { cuerpo, condicion, negada, sino } => {
                 let cumple = match condicion {
                     None => true,
-                    Some(c) => self.condicion(m, c, candidata)?,
+                    // IFNOT: el cuerpo es para cuando la condición NO se cumple
+                    Some(c) => self.condicion(m, c, candidata)? != *negada,
                 };
                 self.bloque(m, if cumple { cuerpo } else { sino }, candidata)?;
             }

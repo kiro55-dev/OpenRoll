@@ -87,8 +87,9 @@ pub enum Sentencia {
     Cambiar { de: Sujeto, param: String, expr: Expr, relativo: bool },
     /// `QUIT`: quita la macro de lo que la tiene asociada y para.
     Quitar,
-    /// `DO cuerpo [IF condición [ELSE cuerpo]]`.
-    Si { cuerpo: Vec<Sentencia>, condicion: Option<Condicion>, sino: Vec<Sentencia> },
+    /// `DO cuerpo [IF condición [ELSE cuerpo]]`, o con `IFNOT`: el cuerpo es para cuando la condición NO se cumple (`negada`) y el
+    /// `ELSE` para cuando sí.
+    Si { cuerpo: Vec<Sentencia>, condicion: Option<Condicion>, negada: bool, sino: Vec<Sentencia> },
     /// `SPREAD acción TO condición`.
     Repartir { accion: Box<Sentencia>, condicion: Condicion },
     /// La acción `MACROS.a, MACROS.b` de un SPREAD: asocia esas macros a cada candidata que cumple.
@@ -274,7 +275,7 @@ impl Parser {
             self.pos += 1;
             let der = self.expr()?;
             let condicion = Condicion::Comparar { izq: expr, cmp, der, mostrar: Some(privada) };
-            return Ok(Sentencia::Si { cuerpo: vec![], condicion: Some(condicion), sino: vec![] });
+            return Ok(Sentencia::Si { cuerpo: vec![], condicion: Some(condicion), negada: false, sino: vec![] });
         }
         Ok(Sentencia::Mostrar { expr, privada })
     }
@@ -316,8 +317,9 @@ impl Parser {
 
     fn si(&mut self) -> Result<Sentencia, ErrorMacro> {
         let cuerpo = self.cuerpo()?;
-        let (mut condicion, mut sino) = (None, Vec::new());
-        if self.sigue_con(&[Clave::If]) {
+        let (mut condicion, mut sino, mut negada) = (None, Vec::new(), false);
+        if self.sigue_con(&[Clave::If, Clave::IfNot]) {
+            negada = self.es_clave(Clave::IfNot);
             self.pos += 1;
             condicion = Some(self.condicion()?);
             if self.sigue_con(&[Clave::Else]) {
@@ -325,9 +327,9 @@ impl Parser {
                 sino = self.cuerpo()?;
             }
         } else if self.sigue_con(&[Clave::Else]) {
-            return self.error("ELSE va después de un IF");
+            return self.error("ELSE va después de un IF o un IFNOT");
         }
-        Ok(Sentencia::Si { cuerpo, condicion, sino })
+        Ok(Sentencia::Si { cuerpo, condicion, negada, sino })
     }
 
     fn repartir(&mut self) -> Result<Sentencia, ErrorMacro> {
@@ -571,7 +573,7 @@ mod tests {
     fn lee_los_ejemplos() {
         let p = leer("ONTURN\nDO CHANGE @vida -1d4 IF EXECUTE 1d20 <= .cont ELSE QUIT").unwrap();
         assert!(p.en_turno && !p.al_pulsar);
-        let Sentencia::Si { cuerpo, condicion: Some(Condicion::Comparar { mostrar, cmp, .. }), sino } = &p.cuerpo[0] else { panic!("{p:?}") };
+        let Sentencia::Si { cuerpo, condicion: Some(Condicion::Comparar { mostrar, cmp, .. }), sino, .. } = &p.cuerpo[0] else { panic!("{p:?}") };
         assert_eq!(*mostrar, Some(false));
         assert_eq!(*cmp, Comparacion::MenorIgual);
         assert!(matches!(&cuerpo[0], Sentencia::Cambiar { relativo: true, de: Sujeto::Propia, .. }));
@@ -600,7 +602,7 @@ mod tests {
         let p = leer("ONCLICK\nSAVE dano 2d6 + 3\nDO [\n  EXECUTE dano\n  CHANGE @vida 10; QUIT\n]\nIF dano >= 5\nELSE EXECUTEP 0").unwrap();
         assert_eq!(p.cuerpo.len(), 2);
         assert!(matches!(&p.cuerpo[0], Sentencia::Guardar { nombre, .. } if nombre == "dano"));
-        let Sentencia::Si { cuerpo, condicion, sino } = &p.cuerpo[1] else { panic!() };
+        let Sentencia::Si { cuerpo, condicion, sino, .. } = &p.cuerpo[1] else { panic!() };
         assert_eq!(cuerpo.len(), 3);
         assert!(matches!(&cuerpo[1], Sentencia::Cambiar { relativo: false, .. }));
         assert!(matches!(condicion, Some(Condicion::Comparar { izq, .. }) if *izq == atr("dano")));
@@ -620,6 +622,16 @@ mod tests {
         ] {
             assert!(leer(codigo).is_ok(), "{codigo}: {:?}", leer(codigo));
         }
+    }
+
+    #[test]
+    fn ifnot_ejecuta_el_cuerpo_cuando_no_se_cumple() {
+        let p = leer("ONTURN\nDO CHANGE @vida -1d4 IFNOT EXECUTE 1d20 + .con >= 14\nELSE QUIT").unwrap();
+        let Sentencia::Si { negada, sino, condicion, .. } = &p.cuerpo[0] else { panic!() };
+        assert!(*negada && condicion.is_some());
+        assert_eq!(sino, &vec![Sentencia::Quitar]);
+        let p = leer("ONCLICK\nDO QUIT IF 1 = 1").unwrap();
+        assert!(matches!(&p.cuerpo[0], Sentencia::Si { negada: false, .. }));
     }
 
     #[test]

@@ -8,7 +8,8 @@
   import { redimensionable } from "$lib/redimensionarVentana";
   import { esJugador } from "$lib/modo";
   import { untrack } from "svelte";
-  import { macros, macrosEditables, type Comprobacion } from "$lib/macros.svelte";
+  import { CODIGO_NUEVA_MACRO, macros, macrosEditables, nombreNuevaMacro, type Comprobacion } from "$lib/macros.svelte";
+  import { partida } from "$lib/partida.svelte";
 
   let { onCerrar }: { onCerrar: () => void } = $props();
 
@@ -18,7 +19,7 @@
   let ventana = $state<HTMLDivElement | null>(null);
   let pos = $state({ x: 280, y: 90 });
 
-  const EJEMPLO = "ONTURN\nDO CHANGE @vida -1d4 IF EXECUTE 1d20 <= .cont ELSE QUIT";
+  const EJEMPLO = "ONTURN\nDO CHANGE @vida -1d4 IFNOT EXECUTE 1d20 + .con >= 14\nELSE QUIT";
 
   const mias = $derived(macrosEditables(macros.lista, esJugador));
   let busqueda = $state("");
@@ -26,10 +27,11 @@
   /** La asociación de una macro con la ficha de la ventana (para la marca ✓ y el ✕). */
   const deLaFicha = (idMacro: number) =>
     entidad ? macros.asociaciones.find((a) => a.id_macro === idMacro && "Ficha" in a.destino && a.destino.Ficha === entidad.id) : undefined;
-  /** La que se edita (0 = una nueva). */
+  /** La que se edita (0 = ninguna: primero se crea con «+ Nueva macro»). */
   let idActual = $state(0);
   let nombre = $state("");
   let codigo = $state("");
+  let nombreAplicado = $state("");
   let comprobacion = $state<Comprobacion | null>(null);
   let errorCodigo = $state("");
   let error = $state("");
@@ -38,9 +40,37 @@
   let ayudaAbierta = $state(false);
 
   const guardada = $derived(mias.find((m) => m.id === idActual));
-  const cambiada = $derived(!guardada ? nombre.trim() !== "" || codigo.trim() !== "" : guardada.nombre !== nombre.trim() || guardada.codigo !== codigo);
+  /** El texto escrito difiere del aplicado: queda guardado como borrador hasta pulsar «Guardar». */
+  const sinAplicar = $derived(!!guardada && guardada.codigo !== codigo);
 
   $effect(() => macros.iniciar());
+  macros.cargarBorradores();
+
+  // Todo lo que se escribe se guarda como borrador al momento (aunque no se pulse «Guardar»)
+  $effect(() => {
+    const texto = codigo;
+    const id = idActual;
+    untrack(() => {
+      const g = mias.find((m) => m.id === id);
+      if (g) macros.ponerBorrador(id, g.codigo === texto ? undefined : texto);
+    });
+  });
+
+  // Con la ventana abierta, pulsar UNA ficha (en «Fichas activas» o en el tablero) la pone como la ficha de la ventana. Solo cuando
+  // la selección cambia (no al abrirla, ni al deseleccionar: la ventana se queda con la última) y solo si se controla.
+  let ultimaSeleccion: number | null = untrack(() => partida.instanciaSeleccionada?.id_instancia ?? null);
+  $effect(() => {
+    const sel = partida.instanciaSeleccionada;
+    const id = sel?.id_instancia ?? null;
+    untrack(() => {
+      if (id === ultimaSeleccion) return;
+      ultimaSeleccion = id;
+      const v = macros.ventana;
+      if (!sel || !v) return;
+      const entidad = partida.controla(sel) ? { id: sel.base.id, nombre: sel.base.nombre } : undefined;
+      if (v.entidad?.id !== entidad?.id) macros.ventana = { ...v, entidad };
+    });
+  });
 
   // Al abrirla (o volver a abrirla desde otra macro o ficha) carga la que se pidió
   $effect(() => {
@@ -55,7 +85,9 @@
     const m = mias.find((x) => x.id === id);
     idActual = m?.id ?? 0;
     nombre = m?.nombre ?? "";
-    codigo = m?.codigo ?? "";
+    nombreAplicado = nombre;
+    // Si había texto a medias, se retoma donde se dejó
+    codigo = m ? (macros.borradores[m.id] ?? m.codigo) : "";
     error = "";
     confirmarBorrado = false;
   }
@@ -82,37 +114,63 @@
     return () => clearTimeout(temporizador);
   });
 
-  /** Un clic en la lista: la abre en el editor y, si se abrió desde una ficha, se la asocia (si aún no la tiene). */
+  /** Un clic en la lista: la abre en el editor y, si se abrió desde una ficha, se la asocia; si ya la tenía, se la quita (alterna). */
   async function elegir(id: number) {
     abrir(id);
-    if (entidad && !deLaFicha(id)) {
-      try {
-        await macros.asociar(id, entidad.id);
-      } catch (err) {
-        error = String(err);
-      }
-    }
-  }
-
-  async function quitarDeLaFicha(e: MouseEvent, idAsociacion: number) {
-    e.stopPropagation();
+    if (!entidad) return;
+    const aso = deLaFicha(id);
     try {
-      await macros.desasociar(idAsociacion);
+      if (aso) await macros.desasociar(aso.id);
+      else await macros.asociar(id, entidad.id);
     } catch (err) {
       error = String(err);
     }
   }
 
-  async function guardar() {
+  /** «+ Nueva macro»: se crea ya, con un nombre («Macro 1»...) y un código mínimo, y se abre para editarla. Desde una ficha, queda asociada a ella. */
+  async function crear() {
     if (guardando) return;
     guardando = true;
     error = "";
     try {
-      const eraNueva = idActual === 0;
-      const m = await macros.guardar({ id: idActual, nombre, codigo });
-      // Una macro creada desde una ficha queda asociada a ella
-      if (eraNueva && entidad) await macros.asociar(m.id, entidad.id);
+      const m = await macros.guardar({ id: 0, nombre: nombreNuevaMacro(mias.map((x) => x.nombre)), codigo: CODIGO_NUEVA_MACRO });
+      if (entidad) await macros.asociar(m.id, entidad.id);
+      busqueda = "";
       abrir(m.id);
+    } catch (err) {
+      error = String(err);
+    } finally {
+      guardando = false;
+    }
+  }
+
+  /** El nombre se aplica al salir del campo (o con Enter): no hace falta «Guardar». Un nombre que no vale vuelve al anterior. */
+  async function aplicarNombre() {
+    const g = guardada;
+    const nuevo = nombre.trim();
+    if (!g || nuevo === g.nombre) {
+      if (g) nombre = g.nombre;
+      return;
+    }
+    error = "";
+    try {
+      await macros.guardar({ id: g.id, nombre: nuevo, codigo: g.codigo });
+      nombreAplicado = nuevo;
+    } catch (err) {
+      error = String(err);
+      nombre = g.nombre;
+    }
+  }
+
+  /** «Guardar» aplica el texto de la macro (se comprueba en Rust: si tiene un error no se aplica y el borrador sigue ahí). */
+  async function guardar() {
+    const g = guardada;
+    if (guardando || !g || !sinAplicar) return;
+    guardando = true;
+    error = "";
+    try {
+      await macros.guardar({ id: g.id, nombre: g.nombre, codigo });
+      macros.ponerBorrador(g.id, undefined);
     } catch (err) {
       error = String(err);
     } finally {
@@ -146,6 +204,7 @@
   use:redimensionable={{ pos }}
   role="dialog"
   aria-label="Macros"
+  data-conserva-foco
   tabindex="-1"
   onkeydown={alTeclear}
   bind:this={ventana}
@@ -159,7 +218,7 @@
   <div class="cuerpo">
     <div class="lista">
       <input type="text" class="buscar" placeholder="Buscar macro..." bind:value={busqueda} />
-      <button type="button" class="item nueva" class:activa={idActual === 0} onclick={() => abrir(0)}>+ Nueva macro</button>
+      <button type="button" class="item nueva" disabled={guardando} onclick={crear}>+ Nueva macro</button>
       {#each visibles as m (m.id)}
         {@const aso = deLaFicha(m.id)}
         <button
@@ -167,16 +226,13 @@
           class="item"
           class:activa={idActual === m.id}
           class:asociada={!!aso}
-          title={ayuda(entidad ? (aso ? `Asociada a ${entidad.nombre}` : `Pulsa para asociarla a ${entidad.nombre} y abrirla`) : "Pulsa para abrirla")}
+          title={ayuda(entidad ? (aso ? `Asociada a ${entidad.nombre}. Pulsa para quitársela` : `Pulsa para asociarla a ${entidad.nombre} y abrirla`) : "Pulsa para abrirla")}
           onclick={() => elegir(m.id)}
         >
           <span class="nombre">{aso ? "✓ " : ""}{m.nombre}</span>
           <span class="tipos">
             {#if m.al_pulsar}<span class="tipo">CLICK</span>{/if}
             {#if m.en_turno}<span class="tipo turno">TURNO</span>{/if}
-            {#if aso}
-              <span class="quitar" role="button" tabindex="-1" aria-label="Quitar de la ficha" title="Quitar de {entidad?.nombre}" onclick={(e) => quitarDeLaFicha(e, aso.id)} onkeydown={() => {}}>✕</span>
-            {/if}
           </span>
         </button>
       {:else}
@@ -184,17 +240,38 @@
       {/each}
     </div>
 
+    {#if !guardada}
+      <div class="editor sin-macro">
+        <p>{mias.length ? "Elige una macro de la lista para editarla" : "Aún no tienes ninguna macro"}, o crea una con «+ Nueva macro».</p>
+        <p class="ejemplo">Por ejemplo:</p>
+        <pre>{EJEMPLO}</pre>
+      </div>
+    {:else}
     <div class="editor">
       <label class="campo">
         <span>Nombre</span>
-        <input type="text" maxlength="40" bind:value={nombre} placeholder="Envenenado" />
+        <input
+          type="text"
+          maxlength="40"
+          bind:value={nombre}
+          title={ayuda("El nombre se aplica al salir del campo o con Enter")}
+          onblur={aplicarNombre}
+          onkeydown={(e) => {
+            if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              nombre = nombreAplicado;
+              (e.currentTarget as HTMLInputElement).blur();
+            }
+          }}
+        />
       </label>
       <textarea
         class="codigo"
         spellcheck="false"
         bind:value={codigo}
         placeholder={EJEMPLO}
-        title={ayuda("Empieza con ONCLICK (botón en la caja «Parámetros»), ONTURN (sola cuando le llega el turno) o los dos")}
+        title={ayuda("Empieza con ONCLICK (botón en la caja «Parámetros»), ONTURN (sola cuando le llega el turno) o los dos. Lo que escribes se conserva aunque no pulses Guardar")}
       ></textarea>
       <div class="estado">
         {#if errorCodigo}
@@ -209,6 +286,7 @@
                 : "sola al empezar su turno"}
           </span>
         {/if}
+        {#if sinAplicar}<span class="aviso"> · sin aplicar (queda guardado como borrador)</span>{/if}
       </div>
       {#if error}<p class="mal">{error}</p>{/if}
       <div class="botones">
@@ -221,11 +299,12 @@
             <button type="button" class="btn" onclick={() => (confirmarBorrado = true)}>Borrar</button>
           {/if}
         {/if}
-        <button type="button" class="btn guardar" disabled={guardando || !cambiada || !!errorCodigo} title={ayuda("Atajo: Ctrl + S")} onclick={guardar}>
+        <button type="button" class="btn guardar" disabled={guardando || !sinAplicar || !!errorCodigo} title={ayuda("Aplica el texto a la macro (Atajo: Ctrl + S)")} onclick={guardar}>
           Guardar
         </button>
       </div>
     </div>
+    {/if}
   </div>
 
   <details class="referencia" bind:open={ayudaAbierta}>
@@ -239,7 +318,7 @@
         <li><code>EXECUTE x</code> / <code>EXECUTEP x</code>: al chat (pública / privada).</li>
         <li><code>SAVE nombre x</code>: guarda un atributo.</li>
         <li><code>CHANGE @vida -1d4</code>: con signo suma; sin signo pone el valor (solo parámetros con máximo).</li>
-        <li><code>DO … IF … ELSE …</code> · <code>QUIT</code>: quita la macro de la ficha.</li>
+        <li><code>DO … IF … ELSE …</code> · <code>DO … IFNOT … ELSE …</code> (el cuerpo es para cuando NO se cumple) · <code>QUIT</code>: quita la macro de la ficha.</li>
         <li><code>SPREAD acción TO condición</code>: a cada entidad del mapa que cumpla (<code>ENTITIES@armadura</code>, <code>ENTITIES.fue</code>, <code>ENTITIES IN @rangoarma</code>, <code>DISTANCE</code>). Acción: <code>EXECUTE</code>, <code>CHANGE ENTITIES@vida …</code> o <code>MACROS.veneno, MACROS.lento</code>.</li>
       </ul>
       <pre>ONCLICK
@@ -275,12 +354,16 @@ SPREAD CHANGE ENTITIES@vida -(2d8 + .fue) TO ENTITIES@armadura &lt;= 1d20 + .des
   .item:hover { background: #27272a; }
   .item.activa { border-color: #3b82f6; background: #2a2a32; }
   .item.nueva { border-style: dashed; color: #a1a1aa; }
+  .item:disabled { opacity: 0.5; cursor: default; }
+  .sin-macro { color: #a1a1aa; font-size: 12px; }
+  .sin-macro p { margin: 0 0 6px; }
+  .sin-macro pre { margin: 0; background: #09090b; border-radius: 4px; padding: 6px; color: #93c5fd; font-family: ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+  .aviso { color: #fbbf24; }
   .item.asociada { border-color: #16a34a; }
   .buscar { background: #09090b; border: 1px solid #3f3f46; color: white; padding: 3px 5px; border-radius: 4px; font-size: 11px; }
   .buscar:focus { outline: none; border-color: #60a5fa; }
   .vacio { color: #71717a; font-size: 11px; padding: 4px; }
-  .quitar { color: #a1a1aa; padding: 0 2px; cursor: pointer; font-size: 10px; }
-  .quitar:hover { color: #f87171; }
+
   .nombre { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tipos { display: flex; gap: 2px; flex: none; }
   .tipo { font-size: 8px; padding: 1px 3px; border-radius: 3px; background: #1e3a8a; color: #bfdbfe; }

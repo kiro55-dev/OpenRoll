@@ -30,6 +30,8 @@ export function esImagen(ruta: string, uso: UsoImagen): boolean {
 }
 
 let dirDatos = "";
+/** La carpeta de datos de la partida abierta (vacía en un jugador): sirve para distinguir una partida de otra en lo que se guarda en este equipo. */
+export const carpetaDePartida = () => dirDatos;
 
 /** Llamar UNA vez al arrancar, antes de pintar ningún mapa. */
 export async function iniciarImagenes(): Promise<void> {

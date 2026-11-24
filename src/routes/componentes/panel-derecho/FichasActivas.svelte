@@ -182,6 +182,7 @@
     <button
       type="button"
       class="tarjeta"
+      data-enter-tablero
       class:seleccionado={partida.estaSeleccionada(ficha.id_instancia)}
       class:caida={partida.estaCaida(ficha)}
       class:oculta={ficha.oculto}

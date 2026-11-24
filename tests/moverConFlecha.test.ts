@@ -87,6 +87,15 @@ describe("el Enter es del tablero solo si no es de un campo, un botón o un enla
     expect(enterEsDelTablero({ key: "Enter", repeat: true })).toBe(false);
   });
 
+  it("la tarjeta de una ficha (un botón marcado) deja pasar el Enter, pero un botón dentro de ella no", () => {
+    const tarjeta = {};
+    const sobreTarjeta = { closest: (s: string) => (s.includes("button") || s.includes("data-enter-tablero") ? tarjeta : null) };
+    expect(enterEsDelTablero({ key: "Enter", target: sobreTarjeta })).toBe(true);
+    const ojo = {};
+    const sobreOjo = { closest: (s: string) => (s.includes("data-enter-tablero") ? tarjeta : s.includes("button") ? ojo : null) };
+    expect(enterEsDelTablero({ key: "Enter", target: sobreOjo })).toBe(false);
+  });
+
   it("dentro de un campo de texto, un botón, un enlace, un selector o algo editable, el Enter es suyo", () => {
     for (const s of ["input", "textarea", "select", "button", "a", "contenteditable"]) {
       expect(enterEsDelTablero({ key: "Enter", target: sobre(s) }), s).toBe(false);

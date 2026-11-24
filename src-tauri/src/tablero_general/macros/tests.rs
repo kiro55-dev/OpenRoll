@@ -220,6 +220,20 @@ fn execute_de_una_comparacion_la_ensena_con_su_resultado() {
 }
 
 #[test]
+fn ifnot_aplica_el_cuerpo_cuando_la_condicion_falla() {
+    // Salvación: si NO se supera (1d20 + cont < 14) pierde vida; si se supera, la macro se quita
+    let codigo = "ONTURN\nDO CHANGE @vida -1d4 IFNOT EXECUTE 1d20 + .cont >= 14\nELSE QUIT";
+    let mut p = Prueba { est: partida(), caras: vec![3, 2], chat: vec![] };
+    con_macro(&mut p.est, 1, "Veneno", codigo, 1);
+    correr(&mut p, 1, 1).unwrap(); // 3 + 2 = 5 < 14: no la supera, pierde 1d4 = 2
+    assert_eq!(vida(&p.est, 1), 18);
+    assert_eq!(p.est.asociaciones_macro.len(), 1);
+    p.caras = vec![15];
+    correr(&mut p, 1, 1).unwrap(); // 15 + 2 >= 14: la supera, ELSE QUIT
+    assert!(p.est.asociaciones_macro.is_empty());
+}
+
+#[test]
 fn quit_para_la_macro() {
     let mut p = Prueba { est: partida(), caras: vec![], chat: vec![] };
     con_macro(&mut p.est, 1, "Una vez", "ONCLICK\nEXECUTE 1\nQUIT\nEXECUTE 2", 1);

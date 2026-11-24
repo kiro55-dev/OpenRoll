@@ -6,6 +6,10 @@ otras fichas del tablero. Las escriben el host y los jugadores (⚙ → «Macros
 ya ligado a esa ficha: buscas por nombre, pulsas una para asociársela o creas una nueva; clic derecho sobre una macro de la
 ficha la abre para editarla); cada uno solo puede asociarlas a fichas que controla. Rust la interpreta en el ordenador del host, así que vale lo mismo para todos.
 
+**Crear y editar:** «+ Nueva macro» la crea al momento como «Macro 1», «Macro 2»… y la abre. El nombre se aplica al salir del
+campo (o con Enter). El texto se guarda solo como borrador mientras escribes, así que puedes dejarla a medias y seguir
+después (aunque cierres la ventana o la aplicación); **Guardar** (o Ctrl+S) es lo que aplica el texto a la macro.
+
 ## Cuándo se ejecuta
 
 La primera línea dice cuándo:
@@ -51,6 +55,7 @@ Una línea que empieza por `IF`, `ELSE`, `AND`, `OR` o `TO` sigue la anterior. `
 | `CHANGE @param x` | Con `+` o `-` delante, **suma**: `CHANGE @vida -1d4`. Sin signo, **pone** ese valor: `CHANGE @vida 10`. Solo parámetros con máximo (cambia el valor actual de esa ficha). |
 | `QUIT` | Quita la macro de la ficha y para. |
 | `DO cuerpo IF condición ELSE cuerpo` | Si se cumple, el primer cuerpo; si no, el del `ELSE` (opcional). Sin `IF`, siempre. |
+| `DO cuerpo IFNOT condición ELSE cuerpo` | Al revés: el primer cuerpo es para cuando la condición **no** se cumple (y el `ELSE`, para cuando sí). Se lee mejor con las salvaciones: `DO CHANGE @vida -1d4 IFNOT EXECUTE 1d20 + .con >= 14`. |
 | `SPREAD acción TO condición` | Hace la acción en cada ficha del mapa que cumple la condición (ver abajo). |
 
 Fuera del chat no sale nada: solo lo que va dentro de `EXECUTE`/`EXECUTEP`.
@@ -76,8 +81,11 @@ Envenenado (se asocia con SPREAD y se va solo al superar la salvación):
 
 ```
 ONTURN
-DO CHANGE @vida -1d4 IF EXECUTE 1d20 <= .cont ELSE QUIT
+DO CHANGE @vida -1d4 IFNOT EXECUTE 1d20 + .con >= 14
+ELSE QUIT
 ```
+
+(Si no supera la salvación pierde vida; si la supera, se quita el veneno.)
 
 Ataque en área (cada objetivo con su tirada de ataque y su daño):
 
