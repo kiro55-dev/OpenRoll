@@ -94,7 +94,7 @@ fn vida(est: &EstadoPartida, id: u16) -> i16 {
 }
 
 fn correr(p: &mut Prueba, asoc: u32, inst: u16) -> Result<(), String> {
-    ejecutar(p, asoc, inst, ID_HOST)
+    ejecutar(p, asoc, inst, ID_HOST, &[])
 }
 
 // ---------------- Intérprete ----------------
@@ -306,10 +306,10 @@ fn un_jugador_asocia_sus_macros_a_sus_fichas_y_solo_ejecuta_las_de_pulsar() {
     let b = asociar_macro_en(&state, 1, turno.id, 1).unwrap();
     // Una macro de un personaje solo se asocia a él (ni siquiera el host la pone en otro)
     assert!(asociar_macro_en(&state, ID_HOST, suya.id, 2).unwrap_err().contains("otro personaje"));
-    assert!(ejecutar_macro_en(&state, 2, a, 1).is_err(), "otro jugador no la pulsa");
-    assert!(ejecutar_macro_en(&state, 1, b, 1).unwrap_err().contains("ONCLICK"));
-    assert!(ejecutar_macro_en(&state, 1, a, 2).unwrap_err().contains("no está asociada"));
-    ejecutar_macro_en(&state, 1, a, 1).unwrap();
+    assert!(ejecutar_macro_en(&state, 2, a, 1, vec![]).is_err(), "otro jugador no la pulsa");
+    assert!(ejecutar_macro_en(&state, 1, b, 1, vec![]).unwrap_err().contains("ONCLICK"));
+    assert!(ejecutar_macro_en(&state, 1, a, 2, vec![]).unwrap_err().contains("no está asociada"));
+    ejecutar_macro_en(&state, 1, a, 1, vec![]).unwrap();
     assert_eq!(vida(&state.lock(), 1), 19);
     // Una general (del host) la puede poner cualquiera en sus fichas: la ve, pero sin código
     asociar_macro_en(&state, 1, del_host.id, 1).unwrap();
@@ -353,7 +353,7 @@ fn por_la_red_un_jugador_solo_toca_lo_suyo_y_su_executep_solo_lo_ve_el_y_el_host
     drop(est);
 
     let a = asociar_macro_en(&state, 1, suya.id, 1).unwrap();
-    ejecutar_macro_en(&state, 1, a, 1).unwrap();
+    ejecutar_macro_en(&state, 1, a, 1, vec![]).unwrap();
     let est = state.lock();
     let privada = |j| vista_para(j, &est).historial_tiradas.iter().any(|t| t.comando.starts_with("Secreto:") && !t.publica);
     assert!(privada(1), "quien la tira la ve");
@@ -414,7 +414,7 @@ fn una_macro_es_del_conjunto_activo_y_solo_vale_con_el() {
 
     // Con Pathfinder en uso, la macro del otro conjunto ni se ve ni se ejecuta (pero sigue ahí)
     usar_conjunto_en(pf, &state).unwrap();
-    assert!(ejecutar_macro_en(&state, ID_HOST, a, 1).unwrap_err().contains("otro conjunto"));
+    assert!(ejecutar_macro_en(&state, ID_HOST, a, 1, vec![]).unwrap_err().contains("otro conjunto"));
     assert!(asociar_macro_en(&state, ID_HOST, m.id, 2).is_err());
     {
         let est = state.lock();
@@ -426,7 +426,7 @@ fn una_macro_es_del_conjunto_activo_y_solo_vale_con_el() {
 
     // Al volver, vuelve a funcionar; y borrar Pathfinder se lleva sus macros
     usar_conjunto_en(base, &state).unwrap();
-    ejecutar_macro_en(&state, ID_HOST, a, 1).unwrap();
+    ejecutar_macro_en(&state, ID_HOST, a, 1, vec![]).unwrap();
     borrar_conjunto_en(pf, &state).unwrap();
     assert!(!state.lock().macros.iter().any(|x| x.conjunto == Some(pf)));
 }
@@ -591,4 +591,56 @@ fn importar_generales_y_propias_las_asocia_y_un_jugador_no_crea_generales() {
     let id = est.macros.iter().find(|m| m.nombre == "Suelta").unwrap();
     assert!(id.es_general());
     assert!(!est.asociaciones_macro.iter().any(|a| a.id_macro == id.id), "existe en el conjunto pero no está puesta");
+}
+
+// ---------------- Textos y AREA ----------------
+
+#[test]
+fn se_comparan_textos_con_el_nombre_el_tipo_y_parametros_de_texto() {
+    let mut p = Prueba { est: partida(), caras: vec![], chat: vec![] };
+    // Solo a quien no se llama «Lejano» y es Enemigo (todas lo son): el goblin
+    con_macro(&mut p.est, 1, "Filtro", "ONCLICK\nSPREAD CHANGE ENTITIES@vida -5 TO ENTITIES@nombre != \"lejano\" AND ENTITIES@tipo = \" Enemigo \"", 1);
+    correr(&mut p, 1, 1).unwrap();
+    assert_eq!((vida(&p.est, 2), vida(&p.est, 3)), (15, 20), "sin distinguir mayúsculas ni espacios de los extremos");
+    // Con EXECUTE sale en el chat con su resultado
+    con_macro(&mut p.est, 2, "Quien", "ONCLICK\nDO QUIT IF EXECUTE @nombre = \"Mago\"", 1);
+    correr(&mut p, 2, 1).unwrap();
+    assert_eq!(p.chat.last().unwrap().0, "Quien: nombre (Mago) = \"Mago\"");
+    // Un parámetro numérico no se compara con un texto
+    con_macro(&mut p.est, 3, "Mal", "ONCLICK\nDO QUIT IF @vida = \"20\"", 1);
+    assert!(correr(&mut p, 3, 1).unwrap_err().contains("número"));
+}
+
+#[test]
+fn un_area_se_aplica_alrededor_del_centro_que_se_apunta() {
+    // Rombo de 2 a izquierda y derecha y 0 arriba y abajo, centrado en (8,5): casillas 6..10 de la fila 5
+    let codigo = "ONCLICK\nSPREAD CHANGE ENTITIES@vida -3 TO ENTITIES IN AREA:rombo(2, 0)";
+    let mut p = Prueba { est: partida(), caras: vec![], chat: vec![] };
+    con_macro(&mut p.est, 1, "Explosion", codigo, 1);
+    // Sin centro, no se puede
+    assert!(correr(&mut p, 1, 1).unwrap_err().contains("Apunta"));
+    ejecutar(&mut p, 1, 1, ID_HOST, &[Casilla { x: 8, y: 5 }]).unwrap();
+    // El goblin (6,5) y el lejano (9,5) caen dentro; el oculto (5,6) no cuenta nunca
+    assert_eq!((vida(&p.est, 2), vida(&p.est, 3), vida(&p.est, 4)), (17, 17, 20));
+
+    // Lo que necesita el front para la vista previa: la forma y los lados [arriba, derecha, abajo, izquierda]
+    let areas = super::interprete::areas_de(&p.est, 1, 1).unwrap();
+    assert_eq!(areas, vec![super::interprete::AreaResuelta { forma: crate::tablero_general::tablero::FormaZona::Rombo, lados: [0, 2, 0, 2] }]);
+    // Con variables y parámetros de la ficha (fue de 14 es +2; vida 20): 4 lados
+    con_macro(&mut p.est, 2, "Cuatro", "ONCLICK\nSPREAD EXECUTE 1 TO ENTITIES IN AREA:cuadrado(.fue, 1, @vida - 19, 200)", 1);
+    let areas = super::interprete::areas_de(&p.est, 2, 1).unwrap();
+    assert_eq!(areas[0].lados, [2, 1, 1, 100], "cada lado como mucho 100");
+}
+
+#[test]
+fn preparar_dice_que_areas_apuntar_y_ejecutar_usa_los_centros() {
+    let state = estado_real("macros_area_real");
+    let m = guardar_macro_en(&state, ID_HOST, de_ficha("Bola", "ONCLICK\nSPREAD CHANGE ENTITIES@vida -1 TO ENTITIES IN AREA:circulo(1)", 1)).unwrap();
+    let a = state.lock().asociaciones_macro.iter().find(|x| x.id_macro == m.id).unwrap().id;
+    let areas = preparar_macro_en(&state, 1, a, 1).unwrap();
+    assert_eq!(areas.len(), 1);
+    assert!(preparar_macro_en(&state, 2, a, 1).is_err(), "otro jugador no");
+    ejecutar_macro_en(&state, 1, a, 1, vec![Casilla { x: 6, y: 5 }]).unwrap();
+    assert_eq!(vida(&state.lock(), 2), 19);
+    assert!(ejecutar_macro_en(&state, 1, a, 1, vec![Casilla { x: 60_000, y: 5 }]).is_err(), "fuera de rango");
 }

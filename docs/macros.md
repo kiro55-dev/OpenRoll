@@ -49,9 +49,15 @@ Un argumento es una suma (o resta) de términos; se pueden agrupar con paréntes
 Un atributo solo vale si la propia macro lo guarda con `SAVE` (si lees `dano` y guardas `daño`, el editor lo marca como error).
 
 Los nombres van **juntos, sin espacios**: «Rango arma» se escribe `@rangoarma` (da igual mayúsculas). Las palabras en
-mayúsculas de esta página están reservadas: no valen como nombre de atributo.
+mayúsculas de esta página solo están reservadas DENTRO de una macro y solo para los nombres de atributo (son palabras
+sueltas, sin `@` ni `.`): una variable o un parámetro se pueden llamar `turn` o `area` sin problema, y fuera de las macros
+no reservan nada.
 
 ## Condiciones
+
+Para comparar textos: `@parámetro = "texto"` o `!=` (solo esos dos), sin distinguir mayúsculas. `@x` es un parámetro visual
+de texto o, si no hay ninguno con ese nombre, `@nombre` (el de la ficha) o `@tipo` (Enemigo, NPC, Jugador, Objeto). En un
+SPREAD también `ENTITIES@nombre != "Mago"`.
 
 `argumento comparación argumento`, con `<`, `<=`, `=`, `!=`, `>=`, `>` (y `vs` como `<=`), unidas con `AND` y `OR`
 (`AND` va primero; usa paréntesis para cambiarlo). Con `EXECUTE` (o `EXECUTEP`) delante, la comparación sale en el chat
@@ -83,6 +89,14 @@ se puede mirar a cada una:
 - `ENTITIES@armadura`, `ENTITIES.fue`: su parámetro o su variable.
 - `ENTITIES IN @rangoarma`: que alguna de sus casillas caiga en la zona que dibuja ese parámetro de TU ficha (cuadrado,
   rombo o círculo).
+- `ENTITIES IN AREA:forma(lados)`: que alguna de sus casillas caiga en un área que **apuntas con el ratón**. Al pulsar el
+  botón de la macro, el tablero enseña la forma bajo el puntero (con tu color de flecha); un clic fija su centro (si la
+  macro tiene varias `AREA`, una detrás de otra) y entonces se ejecuta. Esc o el clic derecho la cancelan sin hacer nada.
+  - Formas: `rombo`, `circulo`, `cuadrado`.
+  - Lados, en casillas desde la casilla del puntero: `(a)` todos; `(a, b)` `a` a izquierda y derecha y `b` arriba y abajo;
+    `(a, b, c, d)` arriba, derecha, abajo e izquierda (como en CSS).
+  - Los lados solo pueden ser números, `.variables` y `@parámetros` de tu ficha (se calculan antes de apuntar).
+  - Solo en macros `ONCLICK` (en un turno no hay nadie que apunte) y con el mapa de la ficha abierto.
 - `DISTANCE`: casillas entre tu ficha y la suya (pegadas = 1, también en diagonal).
 
 La acción puede ser `EXECUTE x` / `EXECUTEP x`, `CHANGE ENTITIES@param x`, un bloque `[ … ]` con varias sentencias (se hacen
@@ -126,6 +140,14 @@ Daño que baja con la distancia (`DISTANCE` sirve para esto, donde `IN` solo dic
 ```
 ONCLICK
 SPREAD CHANGE ENTITIES@vida -(4d6 - DISTANCE) TO DISTANCE <= 5
+```
+
+Bola de fuego apuntada con el ratón (un círculo de 3 casillas que eliges dónde cae):
+
+```
+ONCLICK
+SAVE dano 8d6
+SPREAD CHANGE ENTITIES@vida -dano TO ENTITIES IN AREA:circulo(3) AND ENTITIES@tipo != "Jugador"
 ```
 
 Bola de fuego (el mismo daño para todos los que no superen la salvación):

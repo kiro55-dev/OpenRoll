@@ -7,13 +7,13 @@
 //
 // Topes: pasos, dados y objetivos de un SPREAD, para que ninguna macro (tampoco la de un jugador) pueda colgar al host.
 
-use super::sintaxis::{leer, Condicion, Expr, Sentencia, Sujeto};
+use super::sintaxis::{leer, AreaMacro, Condicion, Expr, Sentencia, Sujeto, Zona};
 use crate::tablero_general::dados::{self, Tirada};
 use crate::tablero_general::escalas::{self, Valoracion};
 use crate::tablero_general::estado::{DeltaPartida, EstadoPartida};
 use crate::tablero_general::instancias;
 use crate::tablero_general::modelos::{
-    AsociacionMacro, Coordenada, DestinoMacro, Forma, IdJugador, Instancia, ValorParametro, ID_HOST,
+    AsociacionMacro, Casilla, Coordenada, DestinoMacro, Forma, IdJugador, Instancia, ValorParametro, ID_HOST,
 };
 use crate::tablero_general::tablero::{self, FormaZona};
 use crate::tablero_general::variables;
@@ -65,6 +65,52 @@ struct Ejecucion {
     parar: bool,
     /// Los atributos de `SAVE`: valen solo durante esta ejecución (no se guardan en la partida ni pasan a la siguiente).
     atributos: Vec<(String, i32)>,
+    /// Los `AREA` de la macro y el centro que eligió el usuario para cada uno (en el mismo orden).
+    areas: Vec<AreaMacro>,
+    centros: Vec<Casilla>,
+    /// Los lados ya calculados de cada `AREA` (se calculan una vez).
+    lados_areas: Vec<Option<[i32; 4]>>,
+}
+
+/// Tope de cada lado de un `AREA`, en casillas.
+pub const MAX_LADO_AREA: i64 = 100;
+
+/// Un `AREA` de una macro, ya calculado con la ficha: su forma y sus lados `[arriba, derecha, abajo, izquierda]`. Es lo que necesita
+/// el front para enseñar la vista previa bajo el ratón antes de ejecutar.
+#[derive(serde::Serialize, Clone, Debug, PartialEq)]
+pub struct AreaResuelta {
+    pub forma: FormaZona,
+    pub lados: [i32; 4],
+}
+
+/// Un mundo que solo deja leer (para calcular los lados de las áreas antes de ejecutar): no tira dados ni cambia nada.
+struct SoloLectura<'a>(&'a EstadoPartida);
+
+impl Mundo for SoloLectura<'_> {
+    fn estado(&self) -> &EstadoPartida {
+        self.0
+    }
+    fn aplicar(&mut self, _delta: DeltaPartida) {}
+    fn tirar(&mut self, _caras: i32) -> i32 {
+        1
+    }
+    fn chat(&mut self, _: IdJugador, _: &str, _: i32, _: bool, _: Option<&Valoracion>, _: bool) {}
+}
+
+/// Las áreas que hay que apuntar antes de ejecutar la macro de esa asociación sobre esa instancia, con sus lados ya calculados.
+pub fn areas_de(est: &EstadoPartida, id_asociacion: u32, id_instancia: u16) -> Result<Vec<AreaResuelta>, String> {
+    let asoc = est.asociaciones_macro.iter().find(|a| a.id == id_asociacion).ok_or("Esa macro ya no está asociada")?;
+    let mac = est.macros.iter().find(|m| m.id == asoc.id_macro).ok_or("Esa macro ya no existe")?;
+    let programa = leer(&mac.codigo).map_err(|e| e.to_string())?;
+    if programa.areas.is_empty() {
+        return Ok(Vec::new());
+    }
+    instancia(est, id_instancia)?;
+    let mut ej = Ejecucion::nueva(id_asociacion, asoc.autor, ID_HOST, limpio(&mac.nombre), id_instancia, programa.areas, Vec::new());
+    let mut mundo = SoloLectura(est);
+    (0..ej.areas.len())
+        .map(|i| Ok(AreaResuelta { forma: ej.areas[i].forma, lados: ej.lados_area(&mut mundo, i)? }))
+        .collect()
 }
 
 /// Quita del texto lo que pudiera pasar por una etiqueta en el desglose (el chat lo escapa igual).
@@ -112,6 +158,26 @@ fn valor_variable(est: &EstadoPartida, inst: &Instancia, nombre: &str) -> Result
     Ok((etiqueta.clone(), variables::resultado(&est.definiciones_variables, &inst.base.parametros, &inst.base.variables, def)))
 }
 
+/// El texto de `@nombre` en la ficha `inst` (su etiqueta y su valor): un parámetro visual de texto o, si no hay ningún parámetro con ese
+/// nombre, los campos fijos `@nombre` (el de la ficha) y `@tipo` (Enemigo, NPC, Jugador, Objeto).
+fn valor_texto(est: &EstadoPartida, inst: &Instancia, nombre: &str) -> Result<(String, String), String> {
+    if let Ok(def) = definicion_parametro(est, nombre) {
+        if !matches!(def.valor_por_defecto, ValorParametro::Texto(_)) {
+            return Err(format!("«{}» es un número: se compara con números, no con un texto", def.clave));
+        }
+        let valor = inst.base.parametros.iter().find(|p| p.id_definicion == def.id).and_then(|p| match &p.valor {
+            ValorParametro::Texto(t) => Some(t.clone()),
+            ValorParametro::Numero(_) => None,
+        });
+        return Ok((def.clave.clone(), valor.unwrap_or_default()));
+    }
+    match sin_espacios(nombre).as_str() {
+        "nombre" => Ok(("nombre".into(), inst.base.nombre.clone())),
+        "tipo" => Ok(("tipo".into(), format!("{:?}", inst.base.tipo))),
+        _ => Err(format!("«@{nombre}» no es un parámetro de texto (ni @nombre ni @tipo)")),
+    }
+}
+
 fn valor_parametro(est: &EstadoPartida, inst: &Instancia, nombre: &str, max: bool) -> Result<(String, i32), String> {
     let def = definicion_parametro(est, nombre)?;
     dados::valor_de_parametro(est, inst, &format!("{}{}", def.clave, if max { ".max" } else { "" }))
@@ -119,7 +185,7 @@ fn valor_parametro(est: &EstadoPartida, inst: &Instancia, nombre: &str, max: boo
 
 /// Ejecuta la asociación `id_asociacion` sobre la instancia `id_instancia`. `quien` es quien sale en el chat. Un error para la macro y
 /// sale en el chat (en privado: solo lo ven el host y `quien`); lo ya hecho se queda.
-pub fn ejecutar(mundo: &mut dyn Mundo, id_asociacion: u32, id_instancia: u16, quien: IdJugador) -> Result<(), String> {
+pub fn ejecutar(mundo: &mut dyn Mundo, id_asociacion: u32, id_instancia: u16, quien: IdJugador, centros: &[Casilla]) -> Result<(), String> {
     let est = mundo.estado();
     let asoc: AsociacionMacro =
         est.asociaciones_macro.iter().find(|a| a.id == id_asociacion).cloned().ok_or("Esa macro ya no está asociada")?;
@@ -127,7 +193,7 @@ pub fn ejecutar(mundo: &mut dyn Mundo, id_asociacion: u32, id_instancia: u16, qu
     let nombre = limpio(&mac.nombre);
     instancia(est, id_instancia)?;
     let programa = leer(&mac.codigo).map_err(|e| format!("{nombre}: {e}"))?;
-    let mut ej = Ejecucion { id_asociacion, autoridad: asoc.autor, quien, nombre, propia: id_instancia, pasos: 0, dados: 0, parar: false, atributos: Vec::new() };
+    let mut ej = Ejecucion::nueva(id_asociacion, asoc.autor, quien, nombre, id_instancia, programa.areas.clone(), centros.to_vec());
     match ej.bloque(mundo, &programa.cuerpo, None) {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -138,6 +204,34 @@ pub fn ejecutar(mundo: &mut dyn Mundo, id_asociacion: u32, id_instancia: u16, qu
 }
 
 impl Ejecucion {
+    fn nueva(id_asociacion: u32, autoridad: IdJugador, quien: IdJugador, nombre: String, propia: u16, areas: Vec<AreaMacro>, centros: Vec<Casilla>) -> Self {
+        let lados_areas = vec![None; areas.len()];
+        Ejecucion { id_asociacion, autoridad, quien, nombre, propia, pasos: 0, dados: 0, parar: false, atributos: Vec::new(), areas, centros, lados_areas }
+    }
+
+    /// Los lados `[arriba, derecha, abajo, izquierda]` del `AREA` número `i` con los valores de la ficha de la macro: 1 lado = todos;
+    /// 2 = horizontal (izquierda y derecha) y vertical (arriba y abajo); 4 = arriba, derecha, abajo, izquierda (como CSS).
+    fn lados_area(&mut self, m: &mut dyn Mundo, i: usize) -> Result<[i32; 4], String> {
+        if let Some(Some(l)) = self.lados_areas.get(i) {
+            return Ok(*l);
+        }
+        let exprs = self.areas.get(i).ok_or("Esa área no existe")?.lados.clone();
+        let mut v = Vec::with_capacity(exprs.len());
+        for e in &exprs {
+            v.push(self.evaluar(m, e, None)?.total.clamp(0, MAX_LADO_AREA) as i32);
+        }
+        let lados = match v.as_slice() {
+            [a] => [*a; 4],
+            [h, vert] => [*vert, *h, *vert, *h],
+            [arriba, derecha, abajo, izquierda] => [*arriba, *derecha, *abajo, *izquierda],
+            _ => return Err("Un AREA lleva 1, 2 o 4 lados".into()),
+        };
+        if let Some(hueco) = self.lados_areas.get_mut(i) {
+            *hueco = Some(lados);
+        }
+        Ok(lados)
+    }
+
     fn paso(&mut self) -> Result<(), String> {
         self.pasos += 1;
         if self.pasos > MAX_PASOS {
@@ -304,7 +398,42 @@ impl Ejecucion {
         match c {
             Condicion::Y(a, b) => Ok(self.condicion(m, a, candidata)? && self.condicion(m, b, candidata)?),
             Condicion::O(a, b) => Ok(self.condicion(m, a, candidata)? || self.condicion(m, b, candidata)?),
-            Condicion::Dentro { param } => {
+            Condicion::Dentro { zona: Zona::Area(i) } => {
+                let cand = candidata.ok_or("ENTITIES IN solo vale dentro de un SPREAD")?;
+                let lados = self.lados_area(m, *i)?;
+                let centro = *self.centros.get(*i).ok_or("Apunta el área en el tablero (pulsa el botón de la macro y elige dónde)")?;
+                let forma = self.areas[*i].forma;
+                let est = m.estado();
+                let otra = instancia(est, cand)?;
+                let Some(b) = casilla(otra) else { return Ok(false) };
+                Ok(tablero::cuerpo_en_caja(forma, tablero::extremos_area(centro, lados), b, tablero::lados_instancia(otra)))
+            }
+            Condicion::CompararTexto { de, param, distinto, texto, mostrar } => {
+                let id = match de {
+                    Sujeto::Propia => self.propia,
+                    Sujeto::Candidata => candidata.ok_or("ENTITIES solo vale dentro de un SPREAD")?,
+                };
+                let (etiqueta, valor) = {
+                    let est = m.estado();
+                    valor_texto(est, instancia(est, id)?, param)?
+                };
+                let iguales = valor.trim().to_lowercase() == texto.trim().to_lowercase();
+                let acierta = iguales != *distinto;
+                if let Some(privada) = mostrar {
+                    let v = Valoracion { nombre: if acierta { "Éxito" } else { "Fallo" }.into(), acierta, especial: false };
+                    let texto_chat = format!(
+                        "{}{} ({}) {} \"{}\"",
+                        self.prefijo(m, candidata),
+                        limpio(&etiqueta),
+                        limpio(&valor),
+                        if *distinto { "!=" } else { "=" },
+                        limpio(texto)
+                    );
+                    m.chat(self.quien, &texto_chat, 0, !privada, Some(&v), false);
+                }
+                Ok(acierta)
+            }
+            Condicion::Dentro { zona: Zona::Parametro(param) } => {
                 let cand = candidata.ok_or("ENTITIES IN solo vale dentro de un SPREAD")?;
                 let est = m.estado();
                 let propia = instancia(est, self.propia)?;

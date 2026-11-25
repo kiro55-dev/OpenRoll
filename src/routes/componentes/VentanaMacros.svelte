@@ -352,7 +352,8 @@
     <div class="texto">
       <p><b>Cabecera</b> (primera línea): <code>ONCLICK</code> (botón), <code>ONTURN</code> (sola al llegarle el turno en batalla) o las dos.</p>
       <p><b>Argumentos</b>: números, dados (<code>2d6</code>, <code>1d20adv</code>), <code>.variable</code>, <code>@parámetro</code> (<code>@vida.max</code> el máximo), un atributo guardado con SAVE, <code>TURN</code> (la vuelta), con <code>+ - ( )</code>. Los nombres van juntos: <code>@rangoarma</code>.</p>
-      <p><b>Condiciones</b>: <code>&lt; &lt;= = != &gt;= &gt;</code> con <code>AND</code> / <code>OR</code>; con <code>EXECUTE</code> delante sale en el chat.</p>
+      <p><b>Condiciones</b>: <code>&lt; &lt;= = != &gt;= &gt;</code> con <code>AND</code> / <code>OR</code>; con <code>EXECUTE</code> delante sale en el chat. Textos: <code>@nombre = "Mago"</code>, <code>@tipo != "Jugador"</code>.</p>
+      <p><b>Área con el ratón</b>: <code>ENTITIES IN AREA:rombo(3)</code>, <code>circulo(a, b)</code> (horizontal, vertical) o <code>cuadrado(arriba, derecha, abajo, izquierda)</code>. Al pulsar la macro eliges dónde con un clic; Esc cancela.</p>
       <p><b>Sentencias</b> (una por línea, o <code>[ … ]</code> para varias):</p>
       <ul>
         <li><code>EXECUTE x</code> / <code>EXECUTEP x</code>: al chat (pública / privada).</li>

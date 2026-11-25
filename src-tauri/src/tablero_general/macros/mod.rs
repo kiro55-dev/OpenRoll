@@ -20,7 +20,7 @@ use crate::tablero_general::almacen::Almacen;
 use crate::tablero_general::escalas::Valoracion;
 use crate::tablero_general::estado::{DeltaPartida, EstadoPartida};
 use crate::tablero_general::jugadores::{controla_entidad, controla_instancia};
-use crate::tablero_general::modelos::{AsociacionMacro, DestinoMacro, IdJugador, Macro, MacroConjunto, MacroFicha, ID_HOST};
+use crate::tablero_general::modelos::{AsociacionMacro, Casilla, DestinoMacro, IdJugador, Macro, MacroConjunto, MacroFicha, ID_HOST};
 use crate::tablero_general::partida::{registrar, registrar_tirada_en, AppState};
 use interprete::{Mundo, MAX_ASOCIACIONES_POR_DESTINO};
 
@@ -126,10 +126,10 @@ impl Mundo for MundoPartida<'_> {
 }
 
 /// Ejecuta una asociación con el estado ya bloqueado, marcando que hay una macro en curso (lo que cambie no dispara las de turno).
-fn ejecutar_con_lock(est: &mut EstadoPartida, almacen: &Almacen, id_asociacion: u32, id_instancia: u16, quien: IdJugador) -> Result<(), String> {
+fn ejecutar_con_lock(est: &mut EstadoPartida, almacen: &Almacen, id_asociacion: u32, id_instancia: u16, quien: IdJugador, centros: &[Casilla]) -> Result<(), String> {
     let antes = est.macros_en_curso;
     est.macros_en_curso = true;
-    let r = interprete::ejecutar(&mut MundoPartida { est, almacen }, id_asociacion, id_instancia, quien);
+    let r = interprete::ejecutar(&mut MundoPartida { est, almacen }, id_asociacion, id_instancia, quien, centros);
     est.macros_en_curso = antes;
     r
 }
@@ -176,7 +176,7 @@ pub fn tras_cambio_de_turno(est: &mut EstadoPartida, almacen: &Almacen, antes: &
             .collect();
         for (asoc, autor) in tareas {
             // Un error ya sale en el chat; las demás siguen
-            let _ = ejecutar_con_lock(est, almacen, asoc, id, autor);
+            let _ = ejecutar_con_lock(est, almacen, asoc, id, autor, &[]);
         }
     }
 }
@@ -393,14 +393,41 @@ pub fn desasociar_macro_en(state: &AppState, jugador: IdJugador, id_asociacion: 
     Ok(())
 }
 
+/// Centros de `AREA` que admite una ejecución, y hasta dónde puede llegar cada coordenada.
+pub const MAX_CENTROS: usize = 16;
+pub const MAX_COORDENADA: u16 = 10_000;
+
+/// Antes de ejecutar una macro ONCLICK: los `AREA` que hay que apuntar en el tablero (vacío si no tiene ninguno), con sus lados ya
+/// calculados con la ficha, para la vista previa. Los mismos permisos que ejecutarla.
 #[tauri::command]
-pub fn ejecutar_macro(id_asociacion: u32, id_instancia: u16, state: State<'_, AppState>) -> Result<(), String> {
-    ejecutar_macro_en(&state, ID_HOST, id_asociacion, id_instancia)
+pub fn preparar_macro(id_asociacion: u32, id_instancia: u16, state: State<'_, AppState>) -> Result<Vec<interprete::AreaResuelta>, String> {
+    preparar_macro_en(&state, ID_HOST, id_asociacion, id_instancia)
 }
 
-/// El botón de una macro ONCLICK en la caja «Parámetros»: solo sobre una instancia que controla y a la que está asociada.
-pub fn ejecutar_macro_en(state: &AppState, jugador: IdJugador, id_asociacion: u32, id_instancia: u16) -> Result<(), String> {
+pub fn preparar_macro_en(state: &AppState, jugador: IdJugador, id_asociacion: u32, id_instancia: u16) -> Result<Vec<interprete::AreaResuelta>, String> {
+    let est = state.lock();
+    comprobar_ejecutable(&est, jugador, id_asociacion, id_instancia)?;
+    interprete::areas_de(&est, id_asociacion, id_instancia)
+}
+
+#[tauri::command]
+pub fn ejecutar_macro(id_asociacion: u32, id_instancia: u16, centros: Option<Vec<Casilla>>, state: State<'_, AppState>) -> Result<(), String> {
+    ejecutar_macro_en(&state, ID_HOST, id_asociacion, id_instancia, centros.unwrap_or_default())
+}
+
+/// El botón de una macro ONCLICK en la caja «Parámetros»: solo sobre una instancia que controla y a la que está asociada. `centros`: dónde
+/// apuntó el usuario cada `AREA` de la macro, en orden.
+pub fn ejecutar_macro_en(state: &AppState, jugador: IdJugador, id_asociacion: u32, id_instancia: u16, centros: Vec<Casilla>) -> Result<(), String> {
+    if centros.len() > MAX_CENTROS || centros.iter().any(|c| c.x > MAX_COORDENADA || c.y > MAX_COORDENADA) {
+        return Err("Demasiadas áreas, o fuera del tablero".into());
+    }
     let mut est = state.lock();
+    comprobar_ejecutable(&est, jugador, id_asociacion, id_instancia)?;
+    ejecutar_con_lock(&mut est, &state.almacen, id_asociacion, id_instancia, jugador, &centros)
+}
+
+/// ¿Puede `jugador` ejecutar con el botón la asociación sobre esa instancia? (que la controle, que esté asociada a ella, ONCLICK y activa)
+fn comprobar_ejecutable(est: &EstadoPartida, jugador: IdJugador, id_asociacion: u32, id_instancia: u16) -> Result<(), String> {
     let a = est.asociaciones_macro.iter().find(|a| a.id == id_asociacion).ok_or("Esa macro ya no está asociada")?;
     let inst = est.instancias_activas.iter().find(|i| i.id_instancia == id_instancia).ok_or("Esa ficha ya no está activa")?;
     let suya = match a.destino {
@@ -414,13 +441,13 @@ pub fn ejecutar_macro_en(state: &AppState, jugador: IdJugador, id_asociacion: u3
         return Err("Solo puedes usar las macros de tus fichas".into());
     }
     let m = est.macros.iter().find(|m| m.id == a.id_macro).ok_or("Esa macro ya no existe")?;
-    if !activa(&est, m) {
+    if !activa(est, m) {
         return Err("Esa macro es de otro conjunto de parámetros".into());
     }
     if !m.al_pulsar {
         return Err("Esta macro no es ONCLICK: va sola con el turno".into());
     }
-    ejecutar_con_lock(&mut est, &state.almacen, id_asociacion, id_instancia, jugador)
+    Ok(())
 }
 
 /// Asocia una macro a una ficha (con el estado ya bloqueado, sin repetir). Devuelve si quedó asociada.

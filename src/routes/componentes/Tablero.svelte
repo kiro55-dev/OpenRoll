@@ -18,6 +18,9 @@
     fichasDelMapa, fichaEnPunto, fichasEnRectangulo, imagenDe, dibujarFicha, dibujarDestino, dibujarFormas, rectanguloFicha
   } from '$lib/fichasTablero';
   import { dibujarPing, dibujarRecorrido, pingVivo } from '$lib/marcasTablero';
+  import { apuntarArea } from '$lib/apuntarArea.svelte';
+  import { dibujarZona } from '$lib/fichasTablero';
+  import { extremosArea } from '$lib/tablero';
   import { ajustesVista } from '$lib/ajustesVista.svelte';
   import { RecorridosAjenos } from '$lib/recorridosAjenos';
   import { destinoDeLaFlecha, enterEsDelTablero } from '$lib/moverConFlecha';
@@ -240,6 +243,19 @@
   //  * derecho: arrastrar mide un recorrido por casillas; sobre una ficha sin arrastrar, la gira.
   /** @param {PointerEvent} e */
   function alPresionar(e) {
+    // Apuntando el AREA de una macro: el clic izquierdo fija su centro y el derecho cancela la macro (nada más se hace con el ratón)
+    if (apuntarArea.actual) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.button === 0) {
+        const q = puntoDelMapa(e);
+        const c = casillaEn(casillas, q.x, q.y);
+        if (c) apuntarArea.confirmar(c);
+      } else if (e.button === 2) {
+        apuntarArea.cancelar();
+      }
+      return;
+    }
     const p = puntoDelMapa(e);
     const casillaPulsada = casillaEn(casillas, p.x, p.y);
     // Por el rectángulo de la ficha y no por la casilla: una que quedó fuera del mapa (tras agrandar la
@@ -300,6 +316,11 @@
 
   /** @param {PointerEvent} e */
   function alMover(e) {
+    if (apuntarArea.actual) {
+      const q = puntoDelMapa(e);
+      apuntarArea.puntero = casillaEn(casillas, q.x, q.y);
+      return;
+    }
     if (recuadro) {
       recuadro = { ...recuadro, hasta: puntoDelMapa(e) };
       return;
@@ -760,9 +781,16 @@
 
   // Depende de la cámara, del tamaño del tablero, de las casillas y del recorrido.
   $effect(() => {
-    void [cam, ancho, alto, dpr, casillas, recorrido, versionAjenos, ajustesVista.colorFlecha, recuadro];
+    void [cam, ancho, alto, dpr, casillas, recorrido, versionAjenos, ajustesVista.colorFlecha, recuadro, apuntarArea.actual, apuntarArea.puntero];
     marcasPendientes = true;
     programar();
+  });
+
+  // Si se cambia de mapa mientras se apunta un AREA, la macro se cancela (el área es del mapa de la ficha)
+  $effect(() => {
+    const a = apuntarArea.actual;
+    const id = idMapa();
+    if (a && a.idMapa !== id) untrack(() => apuntarArea.cancelar());
   });
 
   function pintarMarcas() {
@@ -771,6 +799,17 @@
     for (const f of recorridosAjenos.lista()) dibujarRecorrido(ctx, cam, casillas, f.casillas, f.color);
     dibujarRecorrido(ctx, cam, casillas, recorrido, ajustesVista.colorFlecha);
     if (recuadro) dibujarRecuadro(ctx, recuadro.desde, recuadro.hasta);
+    // El AREA de una macro que se está apuntando: las ya fijadas, tenues; la que toca, bajo el puntero (con mi color de flecha)
+    const apuntado = apuntarArea.actual;
+    if (apuntado) {
+      const color = [...ajustesVista.colorFlecha, 255];
+      apuntado.centros.forEach((c, i) => {
+        const a = apuntado.areas[i];
+        if (a) dibujarZona(ctx, cam, casillas, a.forma, extremosArea(c, a.lados), color, 0.12);
+      });
+      const actual = apuntarArea.areaActual;
+      if (actual && apuntarArea.puntero) dibujarZona(ctx, cam, casillas, actual.forma, extremosArea(apuntarArea.puntero, actual.lados), color, 0.28);
+    }
 
     const ahora = performance.now();
     for (let i = pings.length - 1; i >= 0; i--) {
@@ -960,11 +999,19 @@
   });
 </script>
 
-<svelte:window onkeydown={alPulsarEnter} />
+<svelte:window onkeydown={alPulsarEnter} onkeydowncapture={(e) => {
+  // Esc mientras se apunta el AREA de una macro: se cancela la macro (y nada más: no cierra ventanas)
+  if (apuntarArea.actual && e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    apuntarArea.cancelar();
+  }
+}} />
 
 <div
   class="tablero"
   class:arrastrando={panActivo}
+  class:apuntando={!!apuntarArea.actual}
   bind:this={contenedor}
   data-destino="tablero"
   data-conserva-foco
@@ -983,6 +1030,11 @@
   <canvas bind:this={canvasRejilla}></canvas>
   <canvas bind:this={canvasFichas}></canvas>
   <canvas bind:this={canvasMarcas}></canvas>
+  {#if apuntarArea.actual}
+    <div class="aviso-apuntar">
+      Elige dónde va el área{apuntarArea.actual.areas.length > 1 ? ` ${apuntarArea.actual.centros.length + 1} de ${apuntarArea.actual.areas.length}` : ''} (clic) · Esc o clic derecho para cancelar
+    </div>
+  {/if}
   {#if !hayMapa}
     <div class="sin-mapa">Crea un mapa</div>
   {:else if conversionImagen.convierte(mapa.id)}
@@ -1001,6 +1053,11 @@
     touch-action: none;
   }
   .sin-mapa.convirtiendo { color: #a1a1aa; font-size: 20px; background: rgba(18, 18, 18, 0.6); }
+  .tablero.apuntando { cursor: crosshair; }
+  .aviso-apuntar {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%); pointer-events: none;
+    background: rgba(9, 9, 11, 0.85); border: 1px solid #3f3f46; border-radius: 6px; padding: 4px 10px; color: #e4e4e7; font-size: 12px;
+  }
   /* Sin mapa: un mensaje gris centrado de fondo (no recoge el ratón) */
   .sin-mapa {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;

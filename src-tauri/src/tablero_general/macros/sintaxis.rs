@@ -8,6 +8,7 @@
 //  * un término nuevo de los argumentos (como `TURN`): su variante en `Expr`, su caso en `Parser::termino` y en el intérprete.
 
 use super::lexico::{reservada, trocear, Clave, Comparacion, ErrorMacro, Pieza, Tok};
+use crate::tablero_general::tablero::FormaZona;
 
 /// Largo máximo del código de una macro, en caracteres, y de sus líneas.
 pub const MAX_CARACTERES: usize = 2000;
@@ -61,8 +62,10 @@ impl Expr {
 pub enum Condicion {
     /// `mostrar`: la comparación sale en el chat (`EXECUTE` = pública, `EXECUTEP` = privada: `Some(true)`).
     Comparar { izq: Expr, cmp: Comparacion, der: Expr, mostrar: Option<bool> },
-    /// `ENTITIES IN @param`: la candidata cae en la zona que dibuja ese parámetro de la ficha de la macro.
-    Dentro { param: String },
+    /// `ENTITIES IN @param` / `ENTITIES IN AREA:rombo(…)`: la candidata cae en esa zona.
+    Dentro { zona: Zona },
+    /// `@param = "texto"` / `!=`: un parámetro de texto (o `@nombre` / `@tipo` de la ficha) comparado con un texto, sin mayúsculas.
+    CompararTexto { de: Sujeto, param: String, distinto: bool, texto: String, mostrar: Option<bool> },
     Y(Box<Condicion>, Box<Condicion>),
     O(Box<Condicion>, Box<Condicion>),
 }
@@ -72,6 +75,7 @@ impl Condicion {
         match self {
             Condicion::Comparar { izq, der, .. } => izq.usa_candidata() || der.usa_candidata(),
             Condicion::Dentro { .. } => true,
+            Condicion::CompararTexto { de, .. } => *de == Sujeto::Candidata,
             Condicion::Y(a, b) | Condicion::O(a, b) => a.usa_candidata() || b.usa_candidata(),
         }
     }
@@ -96,15 +100,41 @@ pub enum Sentencia {
     Asociar(Vec<String>),
 }
 
+/// La zona de un `ENTITIES IN`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Zona {
+    /// La forma que dibuja ese parámetro alrededor de la ficha de la macro.
+    Parametro(String),
+    /// El `AREA` número `indice` de la macro (ver `Programa.areas`): su centro lo elige el usuario con el ratón.
+    Area(usize),
+}
+
+/// Un `AREA:forma(lados)` de la macro: su forma y sus lados (1, 2 o 4: todos / horizontal y vertical / arriba, derecha, abajo,
+/// izquierda), que solo pueden ser números, `.variables` y `@parámetros` de la propia ficha (se calculan ANTES de ejecutar, para la
+/// vista previa).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AreaMacro {
+    pub forma: FormaZona,
+    pub lados: Vec<Expr>,
+}
+
 /// Una macro ya leída.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Programa {
     pub al_pulsar: bool,
     pub en_turno: bool,
     pub cuerpo: Vec<Sentencia>,
+    /// Los `AREA` de la macro en el orden en que aparecen: el usuario apunta uno detrás de otro.
+    pub areas: Vec<AreaMacro>,
 }
 
 type LeerSentencia = fn(&mut Parser) -> Result<Sentencia, ErrorMacro>;
+
+/// Un lado de una comparación según se lee: un argumento o un texto entre comillas.
+enum Lado {
+    Expr(Expr),
+    Texto(String),
+}
 
 /// Las sentencias y quién las lee. `DO` y `SPREAD` también están: su cuerpo vuelve a pasar por aquí.
 const SENTENCIAS: &[(Clave, LeerSentencia)] = &[
@@ -126,7 +156,7 @@ pub fn leer(codigo: &str) -> Result<Programa, ErrorMacro> {
         return Err(ErrorMacro { linea: MAX_LINEAS + 1, columna: 1, mensaje: format!("Una macro no puede pasar de {MAX_LINEAS} líneas") });
     }
     let piezas = trocear(codigo)?;
-    let mut p = Parser { piezas, pos: 0, profundidad: 0, en_reparto: false };
+    let mut p = Parser { piezas, pos: 0, profundidad: 0, en_reparto: false, areas: Vec::new() };
     let programa = p.programa()?;
     comprobar_atributos(&programa)?;
     Ok(programa)
@@ -156,7 +186,7 @@ fn comprobar_atributos(p: &Programa) -> Result<(), ErrorMacro> {
                 condicion(a, leidos);
                 condicion(b, leidos);
             }
-            Condicion::Dentro { .. } => {}
+            Condicion::Dentro { .. } | Condicion::CompararTexto { .. } => {}
         }
     }
     fn sentencias(l: &[Sentencia], guardados: &mut Vec<String>, leidos: &mut Vec<String>) {
@@ -204,6 +234,19 @@ pub struct Parser {
     profundidad: usize,
     /// Dentro de un SPREAD: ahí valen `ENTITIES…` y `DISTANCE`.
     en_reparto: bool,
+    /// Los `AREA` leídos hasta ahora.
+    areas: Vec<AreaMacro>,
+}
+
+/// ¿Se puede calcular antes de ejecutar? Números, `.variables` y `@parámetros` de la propia ficha con `+ - ( )` (sin dados ni atributos).
+fn es_fija(e: &Expr) -> bool {
+    match e {
+        Expr::Num(_) => true,
+        Expr::Var { de, .. } | Expr::Param { de, .. } => *de == Sujeto::Propia,
+        Expr::Neg(a) | Expr::Grupo(a) => es_fija(a),
+        Expr::Suma(a, b) | Expr::Resta(a, b) => es_fija(a) && es_fija(b),
+        _ => false,
+    }
 }
 
 impl Parser {
@@ -278,7 +321,15 @@ impl Parser {
         if cuerpo.is_empty() {
             return self.error("La macro no hace nada: falta alguna sentencia después de la cabecera");
         }
-        Ok(Programa { al_pulsar, en_turno, cuerpo })
+        // Un AREA se apunta con el ratón al pulsar el botón: en un turno no hay nadie que apunte
+        if en_turno && !self.areas.is_empty() {
+            return Err(ErrorMacro {
+                linea: 1,
+                columna: 1,
+                mensaje: "AREA se apunta con el ratón: solo vale en una macro ONCLICK (sin ONTURN)".into(),
+            });
+        }
+        Ok(Programa { al_pulsar, en_turno, cuerpo, areas: std::mem::take(&mut self.areas) })
     }
 
     /// Sentencias separadas por saltos de línea o `;`, hasta el final (o hasta `cierre`).
@@ -507,17 +558,21 @@ impl Parser {
             }
             self.pos = guardado;
         }
-        // `ENTITIES IN @param`
+        // `ENTITIES IN @param` / `ENTITIES IN AREA:forma(lados)`
         if self.es_clave(Clave::Entities) && self.ver_en(1) == Some(&Tok::Clave(Clave::In)) {
             if !self.en_reparto {
                 return self.error("ENTITIES solo vale dentro de un SPREAD");
             }
             self.pos += 2;
+            if self.es_clave(Clave::Area) {
+                self.pos += 1;
+                return Ok(Condicion::Dentro { zona: Zona::Area(self.area()?) });
+            }
             let Some(Tok::Param { nombre, max: false }) = self.avanzar() else {
                 self.pos -= 1;
-                return self.error("Detrás de IN va el parámetro visual que dibuja la zona: ENTITIES IN @rangoarma");
+                return self.error("Detrás de IN va el parámetro visual que dibuja la zona (ENTITIES IN @rangoarma) o un AREA:rombo(3)");
             };
-            return Ok(Condicion::Dentro { param: nombre });
+            return Ok(Condicion::Dentro { zona: Zona::Parametro(nombre) });
         }
         let (izq, m1) = self.lado()?;
         let Some(Tok::Cmp(cmp)) = self.ver().cloned() else {
@@ -525,11 +580,74 @@ impl Parser {
         };
         self.pos += 1;
         let (der, m2) = self.lado()?;
-        Ok(Condicion::Comparar { izq, cmp, der, mostrar: m1.or(m2) })
+        let mostrar = m1.or(m2);
+        // Un texto entre comillas: se compara con un parámetro de texto (o @nombre / @tipo), solo con = o !=
+        match (izq, der) {
+            (Lado::Texto(texto), Lado::Expr(Expr::Param { de, nombre, max: false }))
+            | (Lado::Expr(Expr::Param { de, nombre, max: false }), Lado::Texto(texto)) => match cmp {
+                Comparacion::Igual | Comparacion::Distinto => {
+                    Ok(Condicion::CompararTexto { de, param: nombre, distinto: cmp == Comparacion::Distinto, texto, mostrar })
+                }
+                _ => self.error("Un texto solo se compara con = o !="),
+            },
+            (Lado::Texto(_), _) | (_, Lado::Texto(_)) => {
+                self.error("Un texto entre comillas se compara con un @parámetro de texto (o @nombre, @tipo): @clase = \"Mago\"")
+            }
+            (Lado::Expr(izq), Lado::Expr(der)) => Ok(Condicion::Comparar { izq, cmp, der, mostrar }),
+        }
     }
 
-    /// Un lado de una comparación, quizá con `EXECUTE`/`EXECUTEP` delante (la comparación sale entonces en el chat).
-    fn lado(&mut self) -> Result<(Expr, Option<bool>), ErrorMacro> {
+    /// `:forma(a)`, `(a,b)` o `(a,b,c,d)` detrás de `AREA`. Devuelve su número (orden de aparición).
+    fn area(&mut self) -> Result<usize, ErrorMacro> {
+        if self.ver() != Some(&Tok::DosPuntos) {
+            return self.error("Detrás de AREA van dos puntos y la forma: AREA:rombo(3)");
+        }
+        self.pos += 1;
+        let forma = match self.avanzar() {
+            Some(Tok::Ident(f)) => match f.to_lowercase().as_str() {
+                "rombo" => FormaZona::Rombo,
+                "circulo" | "círculo" => FormaZona::Circulo,
+                "cuadrado" => FormaZona::Cuadrado,
+                _ => {
+                    self.pos -= 1;
+                    return self.error(format!("«{f}» no es una forma: rombo, circulo o cuadrado"));
+                }
+            },
+            _ => {
+                self.pos -= 1;
+                return self.error("Detrás de AREA: va la forma: rombo, circulo o cuadrado");
+            }
+        };
+        if self.ver() != Some(&Tok::AbreP) {
+            return self.error("Faltan los lados del área entre paréntesis: AREA:rombo(3)");
+        }
+        self.pos += 1;
+        let mut lados = Vec::new();
+        loop {
+            let e = self.expr()?;
+            if !es_fija(&e) {
+                return self.error("Los lados de un AREA solo pueden ser números, .variables y @parámetros de la ficha (sin dados ni atributos)");
+            }
+            lados.push(e);
+            match self.avanzar() {
+                Some(Tok::Coma) => continue,
+                Some(Tok::CierraP) => break,
+                _ => {
+                    self.pos -= 1;
+                    return self.error("Falta cerrar los lados del área con «)»");
+                }
+            }
+        }
+        if !matches!(lados.len(), 1 | 2 | 4) {
+            return self.error("Un AREA lleva 1 lado (todos), 2 (horizontal, vertical) o 4 (arriba, derecha, abajo, izquierda)");
+        }
+        self.areas.push(AreaMacro { forma, lados });
+        Ok(self.areas.len() - 1)
+    }
+
+    /// Un lado de una comparación, quizá con `EXECUTE`/`EXECUTEP` delante (la comparación sale entonces en el chat). Puede ser un texto
+    /// entre comillas.
+    fn lado(&mut self) -> Result<(Lado, Option<bool>), ErrorMacro> {
         let mostrar = match self.ver() {
             Some(Tok::Clave(Clave::Execute)) => Some(false),
             Some(Tok::Clave(Clave::ExecuteP)) => Some(true),
@@ -538,7 +656,11 @@ impl Parser {
         if mostrar.is_some() {
             self.pos += 1;
         }
-        Ok((self.expr()?, mostrar))
+        if let Some(Tok::Texto(t)) = self.ver().cloned() {
+            self.pos += 1;
+            return Ok((Lado::Texto(t), mostrar));
+        }
+        Ok((Lado::Expr(self.expr()?), mostrar))
     }
 
     // ---------------- Argumentos ----------------
@@ -602,6 +724,10 @@ impl Parser {
                 Expr::Atributo(nombre)
             }
             Tok::Clave(Clave::Turn) => Expr::Turno,
+            Tok::Texto(_) => {
+                self.pos -= 1;
+                return self.error("Un texto entre comillas solo va en una comparación con = o !=: @clase = \"Mago\"");
+            }
             Tok::Clave(Clave::Distance) => {
                 if !self.en_reparto {
                     self.pos -= 1;
@@ -664,7 +790,7 @@ mod tests {
         assert!(p.en_turno && p.al_pulsar);
         let Sentencia::Repartir { accion, condicion } = &p.cuerpo[0] else { panic!() };
         assert!(matches!(**accion, Sentencia::Cambiar { de: Sujeto::Candidata, relativo: true, .. }));
-        assert!(matches!(condicion, Condicion::Y(_, b) if matches!(**b, Condicion::Dentro { .. })));
+        assert!(matches!(condicion, Condicion::Y(_, b) if matches!(**b, Condicion::Dentro { zona: Zona::Parametro(_) })));
         assert!(condicion.usa_candidata());
     }
 
@@ -699,6 +825,7 @@ mod tests {
             "ONCLICK\nSPREAD CHANGE ENTITIES@vida -(2d8 + .fue) TO ENTITIES@armadura <= 1d20 + .destreza AND ENTITIES IN @rangoarma",
             "ONCLICK\nSAVE dano 8d6\nSPREAD CHANGE ENTITIES@vida -dano TO ENTITIES.des + 1d20 < 15 AND DISTANCE <= 4",
             "ONCLICK\nSPREAD MACROS.envenenado TO DISTANCE <= 1",
+            "ONCLICK\nSAVE dano 8d6\nSPREAD CHANGE ENTITIES@vida -dano TO ENTITIES IN AREA:circulo(3) AND ENTITIES@tipo != \"Jugador\"",
             "ONCLICK # comentario\nEXECUTE 1d20 vs 12\nDO [ SAVE a 1; EXECUTEP a ]\n  IF TURN >= 2\n  AND @vida.max != 0",
         ] {
             assert!(leer(codigo).is_ok(), "{codigo}: {:?}", leer(codigo));
@@ -732,6 +859,26 @@ mod tests {
         assert!(e.mensaje.contains("«dano»") && e.mensaje.contains("«daño»"), "{e}");
         assert!(leer("ONCLICK\nEXECUTE veces").is_err());
         assert!(leer("ONCLICK\nSAVE a 1\nDO EXECUTE A IF 1 = 1").is_ok(), "sin distinguir mayúsculas, y en cualquier sitio");
+    }
+
+    #[test]
+    fn areas_y_textos() {
+        let p = leer("ONCLICK\nSPREAD EXECUTE 1 TO ENTITIES IN AREA:rombo(3) OR ENTITIES IN AREA:Círculo(.fue + 1, 2)\nSPREAD QUIT TO ENTITIES IN AREA:cuadrado(1, 2, 3, @vida)").unwrap_err();
+        assert!(p.mensaje.contains("SPREAD"), "QUIT no es una acción de SPREAD: {p}");
+        let p = leer("ONCLICK\nSPREAD EXECUTE 1 TO ENTITIES IN AREA:rombo(3) OR ENTITIES IN AREA:Círculo(.fue + 1, 2)\nSPREAD EXECUTE 2 TO ENTITIES IN AREA:cuadrado(1, 2, 3, @vida)").unwrap();
+        assert_eq!(p.areas.iter().map(|a| (a.forma, a.lados.len())).collect::<Vec<_>>(), vec![(FormaZona::Rombo, 1), (FormaZona::Circulo, 2), (FormaZona::Cuadrado, 4)]);
+        let falla = |c: &str| leer(c).unwrap_err().mensaje;
+        assert!(falla("ONCLICK\nSPREAD EXECUTE 1 TO ENTITIES IN AREA:rombo(1, 2, 3)").contains("1 lado"));
+        assert!(falla("ONCLICK\nSPREAD EXECUTE 1 TO ENTITIES IN AREA:rombo(1d4)").contains("dados"));
+        assert!(falla("ONCLICK\nSPREAD EXECUTE 1 TO ENTITIES IN AREA:triangulo(1)").contains("forma"));
+        assert!(falla("ONCLICK\nSPREAD EXECUTE 1 TO ENTITIES IN AREA rombo(1)").contains("dos puntos"));
+        assert!(falla("ONTURN ONCLICK\nSPREAD EXECUTE 1 TO ENTITIES IN AREA:rombo(1)").contains("ONCLICK"));
+        // Textos
+        let p = leer("ONCLICK\nDO QUIT IF EXECUTE @nombre != \"Mago\"\nSPREAD EXECUTE 1 TO \"Orco\" = ENTITIES@tipo").unwrap();
+        assert!(matches!(&p.cuerpo[0], Sentencia::Si { condicion: Some(Condicion::CompararTexto { distinto: true, mostrar: Some(false), .. }), .. }));
+        assert!(falla("ONCLICK\nDO QUIT IF @nombre < \"Mago\"").contains("= o !="));
+        assert!(falla("ONCLICK\nDO QUIT IF 3 = \"Mago\"").contains("@parámetro"));
+        assert!(falla("ONCLICK\nEXECUTE \"hola\"").contains("comparación"));
     }
 
     #[test]

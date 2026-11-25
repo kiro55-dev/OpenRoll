@@ -112,8 +112,15 @@ pub enum Peticion {
     AsociarMacro { id_macro: u16, id_entidad: u16 },
     /// Quita una macro de una ficha o instancia suya.
     DesasociarMacro { id_asociacion: u32 },
-    /// El botón de una macro ONCLICK de una instancia suya.
-    EjecutarMacro { id_asociacion: u32, id_instancia: u16 },
+    /// Antes de ejecutar: los AREA que hay que apuntar (solo lee).
+    PrepararMacro { id_asociacion: u32, id_instancia: u16 },
+    /// El botón de una macro ONCLICK de una instancia suya, con el centro de cada AREA que apuntó.
+    EjecutarMacro {
+        id_asociacion: u32,
+        id_instancia: u16,
+        #[serde(default)]
+        centros: Vec<crate::tablero_general::modelos::Casilla>,
+    },
     /// Las macros que trae la plantilla de una ficha suya: se crean (o se reutilizan por nombre) y se asocian a ella.
     ImportarMacrosFicha { id_entidad: u16, macros: Vec<crate::tablero_general::modelos::MacroFicha> },
 }
@@ -262,7 +269,13 @@ pub fn permitida_con(est: &EstadoPartida, jugador: IdJugador, p: &Peticion, subi
                 crate::tablero_general::modelos::DestinoMacro::Instancia(id) => instancia_suya(est, jugador, id),
             }
         }
-        Peticion::EjecutarMacro { id_instancia, .. } => instancia_suya(est, jugador, *id_instancia),
+        Peticion::PrepararMacro { id_instancia, .. } => instancia_suya(est, jugador, *id_instancia),
+        Peticion::EjecutarMacro { id_instancia, centros, .. } => {
+            if centros.len() > crate::tablero_general::macros::MAX_CENTROS {
+                return Err("Demasiadas áreas".into());
+            }
+            instancia_suya(est, jugador, *id_instancia)
+        }
         Peticion::ImportarMacrosFicha { id_entidad, macros } => {
             ficha_suya(est, jugador, *id_entidad)?;
             let tope = crate::tablero_general::macros::MAX_MACROS_PLANTILLA;
@@ -462,6 +475,10 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
     if let Peticion::ValidarMacro { codigo } = &p {
         return json(crate::tablero_general::macros::comprobar(codigo)?);
     }
+    // Solo lee: no cambia nada ni hay que avisar a nadie
+    if let Peticion::PrepararMacro { id_asociacion, id_instancia } = &p {
+        return json(crate::tablero_general::macros::preparar_macro_en(state, jugador, *id_asociacion, *id_instancia)?);
+    }
     // Qué tiene que volver a leer la pantalla del host: el chat, o las fichas (banco e instancias)
     let partes = if matches!(
         p,
@@ -484,7 +501,7 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
     let resultado = match p {
         // Las variables, solo de una ficha suya (lo comprueba `tirar_dado_de`)
         Peticion::TirarDado { comando, id_instancia, publica } => json(tirar_dado_de(state, jugador, &comando, publica.unwrap_or(true), id_instancia)?),
-        Peticion::ObtenerHistorialPersonal | Peticion::ValidarMacro { .. } => Err("Se contesta antes".to_string()),
+        Peticion::ObtenerHistorialPersonal | Peticion::ValidarMacro { .. } | Peticion::PrepararMacro { .. } => Err("Se contesta antes".to_string()),
         Peticion::GuardarMacro { datos } => json(crate::tablero_general::macros::guardar_macro_en(state, jugador, datos)?),
         Peticion::BorrarMacro { id } => json(crate::tablero_general::macros::borrar_macro_en(state, jugador, id)?),
         Peticion::AsociarMacro { id_macro, id_entidad } => json(crate::tablero_general::macros::asociar_macro_en(state, jugador, id_macro, id_entidad)?),
@@ -492,8 +509,8 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
         Peticion::ImportarMacrosFicha { id_entidad, macros } => {
             json(crate::tablero_general::macros::importar_macros_ficha_en(state, jugador, id_entidad, macros)?)
         }
-        Peticion::EjecutarMacro { id_asociacion, id_instancia } => {
-            json(crate::tablero_general::macros::ejecutar_macro_en(state, jugador, id_asociacion, id_instancia)?)
+        Peticion::EjecutarMacro { id_asociacion, id_instancia, centros } => {
+            json(crate::tablero_general::macros::ejecutar_macro_en(state, jugador, id_asociacion, id_instancia, centros)?)
         }
         Peticion::MoverInstancia { id_instancia, destino } => json(partida::mover_instancia_en(id_instancia, destino, state)?),
         Peticion::MoverInstancias { ids, id_mapa, dx, dy } => json(partida::mover_instancias_en(ids, id_mapa, dx, dy, state)?),

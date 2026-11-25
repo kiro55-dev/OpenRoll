@@ -292,9 +292,6 @@ export function dibujarFormas(
   // Un Objeto no dibuja los parámetros visuales en el tablero (rangos): solo su cuerpo
   if (ficha.instancia.base.tipo === "Objeto") return;
   const lados = ladosInstancia(ficha.instancia);
-  // Pasa una línea de rejilla (en casillas) a pantalla
-  const px = (columna: number) => cam.x + columna * rejilla.anchoCasilla * cam.zoom;
-  const py = (fila: number) => cam.y + fila * rejilla.altoCasilla * cam.zoom;
 
   for (const d of definiciones) {
     const forma = d.representar_mapa;
@@ -308,29 +305,49 @@ export function dibujarFormas(
 
     const n = valorDe(d);
     if (!(n > 0)) continue;
-    const e = extremosForma(ficha.casilla, lados, n);
-    const [izq, der, arr, abj, cx, cy] = [px(e.izquierda), px(e.derecha), py(e.arriba), py(e.abajo), px(e.cx), py(e.cy)];
-
-    ctx.save();
-    ctx.beginPath();
-    if (tipo === "Cuadrado") {
-      ctx.rect(izq, arr, der - izq, abj - arr);
-    } else if (tipo === "Rombo") {
-      ctx.moveTo(izq, cy);
-      ctx.lineTo(cx, arr);
-      ctx.lineTo(der, cy);
-      ctx.lineTo(cx, abj);
-      ctx.closePath();
-    } else if (tipo === "Circulo") {
-      ctx.ellipse(cx, cy, (der - izq) / 2, (abj - arr) / 2, 0, 0, Math.PI * 2);
-    }
-    ctx.fillStyle = colorDe(rgba, Math.min(0.25, (rgba[3] ?? 90) / 255));
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = colorDe(rgba, 0.95);
-    ctx.stroke();
-    ctx.restore();
+    if (tipo !== "Cuadrado" && tipo !== "Rombo" && tipo !== "Circulo") continue;
+    dibujarZona(ctx, cam, rejilla, tipo, extremosForma(ficha.casilla, lados, n), rgba, Math.min(0.25, (rgba[3] ?? 90) / 255));
   }
+}
+
+/** Las formas que puede dibujar una zona: las de los parámetros y las del `AREA` de una macro. */
+export type FormaZona = "Cuadrado" | "Rombo" | "Circulo";
+
+/**
+ * Dibuja una forma inscrita en la caja `e` (líneas de la rejilla, con su centro `cx`/`cy`): el rectángulo, el rombo que une los puntos
+ * medios de los lados o la elipse. La usan las formas de los parámetros y la vista previa del `AREA` de una macro.
+ */
+export function dibujarZona(
+  ctx: CanvasRenderingContext2D,
+  cam: Camara,
+  rejilla: RejillaTablero,
+  forma: FormaZona,
+  e: { izquierda: number; derecha: number; arriba: number; abajo: number; cx: number; cy: number },
+  rgba: number[],
+  relleno: number
+) {
+  const px = (columna: number) => cam.x + columna * rejilla.anchoCasilla * cam.zoom;
+  const py = (fila: number) => cam.y + fila * rejilla.altoCasilla * cam.zoom;
+  const [izq, der, arr, abj, cx, cy] = [px(e.izquierda), px(e.derecha), py(e.arriba), py(e.abajo), px(e.cx), py(e.cy)];
+  ctx.save();
+  ctx.beginPath();
+  if (forma === "Cuadrado") {
+    ctx.rect(izq, arr, der - izq, abj - arr);
+  } else if (forma === "Rombo") {
+    ctx.moveTo(izq, cy);
+    ctx.lineTo(cx, arr);
+    ctx.lineTo(der, cy);
+    ctx.lineTo(cx, abj);
+    ctx.closePath();
+  } else {
+    ctx.ellipse(cx, cy, Math.max(0, (der - izq) / 2), Math.max(0, (abj - arr) / 2), 0, 0, Math.PI * 2);
+  }
+  ctx.fillStyle = colorDe(rgba, relleno);
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = colorDe(rgba, 0.95);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function dibujarBarra(

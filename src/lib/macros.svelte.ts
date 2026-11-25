@@ -8,6 +8,7 @@ import type { AsociacionMacro, Instancia, Macro } from "$lib/partida.svelte";
 import { partida } from "$lib/partida.svelte";
 import { tiradas } from "$lib/tiradas.svelte";
 import { carpetaDePartida } from "$lib/imagenes";
+import { apuntarArea, type AreaResuelta } from "$lib/apuntarArea.svelte";
 import { esJugador } from "$lib/modo";
 
 /** Lo que tiene una macro recién creada (Rust no admite una vacía: tiene que empezar con ONCLICK u ONTURN y hacer algo). */
@@ -213,7 +214,20 @@ class Macros {
     if (this.ejecutando.includes(idAsociacion)) return;
     this.ejecutando = [...this.ejecutando, idAsociacion];
     try {
-      await invoke("ejecutar_macro", { idAsociacion, idInstancia });
+      // Si la macro tiene AREA, primero se apunta cada una en el tablero (Esc la cancela entera)
+      const areas = await invoke<AreaResuelta[]>("preparar_macro", { idAsociacion, idInstancia });
+      let centros: { x: number; y: number }[] = [];
+      if (areas.length) {
+        const idMapa = partida.instancias.find((i) => i.id_instancia === idInstancia)?.id_mapa ?? null;
+        if (idMapa === null || partida.mapaActual?.id !== idMapa) {
+          partida.avisar("Para apuntar el área, abre el mapa donde está la ficha");
+          return;
+        }
+        const elegidos = await apuntarArea.pedir(areas, idMapa);
+        if (!elegidos) return; // cancelada: no se hace nada
+        centros = elegidos;
+      }
+      await invoke("ejecutar_macro", { idAsociacion, idInstancia, centros });
     } catch (err) {
       console.error("La macro falló:", err);
     } finally {

@@ -23,7 +23,7 @@ use tablero_general::batalla::{
 };
 use tablero_general::dados::{limpiar_chat, tirar_dado};
 use tablero_general::macros::{
-    asociar_macro, borrar_macro, desasociar_macro, ejecutar_macro, guardar_macro, importar_macros_ficha, obtener_asociaciones_macro, obtener_macros,
+    asociar_macro, borrar_macro, desasociar_macro, ejecutar_macro, guardar_macro, importar_macros_ficha, obtener_asociaciones_macro, obtener_macros, preparar_macro,
     validar_macro,
 };
 use tablero_general::plantilla::{guardar_plantilla, importar_imagen_base64, leer_plantilla};
@@ -138,6 +138,7 @@ pub fn run() {
             asociar_macro,
             desasociar_macro,
             ejecutar_macro,
+            preparar_macro,
             importar_macros_ficha,
             limpiar_chat,
             guardar_plantilla,

@@ -272,6 +272,19 @@ export function ladosInstancia(inst: { base: { cuerpo: Cuerpo }; rotacion?: numb
  * de un cuerpo: se cuentan `n` casillas desde cada borde del cuerpo. Los cuatro puntos de referencia
  * (izquierda, derecha, arriba, abajo) caen justo en la rejilla; `cx`/`cy` es el centro del cuerpo.
  */
+/**
+ * Límites (líneas de la rejilla) del `AREA` de una macro centrada en la casilla `centro`, con sus lados `[arriba, derecha, abajo,
+ * izquierda]` en casillas. Igual que `tablero::extremos_area` de Rust. `cx`/`cy` es el centro de la caja (la forma va inscrita en ella).
+ */
+export function extremosArea(centro: Casilla, lados: readonly [number, number, number, number]) {
+  const [arriba, derecha, abajo, izquierda] = lados;
+  const izq = centro.x - izquierda;
+  const der = centro.x + 1 + derecha;
+  const arr = centro.y - arriba;
+  const abj = centro.y + 1 + abajo;
+  return { izquierda: izq, derecha: der, arriba: arr, abajo: abj, cx: (izq + der) / 2, cy: (arr + abj) / 2 };
+}
+
 export function extremosForma(centro: Casilla, lados: Lados, n: number) {
   const { x0, y0, x1, y1 } = extremos(centro, lados);
   return {

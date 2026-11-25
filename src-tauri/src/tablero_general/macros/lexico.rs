@@ -33,6 +33,7 @@ pub enum Clave {
     Save,
     Turn,
     Distance,
+    Area,
 }
 
 /// Las palabras clave y lo que son. Para añadir una: una fila aquí, su variante en `Clave` y su sitio en el parser.
@@ -57,6 +58,7 @@ pub const CLAVES: &[(&str, Clave)] = &[
     ("SAVE", Clave::Save),
     ("TURN", Clave::Turn),
     ("DISTANCE", Clave::Distance),
+    ("AREA", Clave::Area),
 ];
 
 /// Además de las claves, palabras que no pueden ser nombre de atributo (son de los dados).
@@ -150,8 +152,15 @@ pub enum Tok {
     CierraC,
     Coma,
     PuntoComa,
+    /// `:` (en `AREA:rombo(3)`).
+    DosPuntos,
+    /// Un texto entre comillas: `"Mago"` (solo para comparar con `=` / `!=`).
+    Texto(String),
     Salto,
 }
+
+/// Largo máximo de un texto entre comillas.
+pub const MAX_TEXTO: usize = 200;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Pieza {
@@ -218,6 +227,26 @@ pub fn trocear(codigo: &str) -> Result<Vec<Pieza>, ErrorMacro> {
                 };
                 poner(tok, &mut piezas);
                 i += 1;
+            }
+            ':' => {
+                poner(Tok::DosPuntos, &mut piezas);
+                i += 1;
+            }
+            '"' => {
+                // Un texto entre comillas, en la misma línea
+                let mut j = i + 1;
+                while j < c.len() && c[j] != '"' && c[j] != '\n' {
+                    j += 1;
+                }
+                if j >= c.len() || c[j] != '"' {
+                    return Err(error(linea, col, "Falta cerrar el texto con «\"»".into()));
+                }
+                let texto: String = c[i + 1..j].iter().collect();
+                if texto.chars().count() > MAX_TEXTO {
+                    return Err(error(linea, col, format!("Un texto no puede pasar de {MAX_TEXTO} caracteres")));
+                }
+                poner(Tok::Texto(texto), &mut piezas);
+                i = j + 1;
             }
             '<' | '>' | '=' | '!' => {
                 let sig = c.get(i + 1).copied();
@@ -372,6 +401,28 @@ mod tests {
                 Tok::Dado { veces: 3, caras: 6, ventaja: false, desventaja: true },
             ]
         );
+    }
+
+    #[test]
+    fn textos_dos_puntos_y_area() {
+        assert_eq!(
+            toks("@clase = \"Mago oscuro\" AREA:rombo(3)"),
+            vec![
+                Tok::Param { nombre: "clase".into(), max: false },
+                Tok::Cmp(Comparacion::Igual),
+                Tok::Texto("Mago oscuro".into()),
+                Tok::Clave(Clave::Area),
+                Tok::DosPuntos,
+                Tok::Ident("rombo".into()),
+                Tok::AbreP,
+                Tok::Num(3),
+                Tok::CierraP,
+            ]
+        );
+        let e = trocear("ONCLICK\nDO QUIT IF @clase = \"Mago").unwrap_err();
+        assert!(e.mensaje.contains("cerrar") && e.linea == 2, "{e}");
+        assert!(trocear("ONCLICK\nDO QUIT IF @clase = \"Ma\ngo\"").is_err(), "no cruza de línea");
+        assert!(trocear(&format!("EXECUTE \"{}\"", "x".repeat(201))).is_err());
     }
 
     #[test]

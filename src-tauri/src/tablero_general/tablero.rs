@@ -327,8 +327,8 @@ impl AvisoTablero {
 // Zonas de los parámetros y distancias (las macros: `ENTITIES IN @rango`, `DISTANCE`)
 // ------------------------------------------------------------------
 
-/// La forma que dibuja un parámetro alrededor de un cuerpo (lo que pinta `dibujarFormas` en el front).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// La forma que dibuja un parámetro alrededor de un cuerpo (lo que pinta `dibujarFormas` en el front), o la de un `AREA` de una macro.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FormaZona {
     Cuadrado,
     Rombo,
@@ -343,11 +343,29 @@ pub fn extremos_forma(centro: Casilla, lados: (u16, u16), n: i32) -> (i32, i32, 
 }
 
 /// ¿El CENTRO de la casilla `(x, y)` cae dentro de la forma (los bordes cuentan)? Con `n <= 0` no hay forma.
+#[cfg(test)]
 pub fn casilla_en_forma(forma: FormaZona, centro: Casilla, lados: (u16, u16), n: i32, x: i32, y: i32) -> bool {
     if n <= 0 {
         return false;
     }
-    let (izq, der, arr, abj) = extremos_forma(centro, lados, n);
+    casilla_en_caja(forma, extremos_forma(centro, lados, n), x, y)
+}
+
+/// Las líneas de la rejilla `(izquierda, derecha, arriba, abajo)` del `AREA` de una macro centrada en la casilla `centro`, con sus lados
+/// `[arriba, derecha, abajo, izquierda]` en casillas (como en CSS). Igual que `extremosArea` del front.
+pub fn extremos_area(centro: Casilla, lados: [i32; 4]) -> (i32, i32, i32, i32) {
+    let (x, y) = (i32::from(centro.x), i32::from(centro.y));
+    let [arriba, derecha, abajo, izquierda] = lados;
+    (x - izquierda, x + 1 + derecha, y - arriba, y + 1 + abajo)
+}
+
+/// ¿El centro de la casilla `(x, y)` cae dentro de la forma inscrita en la caja `(izquierda, derecha, arriba, abajo)` (líneas de la
+/// rejilla)? El centro de la forma es el de la caja, así que vale también con lados distintos (un rombo o un círculo alargado).
+pub fn casilla_en_caja(forma: FormaZona, caja: (i32, i32, i32, i32), x: i32, y: i32) -> bool {
+    let (izq, der, arr, abj) = caja;
+    if der <= izq || abj <= arr {
+        return false;
+    }
     let (px, py) = (f64::from(x) + 0.5, f64::from(y) + 0.5);
     let (cx, cy) = (f64::from(izq + der) / 2.0, f64::from(arr + abj) / 2.0);
     let (rx, ry) = (f64::from(der - izq) / 2.0, f64::from(abj - arr) / 2.0);
@@ -360,8 +378,13 @@ pub fn casilla_en_forma(forma: FormaZona, centro: Casilla, lados: (u16, u16), n:
 
 /// ¿Algo del cuerpo `(otro, lados_otro)` cae dentro de la forma del primero?
 pub fn cuerpo_en_forma(forma: FormaZona, centro: Casilla, lados: (u16, u16), n: i32, otro: Casilla, lados_otro: (u16, u16)) -> bool {
+    n > 0 && cuerpo_en_caja(forma, extremos_forma(centro, lados, n), otro, lados_otro)
+}
+
+/// ¿Algo del cuerpo `(otro, lados_otro)` cae dentro de la forma inscrita en la caja?
+pub fn cuerpo_en_caja(forma: FormaZona, caja: (i32, i32, i32, i32), otro: Casilla, lados_otro: (u16, u16)) -> bool {
     let (x0, y0, x1, y1) = rectangulo(otro, lados_otro);
-    (y0..=y1).any(|y| (x0..=x1).any(|x| casilla_en_forma(forma, centro, lados, n, x, y)))
+    (y0..=y1).any(|y| (x0..=x1).any(|x| casilla_en_caja(forma, caja, x, y)))
 }
 
 /// Distancia en casillas entre dos cuerpos, contada como se mueve un rey de ajedrez (la mayor de las dos separaciones): 0 si se
@@ -396,6 +419,23 @@ mod tests_zonas {
         assert!(!casilla_en_forma(FormaZona::Circulo, C, (1, 1), 2, 8, 8));
         // Sin valor, no hay zona
         assert!(!casilla_en_forma(FormaZona::Cuadrado, C, (1, 1), 0, 10, 10));
+    }
+
+    #[test]
+    fn un_area_puede_tener_cada_lado_distinto() {
+        // Centro (10,10), 3 a izquierda y derecha y 1 arriba y abajo (rombo(3,1)): líneas 7..14 y 9..12
+        let caja = extremos_area(C, [1, 3, 1, 3]);
+        assert_eq!(caja, (7, 14, 9, 12));
+        assert!(casilla_en_caja(FormaZona::Rombo, caja, 7, 10), "la punta izquierda");
+        assert!(!casilla_en_caja(FormaZona::Rombo, caja, 10, 8), "por arriba solo llega una casilla");
+        assert!(casilla_en_caja(FormaZona::Circulo, caja, 12, 10));
+        assert!(!casilla_en_caja(FormaZona::Circulo, caja, 13, 9), "la esquina de la elipse queda fuera");
+        // Lados distintos en cada dirección: más hacia la derecha que hacia la izquierda
+        let caja = extremos_area(C, [0, 4, 0, 0]);
+        assert!(casilla_en_caja(FormaZona::Cuadrado, caja, 14, 10) && !casilla_en_caja(FormaZona::Cuadrado, caja, 9, 10));
+        // Un cuerpo grande entra si alguna de sus casillas cae dentro
+        assert!(cuerpo_en_caja(FormaZona::Cuadrado, caja, Casilla { x: 15, y: 10 }, (3, 3)), "su casilla 14 cae dentro");
+        assert!(!cuerpo_en_caja(FormaZona::Cuadrado, caja, Casilla { x: 16, y: 10 }, (3, 3)), "de la 15 en adelante, fuera");
     }
 
     #[test]
