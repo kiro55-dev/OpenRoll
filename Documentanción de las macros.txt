@@ -36,10 +36,11 @@ SAVE tirada x(tirada es un ejemplo de atributo): Indica que un argumento que se 
 	Dentro de un IF puede haber un execute, save,
 TURN: Guarda el valor del turno actual, se va actualizando conforme pasan los turnos, si se ejecuta un ONCLICK sin estar en combate da error.
 SPREAD [] TO: [] sirve para declarar un subconjunto de acciones
+AREA:forma(a,b,c,d): forma es rombo, cuadrado, circulo, se usa en continuación de IN, y te permite seleccionar un área del mapa, abcd son las dimensiones de la formasi usas un solo parámetro es todos los lados, si usas dos es horizontal y vertical, y si usas 4 es arriba derecha abajo izquieda (parecido a css)
 
 EJEMPLO MACROS
 
-Macro: ataque en area
+Macro: Ataque en área con subconjunto de acciones
 ONCLICK
 SPREAD [
   SAVE daño 1d20
@@ -47,9 +48,12 @@ SPREAD [
   EXECUTE dano
 ] TO ENTITIES IN @rangoarma AND ENTITIES@armadura < 10
 
-Macro: ataque en area simple
+Macro: Ataque en área con forma personalizada
 ONCLICK
-SPREAD CHANGE ENTITIES@vida -1d20 TO ENTITIES IN @rangoarma
+SAVE danio 8d6
+SPREAD CHANGE ENTITIES@vida -danio TO ENTITIES IN AREA:circulo(3) AND ENTITIES@tipo != "Jugador"
+
+
 
 Macro: Envenenado
 ONTURN
