@@ -1,0 +1,56 @@
+Las macro son capaces de modificar parámetros visuales, ademas de tiradas y cálculos, las macros 
+se guardan como tal en la partida, un jugador tambien puede definir una macro, la 
+cuestión es que uno solo puede asociar una macro sobre una ficha sobre la que tiene permiso, la idea al final del 
+día es que en la ventana de parámetros de la derecha que está asociado a la entidad, teniendo un botón con la macro 
+definida que lo pulsas y hace todo lo que tenga que hacer. Sin embargo, una macro puede ser de dos tipos, 
+una con tiradas en el turno o al pulsar, la que sea de pulsar aparece tipo botón y 
+la que sea automática en un turno que no se ve como un botón  (en caso de ser ambas que sale como botón). 
+Es a partir la sintaxis propias de los dados, pero con más cosas.
+
+
+
+
+
+Sintaxis macro:
+A lo largo de la definición de la sintaxis cuando se usa "x" es un argumento (Argumento se refiere a la suma de tirada, variables o parámetros.)
+Se pueden usar "()" para agrupar argumentos
+"y" es una condición, que está formada por dos argumentos y una comparación, que puede ser >=, =, <=,  
+para acceder a una variable se usa .variable, para acceder al parámetro visual @parametro.
+Las palabras en mayusculas son palabras reservadas
+ONTURN: Define al inicio de la macro que es automática con el turno
+ONCLICK: Define que se ejecuta al pulsar un botón
+	Las dos anteriores son compatibles, podrías poner ONTURN ONCLICK perfectamente, pero al menos una de las dos al inicio de la macro es obligatoria
+DO x IF y ELSE x: x puede ser cualquier cosa menos ONTURN o ONCLICK,, un atributo se considera tambien como argumento ya que contiene un valor numérico al igual que una variable. Else es opcional 
+EXECUTE x: Indica un argumento que se va a mostrar en el chat.
+QUIT: Desasocia la macro a la entidad a la que está asociada.
+CHANGE @parametro x: cambia a un parámetro visual (solo a uno visual) el valor del argumento
+SPREAD MACROS.macro1, MACROS.macro2 (ninguna otra palabra clave en medio) TO ENTITIES@velocidad <= 12 AND ENTITIES.fue <= 13 OR 1d20 = 20: Inserta una macro automáticamente a aquellas entidades que cumplan la condición
+	El TO es una condición igual que un if, pero esta estructura permite referenciar parámetros y variables de otras entidades, internamente ENTITIES@algo es un bucle que busca para cada entidad en el tablero el parámetro visual concreto, y posteriormente manda lo que tenga que mandar a la entidad que cumpla la condición, si la condición que se cumple no referencia a una entidad se esparces a todas
+SPREAD ENTITIES@vida - (x) to ENTITIES@armadura <= x
+SPREAD EXECUTE X to ENTITIES@velocidad <= x
+SPREAD EXECUTE X to ENTITIES IN @velocidad
+	La palabra clave IN solo es aplicable a parámetros visuales que se dibujan en el tablero, hace referencia a la zona que se marca, si hay alguna entidad dentro del por ejemplo, rombo, se le aplica
+	En general SPREAD puede hacer que otras entidades que cumpla una condición en concreto haga una acción
+SAVE tirada x(tirada es un ejemplo de atributo): Indica que un argumento que se guarda en el atributo x, un atributo se trata igual que una variable excepto por su referenciación, se le llama directamente, si no existia antes se define, o si ya existia se sobreescribe, no puede estar vacio
+	Dentro de un DO puede haber otro do, un execute, un quit, un spread, un change y save
+	Dentro de un IF puede haber un execute, save,
+TURN: Guarda el valor del turno actual, se va actualizando conforme pasan los turnos, si se ejecuta un ONCLICK sin estar en combate da error.
+SPREAD [] TO: [] sirve para declarar un subconjunto de acciones
+
+EJEMPLO MACROS
+
+Macro: ataque en area
+ONCLICK
+SPREAD [
+  SAVE daño 1d20
+  CHANGE ENTITIES@vida -daño
+  EXECUTE dano
+] TO ENTITIES IN @rangoarma AND ENTITIES@armadura < 10
+
+Macro: ataque en area simple
+ONCLICK
+SPREAD CHANGE ENTITIES@vida -1d20 TO ENTITIES IN @rangoarma
+
+Macro: Envenenado
+ONTURN
+DO CHANGE @vida -1d4 IFNOT EXECUTE 1d20 + .con <= 10 ELSE QUIT
