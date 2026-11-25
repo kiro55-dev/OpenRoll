@@ -119,7 +119,8 @@ export const PETICIONES = new Set([
   "borrar_macro",
   "asociar_macro",
   "desasociar_macro",
-  "ejecutar_macro"
+  "ejecutar_macro",
+  "importar_macros_ficha"
 ]);
 
 /**

@@ -114,6 +114,8 @@ pub enum Peticion {
     DesasociarMacro { id_asociacion: u32 },
     /// El botón de una macro ONCLICK de una instancia suya.
     EjecutarMacro { id_asociacion: u32, id_instancia: u16 },
+    /// Las macros que trae la plantilla de una ficha suya: se crean (o se reutilizan por nombre) y se asocian a ella.
+    ImportarMacrosFicha { id_entidad: u16, macros: Vec<crate::tablero_general::modelos::MacroFicha> },
 }
 
 /// Lo que mandó el navegador (`{ cmd, ...args }`) como una petición de la lista blanca.
@@ -229,6 +231,13 @@ pub fn permitida_con(est: &EstadoPartida, jugador: IdJugador, p: &Peticion, subi
             if datos.id != 0 && !est.macros.iter().any(|m| m.id == datos.id && m.autor == jugador) {
                 return Err("Esa macro no es tuya".into());
             }
+            // Una nueva es de uno de sus personajes: las generales (sin personaje) solo las crea el host
+            if datos.id == 0 {
+                match datos.id_entidad {
+                    Some(e) => ficha_suya(est, jugador, e)?,
+                    None => return Err("Solo el host crea macros generales: crea la tuya desde una de tus fichas".into()),
+                }
+            }
             if datos.codigo.chars().count() > crate::tablero_general::macros::sintaxis::MAX_CARACTERES {
                 return Err("La macro es demasiado larga".into());
             }
@@ -239,7 +248,12 @@ pub fn permitida_con(est: &EstadoPartida, jugador: IdJugador, p: &Peticion, subi
         }
         Peticion::AsociarMacro { id_macro, id_entidad } => {
             ficha_suya(est, jugador, *id_entidad)?;
-            if est.macros.iter().any(|m| m.id == *id_macro && m.autor == jugador) { Ok(()) } else { Err("Esa macro no es tuya".into()) }
+            // Las suyas, o las generales; y una de un personaje solo a ese personaje
+            let m = est.macros.iter().find(|m| m.id == *id_macro).ok_or("Esa macro no existe")?;
+            if m.propietaria.is_some_and(|p| p != *id_entidad) {
+                return Err("Esa macro es de otro personaje".into());
+            }
+            if m.autor == jugador || m.es_general() { Ok(()) } else { Err("Solo puedes asociar tus macros o las generales".into()) }
         }
         Peticion::DesasociarMacro { id_asociacion } => {
             let a = est.asociaciones_macro.iter().find(|a| a.id == *id_asociacion).ok_or("Esa macro ya no está asociada")?;
@@ -249,6 +263,15 @@ pub fn permitida_con(est: &EstadoPartida, jugador: IdJugador, p: &Peticion, subi
             }
         }
         Peticion::EjecutarMacro { id_instancia, .. } => instancia_suya(est, jugador, *id_instancia),
+        Peticion::ImportarMacrosFicha { id_entidad, macros } => {
+            ficha_suya(est, jugador, *id_entidad)?;
+            let tope = crate::tablero_general::macros::MAX_MACROS_PLANTILLA;
+            let largo = crate::tablero_general::macros::sintaxis::MAX_CARACTERES;
+            if macros.len() > tope || macros.iter().any(|m| m.codigo.chars().count() > largo || m.nombre.chars().count() > 200) {
+                return Err("Demasiadas macros, o demasiado largas".into());
+            }
+            Ok(())
+        }
         Peticion::PasarTurno { id_mapa, id_grupo } => {
             mapa_compartido(est, *id_mapa)?;
             crate::tablero_general::batalla::pasar_turno_de(est, jugador, *id_mapa, *id_grupo).map(|_| ())
@@ -442,7 +465,12 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
     // Qué tiene que volver a leer la pantalla del host: el chat, o las fichas (banco e instancias)
     let partes = if matches!(
         p,
-        Peticion::GuardarMacro { .. } | Peticion::BorrarMacro { .. } | Peticion::AsociarMacro { .. } | Peticion::DesasociarMacro { .. } | Peticion::EjecutarMacro { .. }
+        Peticion::GuardarMacro { .. }
+            | Peticion::BorrarMacro { .. }
+            | Peticion::AsociarMacro { .. }
+            | Peticion::DesasociarMacro { .. }
+            | Peticion::EjecutarMacro { .. }
+            | Peticion::ImportarMacrosFicha { .. }
     ) {
         // Una macro puede tocar las fichas y el chat
         serde_json::json!({ "macros": true, "tiradas": true, "entidades": true })
@@ -461,6 +489,9 @@ pub fn ejecutar_en(state: &AppState, red: &Red, jugador: IdJugador, p: Peticion)
         Peticion::BorrarMacro { id } => json(crate::tablero_general::macros::borrar_macro_en(state, jugador, id)?),
         Peticion::AsociarMacro { id_macro, id_entidad } => json(crate::tablero_general::macros::asociar_macro_en(state, jugador, id_macro, id_entidad)?),
         Peticion::DesasociarMacro { id_asociacion } => json(crate::tablero_general::macros::desasociar_macro_en(state, jugador, id_asociacion)?),
+        Peticion::ImportarMacrosFicha { id_entidad, macros } => {
+            json(crate::tablero_general::macros::importar_macros_ficha_en(state, jugador, id_entidad, macros)?)
+        }
         Peticion::EjecutarMacro { id_asociacion, id_instancia } => {
             json(crate::tablero_general::macros::ejecutar_macro_en(state, jugador, id_asociacion, id_instancia)?)
         }

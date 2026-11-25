@@ -354,3 +354,33 @@ describe("el conjunto dentro de la plantilla", () => {
     expect(leida.archivos).toEqual([]);
   });
 });
+
+describe("las macros de la ficha en la plantilla", () => {
+  const golpe = { nombre: "Golpe", codigo: "ONCLICK\nEXECUTE 1d20 + .fue" };
+  const conMacros = (macros: unknown) =>
+    generarPlantilla({
+      ...datosDePlantilla({ definiciones: PARAMETROS, grupos: GRUPOS, variables: VARIABLES, conjunto: "D&D 5e", entidad: ficha(), idFicha: 1 }),
+      macros
+    } as never);
+
+  it("viajan con la ficha y se leen tal cual", () => {
+    const datos = datosDePlantilla({ definiciones: PARAMETROS, grupos: GRUPOS, variables: VARIABLES, conjunto: "D&D 5e", entidad: ficha(), idFicha: 1, macros: [golpe] });
+    expect(leerPlantilla(generarPlantilla(datos)).macros).toEqual([{ ...golpe, general: false, asociada: true }]);
+    // Una plantilla sin el campo (de antes) no trae ninguna
+    expect(leerPlantilla(exportar(ficha())).macros).toEqual([]);
+  });
+
+  it("se leen como entrada no fiable: con topes y tipos", () => {
+    expect(() => leerPlantilla(conMacros(Array.from({ length: 211 }, () => golpe)))).toThrow(/macros/);
+    expect(() => leerPlantilla(conMacros([{ nombre: 3, codigo: "x" }]))).toThrow(/dañada/);
+    // Una general puede ir solo con el nombre (la lleva así un jugador); una del personaje, no
+    expect(leerPlantilla(conMacros([{ nombre: "Atacar", codigo: "", general: true }])).macros).toEqual([{ nombre: "Atacar", codigo: "", general: true, asociada: true }]);
+    expect(leerPlantilla(conMacros([{ nombre: "Suelta", codigo: "", general: true, asociada: false }])).macros[0].asociada).toBe(false);
+    expect(() => leerPlantilla(conMacros([{ nombre: "Mía", codigo: "" }]))).toThrow(/sin código/);
+    expect(leerPlantilla(conMacros([{ nombre: "  Larga ", codigo: "x".repeat(5000) }])).macros[0]).toEqual({ nombre: "Larga", codigo: "x".repeat(2000), general: false, asociada: true });
+  });
+
+  it("el JavaScript de la plantilla las conserva al guardar", () => {
+    expect(plantillaHtml).toContain("macros: DATOS.macros || []");
+  });
+});

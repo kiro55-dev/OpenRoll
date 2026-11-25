@@ -210,7 +210,7 @@ describe("formas de los parámetros en el tablero", () => {
     return llamadas;
   };
 
-  it("un Enemigo dibuja el rango y la barra de vida; un Objeto no dibuja nada", () => {
+  it("un Enemigo dibuja el rango; un Objeto no dibuja nada", () => {
     expect(dibujar("Enemigo")).toEqual(expect.arrayContaining(["rect", "fillRect"]));
     expect(dibujar("Objeto")).toEqual([]);
   });

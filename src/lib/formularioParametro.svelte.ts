@@ -13,7 +13,6 @@ export const FORMAS: { valor: TipoForma; texto: string }[] = [
   { valor: "Rombo", texto: "Rombo" },
   { valor: "Circulo", texto: "Círculo" },
   { valor: "Cuadrado", texto: "Cuadrado" },
-  { valor: "BarraVida", texto: "Barra de vida" },
   // Solo para parámetros con máximo (ver `formasDisponibles`)
   { valor: "Resumen", texto: "Resumen (actual/máx)" }
 ];

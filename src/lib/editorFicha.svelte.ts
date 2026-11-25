@@ -27,6 +27,8 @@ import { importarImagen, urlDeImagen } from "$lib/imagenes";
 import { cargarImagen, encuadreCentrado, miniaturaWebp, type Encuadre } from "$lib/recorteFoto";
 import { aplicarAFicha, MAX_ARCHIVOS_TEXTO, type ArchivoPlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
 import { conjuntoActual, importarFotoPlantilla } from "$lib/plantillaIo";
+import { macros } from "$lib/macros.svelte";
+import type { MacroPlantilla } from "$lib/plantillaFicha";
 
 interface ArchivoAdjunto {
   ruta: string;
@@ -498,6 +500,8 @@ export class EditorFicha {
 
   /** Lo que no se pudo pasar de la última plantilla aplicada (se ve en la ventana). */
   avisosPlantilla = $state<string[]>([]);
+  /** Las macros que trajo la plantilla: se crean y asocian a la ficha al GUARDAR (como los .txt, nada se escribe antes). */
+  #macrosPlantilla: MacroPlantilla[] = [];
   /** Se ve unos segundos tras importar una plantilla («Datos importados»). */
   datosImportados = $state(false);
   #relojImportado: ReturnType<typeof setTimeout> | null = null;
@@ -534,6 +538,7 @@ export class EditorFicha {
     }
     // Los archivos de texto: la plantilla manda (se renombran, se editan, se crean y los que ya no están dejan de existir)
     if (plantilla.ficha && plantilla.archivos) await this.#aplicarArchivos(plantilla.archivos, avisos);
+    if (plantilla.ficha) this.#macrosPlantilla = plantilla.macros ?? [];
     this.avisosPlantilla = avisos;
     this.datosImportados = true;
     if (this.#relojImportado) clearTimeout(this.#relojImportado);
@@ -762,6 +767,17 @@ export class EditorFicha {
       const enviar = $state.snapshot(this.entidad) as Entidad;
       if (!this.esBorrador) enviar.actuales = actualesTocados(this.#original, enviar);
       if (!(await partida.guardarEntidad(enviar))) return false;
+      // Las macros de la plantilla, ya con la ficha guardada (lo que no se pudo, como aviso)
+      if (this.#macrosPlantilla.length) {
+        const lista = this.#macrosPlantilla;
+        this.#macrosPlantilla = [];
+        try {
+          const avisos = await macros.importarDeFicha(this.entidad.id, lista);
+          if (avisos.length) partida.avisar(avisos.join(" · "));
+        } catch (err) {
+          partida.avisar(`Las macros de la plantilla no se han podido importar: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
       await this.#guardarMiniatura();
       // Fotos/archivos de la sesión que al final no se usaron (cambió de foto, quitó un adjunto...)
       await this.#descartarSesion();

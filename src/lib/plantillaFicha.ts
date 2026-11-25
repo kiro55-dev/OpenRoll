@@ -121,7 +121,24 @@ export interface DatosPlantilla {
   foto: FotoPlantilla | null;
   /** Los archivos de texto de la ficha. Una plantilla de antes de este apartado no lo trae: en ese caso no se tocan los de la ficha. */
   archivos: ArchivoPlantilla[];
+  /** Las macros asociadas a la ficha (las del conjunto entero, si las hay, van dentro de `definicion_conjunto`). */
+  macros?: MacroPlantilla[];
 }
+
+/** Una macro que viaja en la plantilla de una ficha: su nombre y su código (Rust la vuelve a comprobar al importarla). */
+export interface MacroPlantilla {
+  nombre: string;
+  /** Vacío solo en una general que quien exportó no conoce (un jugador): al importar se usa la del conjunto, si la hay. */
+  codigo: string;
+  /** Es una macro general (del conjunto) y no del personaje. */
+  general?: boolean;
+  /** La tenía puesta este personaje. Las generales que no (todas las del conjunto viajan) solo se crean en el conjunto al importar. */
+  asociada?: boolean;
+}
+
+/** Macros que puede traer la plantilla de una ficha (las suyas y todas las generales del conjunto) y largo de cada una (los topes de Rust). */
+export const MAX_MACROS_PLANTILLA = 210;
+export const MAX_CODIGO_MACRO = 2000;
 
 /** Lo que se queda de una plantilla leída: sus datos y, de sus definiciones, solo los nombres (para emparejar por nombre). */
 export interface PlantillaLeida {
@@ -132,6 +149,8 @@ export interface PlantillaLeida {
   foto: FotoPlantilla | null;
   /** `null` = la plantilla no lleva archivos de texto (no se toca ninguno). */
   archivos: ArchivoPlantilla[] | null;
+  /** Las macros de la ficha (vacío si no trae ninguna). */
+  macros: MacroPlantilla[];
   nombresVariables: Map<number, string>;
   nombresParametros: Map<number, string>;
 }
@@ -154,6 +173,7 @@ export function datosDePlantilla(p: {
   foto?: FotoPlantilla | null;
   archivos?: ArchivoPlantilla[];
   definicionConjunto?: Record<string, unknown> | null;
+  macros?: MacroPlantilla[];
 }): DatosPlantilla {
   const e = p.entidad ?? null;
   return {
@@ -195,7 +215,8 @@ export function datosDePlantilla(p: {
         }
       : null,
     foto: p.foto ?? null,
-    archivos: p.archivos ?? []
+    archivos: p.archivos ?? [],
+    macros: (p.macros ?? []).slice(0, MAX_MACROS_PLANTILLA)
   };
 }
 
@@ -301,6 +322,7 @@ export function leerPlantilla(html: string): PlantillaLeida {
     ficha: d.ficha === null || d.ficha === undefined ? null : leerFicha(objeto(d.ficha, "ficha")),
     foto: d.foto === null || d.foto === undefined ? null : leerFoto(objeto(d.foto, "foto")),
     archivos: d.archivos === null || d.archivos === undefined ? null : leerArchivos(d.archivos),
+    macros: d.macros === null || d.macros === undefined ? [] : leerMacros(d.macros),
     nombresVariables,
     nombresParametros
   };
@@ -358,6 +380,19 @@ function leerArchivos(v: unknown): ArchivoPlantilla[] {
     if (original && originales.has(original.toLowerCase())) original = null;
     if (original) originales.add(original.toLowerCase());
     return { original, nombre, contenido };
+  });
+}
+
+/** Las macros de la plantilla (entrada NO fiable): solo nombre y código de texto, con los topes de Rust, que las vuelve a comprobar. */
+function leerMacros(v: unknown): MacroPlantilla[] {
+  if (!Array.isArray(v) || v.length > MAX_MACROS_PLANTILLA) throw new Error(`La plantilla no puede llevar más de ${MAX_MACROS_PLANTILLA} macros`);
+  return v.map((x) => {
+    const m = objeto(x, "macro");
+    const general = m.general === true;
+    const codigo = texto(m.codigo ?? "", MAX_CODIGO_MACRO, "macro");
+    // Sin código solo vale una general (se reconoce por su nombre); una del personaje sin código no es nada
+    if (!general && !codigo.trim()) throw new Error("La plantilla está dañada (macro sin código)");
+    return { nombre: texto(m.nombre, 40, "macro").trim(), codigo, general, asociada: m.asociada !== false };
   });
 }
 

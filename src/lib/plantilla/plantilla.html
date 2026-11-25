@@ -606,6 +606,7 @@
       plantilla_id: DATOS.plantilla_id || null,
       definiciones: defs,
       definicion_conjunto: DATOS.definicion_conjunto || null, // el conjunto entero, tal cual (OpenRoll lo importa de aquí)
+      macros: DATOS.macros || [], // las macros de la ficha, tal cual (no se editan aquí)
       ficha: {
         nombre: estado.nombre.trim(),
         tipo: estado.tipo,

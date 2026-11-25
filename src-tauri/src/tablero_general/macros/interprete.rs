@@ -268,8 +268,15 @@ impl Ejecucion {
     fn asociar(&mut self, m: &mut dyn Mundo, nombre: &str, destino: u16) -> Result<(), String> {
         let est = m.estado();
         let buscado = sin_espacios(nombre);
+        let ficha = instancia(est, self.propia)?.base.id;
         let por_nombre = |autor: Option<IdJugador>| {
-            est.macros.iter().find(|x| sin_espacios(&x.nombre) == buscado && autor.is_none_or(|a| x.autor == a))
+            // Solo las del conjunto que se está usando, y de este personaje o generales
+            est.macros.iter().find(|x| {
+                sin_espacios(&x.nombre) == buscado
+                    && (x.es_general() || autor.is_none_or(|a| x.autor == a))
+                    && x.propietaria.is_none_or(|p| p == ficha)
+                    && super::activa(est, x)
+            })
         };
         let mac = por_nombre(Some(self.autoridad))
             .or_else(|| if self.autoridad == ID_HOST { por_nombre(None) } else { None })

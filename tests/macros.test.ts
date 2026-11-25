@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => [], convertFileSrc: (s: string) => s }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 
-const { macrosDeInstancia, macrosEditables, nombreNuevaMacro, CODIGO_NUEVA_MACRO, macros } = await import("$lib/macros.svelte");
+const { macrosDeInstancia, macrosEditables, nombreNuevaMacro, CODIGO_NUEVA_MACRO, macros, macrosDeLaVentana, esGeneral } = await import("$lib/macros.svelte");
 
 const macro = (id: number, al_pulsar: boolean, en_turno: boolean, codigo = "x") => ({ id, nombre: `M${id}`, codigo, autor: 0, al_pulsar, en_turno });
 const asoc = (id: number, id_macro: number, destino: { Ficha: number } | { Instancia: number }) => ({ id, id_macro, destino, autor: 0 });
@@ -25,6 +25,26 @@ describe("macro nueva y borradores", () => {
     macros.ponerBorrador(4, undefined);
     expect(macros.borradores).toEqual({ 5: "x" });
     macros.ponerBorrador(5, undefined);
+  });
+});
+
+describe("macros de un personaje y generales", () => {
+  const general = { ...macro(1, true, false), propietaria: null };
+  const delMago = { ...macro(2, true, false), propietaria: 7 };
+  const delOrco = { ...macro(3, true, false), propietaria: 8 };
+  const deJugador = { ...macro(4, true, false), autor: 1, propietaria: null }; // de antes de las de personaje
+
+  it("la ventana enseña las generales y, desde un personaje, solo las suyas", () => {
+    const todas = [general, delMago, delOrco, deJugador];
+    expect(macrosDeLaVentana(todas, undefined).map((m) => m.id)).toEqual([1, 4]);
+    expect(macrosDeLaVentana(todas, 7).map((m) => m.id)).toEqual([1, 2, 4]);
+    expect(macrosDeLaVentana(todas, 8).map((m) => m.id)).toEqual([1, 3, 4]);
+  });
+
+  it("general = sin personaje y del host", () => {
+    expect(esGeneral(general)).toBe(true);
+    expect(esGeneral(delMago)).toBe(false);
+    expect(esGeneral(deJugador)).toBe(false);
   });
 });
 

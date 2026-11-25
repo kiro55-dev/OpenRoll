@@ -58,6 +58,7 @@ fn generico() -> ConjuntoParametros {
         listas_rangos: Vec::new(),
         escala_resultado: None,
         archivos_texto: Vec::new(),
+        macros: Vec::new(),
     }
 }
 
@@ -97,6 +98,8 @@ impl EstadoPartida {
             listas_rangos: self.listas_rangos.clone(),
             escala_resultado: self.escala_resultado.clone(),
             archivos_texto: self.archivos_texto_defecto.clone(),
+            // Las macros del conjunto viven en `EstadoPartida.macros` (ver `obtener_conjunto_activo`)
+            macros: Vec::new(),
         }
     }
 
@@ -301,6 +304,7 @@ pub fn asegurar(est: &mut EstadoPartida) {
         listas_rangos: est.listas_rangos.clone(),
         escala_resultado: est.escala_resultado.clone(),
         archivos_texto: est.archivos_texto_defecto.clone(),
+        macros: Vec::new(),
     };
     let g = generico();
     let es_generico = vivo.parametros == g.parametros && vivo.variables.is_empty() && vivo.grupos_variables == g.grupos_variables;
@@ -318,8 +322,10 @@ impl EstadoPartida {
     /// vivas). `default()` sigue siendo el genérico: es la base de las partidas anteriores a los conjuntos y de casi todas las pruebas.
     /// Una partida que ya existe no pasa por aquí: conserva lo que tiene (`asegurar`).
     pub fn para_partida_nueva() -> Self {
-        let dnd = integrado(CONJUNTO_POR_DEFECTO).expect("el conjunto por defecto existe").contenido;
+        let mut dnd = integrado(CONJUNTO_POR_DEFECTO).expect("el conjunto por defecto existe").contenido;
         let mut e = Self::default();
+        // Sus macros nacen como macros del host del conjunto (como al añadirlo a una partida)
+        e.macros = crate::tablero_general::macros::macros_nuevas(&e, 1, std::mem::take(&mut dnd.macros));
         e.definiciones_parametros = dnd.parametros.clone();
         e.grupos_variables = dnd.grupos_variables.clone();
         e.definiciones_variables = dnd.variables.clone();
@@ -490,6 +496,9 @@ pub fn validar(mut c: ConjuntoParametros) -> Result<ConjuntoParametros, String> 
     // Los archivos de texto por defecto, con las mismas reglas que al editarlos a mano
     let archivos_texto = crate::tablero_general::archivos_defecto::validar(c.archivos_texto)?;
 
+    // Las macros, con las mismas reglas que al escribirlas a mano (nombre y código), sin nombres repetidos
+    let macros = crate::tablero_general::macros::validar_de_conjunto(c.macros)?;
+
     Ok(ConjuntoParametros {
         nombre: c.nombre,
         descripcion: c.descripcion,
@@ -499,6 +508,7 @@ pub fn validar(mut c: ConjuntoParametros) -> Result<ConjuntoParametros, String> 
         listas_rangos: listas,
         escala_resultado,
         archivos_texto,
+        macros,
     })
 }
 
@@ -593,8 +603,11 @@ fn anadir(est: &mut EstadoPartida, state: &AppState, origen: Option<String>, mut
         return Err(format!("Una partida no puede guardar más de {MAX_CONJUNTOS} conjuntos: borra alguno"));
     }
     contenido.nombre = nombre_libre(est, &contenido.nombre);
+    // Sus macros no se guardan dentro del conjunto: pasan a ser macros del host de ese conjunto (las vivas de la partida)
+    let macros = std::mem::take(&mut contenido.macros);
     let guardado = ConjuntoGuardado { id: id_libre(est), origen, contenido, valores: Default::default() };
     registrar(est, &state.almacen, DeltaPartida::ConjuntoAnadido(guardado.clone()));
+    crate::tablero_general::macros::crear_de_conjunto(est, &state.almacen, guardado.id, macros);
     Ok(guardado)
 }
 
@@ -630,6 +643,7 @@ pub fn crear_conjunto_vacio_en(state: &AppState) -> Result<u16, String> {
         listas_rangos: vec![],
         escala_resultado: None,
         archivos_texto: vec![],
+        macros: vec![],
     })?;
     let mut est = state.lock();
     Ok(anadir(&mut est, state, None, contenido)?.id)
@@ -670,7 +684,7 @@ pub fn renombrar_conjunto_en(id: u16, nombre: String, state: &AppState) -> Resul
         return Ok(());
     }
     // Se valida como el resto (largo, caracteres) y que no lo tenga otro
-    validar(ConjuntoParametros { nombre: nombre.clone(), descripcion: String::new(), parametros: vec![], grupos_variables: vec![], variables: vec![], listas_rangos: vec![], escala_resultado: None, archivos_texto: vec![] })?;
+    validar(ConjuntoParametros { nombre: nombre.clone(), descripcion: String::new(), parametros: vec![], grupos_variables: vec![], variables: vec![], listas_rangos: vec![], escala_resultado: None, archivos_texto: vec![], macros: vec![] })?;
     let repetido = est.conjuntos_parametros.iter().filter(|g| g.id != id).filter_map(|g| est.contenido_de(g.id)).any(|c| c.nombre.to_lowercase() == nombre.to_lowercase());
     if repetido {
         return Err(format!("Ya hay un conjunto que se llama «{nombre}»"));
@@ -698,11 +712,14 @@ pub fn borrar_conjunto_en(id: u16, state: &AppState) -> Result<(), String> {
 }
 
 /// El conjunto completo (con el nombre y la descripción que tiene guardados) que está en uso: lo que lleva dentro una plantilla de ficha
-/// exportada, para que se pueda importar desde ella.
+/// exportada, para que se pueda importar desde ella. `con_macros`: también sus macros (las del host de este conjunto); lo pide la
+/// plantilla de los parámetros (en blanco), no la de una ficha, que lleva solo las suyas.
 #[tauri::command]
-pub fn obtener_conjunto_activo(state: State<'_, AppState>) -> ConjuntoParametros {
+pub fn obtener_conjunto_activo(con_macros: Option<bool>, state: State<'_, AppState>) -> ConjuntoParametros {
     let est = state.lock();
-    est.contenido_de(est.conjunto_activo).unwrap_or_else(|| est.contenido_vivo())
+    let mut c = est.contenido_de(est.conjunto_activo).unwrap_or_else(|| est.contenido_vivo());
+    c.macros = if con_macros.unwrap_or(false) { crate::tablero_general::macros::del_conjunto_activo(&est) } else { Vec::new() };
+    c
 }
 
 /// El conjunto que lleva una plantilla de ficha (el texto del .html): se busca el bloque de datos `<script id="datos-openroll">`, se
@@ -928,6 +945,7 @@ mod tests {
             listas_rangos: vec![],
             escala_resultado: None,
             archivos_texto: vec![],
+            macros: vec![],
         }
     }
 
@@ -1333,7 +1351,11 @@ mod tests {
         for clave in ["dnd5e", "pathfinder2e", "cthulhu7e"] {
             let id = anadir_conjunto_de_serie_en(clave, &state).unwrap();
             let original = state.lock().contenido_de(id).unwrap();
-            assert_eq!(original, integrado(clave).unwrap().contenido, "{clave}: la copia es igual al original");
+            let serie = integrado(clave).unwrap().contenido;
+            // Igual al original, salvo sus macros, que pasan a ser macros de la partida de ese conjunto
+            assert_eq!(original, ConjuntoParametros { macros: vec![], ..serie.clone() }, "{clave}: la copia es igual al original");
+            let nombres: Vec<String> = state.lock().macros.iter().filter(|m| m.conjunto == Some(id)).map(|m| m.nombre.clone()).collect();
+            assert_eq!(nombres, serie.macros.iter().map(|m| m.nombre.clone()).collect::<Vec<_>>(), "{clave}: sus macros");
             // Llevarlo en una plantilla y volver a importarla da lo mismo (con la escala, los rangos y los cálculos de parámetros)
             let archivo = state.raiz.join(format!("{clave}.html"));
             std::fs::write(&archivo, plantilla_con(&original)).unwrap();

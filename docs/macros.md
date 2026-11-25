@@ -10,6 +10,19 @@ ficha la abre para editarla); cada uno solo puede asociarlas a fichas que contro
 campo (o con Enter). El texto se guarda solo como borrador mientras escribes, así que puedes dejarla a medias y seguir
 después (aunque cierres la ventana o la aplicación); **Guardar** (o Ctrl+S) es lo que aplica el texto a la macro.
 
+**Cada macro es de un conjunto de parámetros**, el que estaba en uso al crearla, porque usa sus nombres (`.fue`, `@vida`). Solo se
+ve y funciona con ese conjunto en uso; las de otros conjuntos se guardan y vuelven al volver a él. Los conjuntos de serie
+(D&D 5e, Pathfinder 2e, Cthulhu 7e) traen unas cuantas de ejemplo. La plantilla de una ficha lleva solo las macros de esa ficha
+(al importarla se crean, o se usan las tuyas que ya se llamen igual, y se le asocian al guardar); la plantilla de los
+parámetros actuales lleva todas las del conjunto.
+
+**De un personaje o generales.** Una macro creada desde la caja «Parámetros» de un personaje (botón «+ Macro») es **de ese
+personaje**: se asocia sola a él, solo se puede asociar a él y viaja con su plantilla, pero no sale con el conjunto. Una macro
+creada desde ⚙ → «Macros…» es **general**: forma parte del conjunto y sale al exportarlo; **solo el host** crea generales.
+Cualquiera puede ponerles una general a sus personajes (un jugador la ve sin su código). La plantilla de un personaje lleva
+las suyas y TODAS las generales del conjunto; al importarla, las generales que ya existan se reutilizan por nombre, las que
+no existan las crea el host (un jugador no puede) y solo se le ponen al personaje las que ya tenía puestas.
+
 ## Cuándo se ejecuta
 
 La primera línea dice cuándo:

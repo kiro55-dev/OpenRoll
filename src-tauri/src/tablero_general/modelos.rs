@@ -390,6 +390,10 @@ pub struct ConjuntoParametros {
     /// Los archivos de texto (.txt) con los que nace toda ficha NUEVA, en su orden (ver archivos_defecto.rs).
     #[serde(default)]
     pub archivos_texto: Vec<ArchivoTextoDefecto>,
+    /// Sus macros por defecto (solo como datos: las de serie y las de una plantilla de los parámetros). En una partida viven en
+    /// `EstadoPartida.macros` con su `conjunto`; aquí va vacío salvo al exportar el conjunto entero.
+    #[serde(default)]
+    pub macros: Vec<MacroConjunto>,
 }
 
 /// Un archivo de texto que trae por defecto cada ficha nueva del conjunto: su nombre (sin «.txt») y su texto inicial.
@@ -904,6 +908,47 @@ pub struct Macro {
     pub al_pulsar: bool,
     #[serde(default)]
     pub en_turno: bool,
+    /// El conjunto de parámetros al que pertenece (el activo al crearla): solo se ve, se asocia y se ejecuta con ese conjunto activo,
+    /// porque usa sus nombres (`.fue`, `@vida`). `None`: una macro de antes de que existiera esto, vale en cualquiera.
+    #[serde(default)]
+    pub conjunto: Option<u16>,
+    /// De qué PERSONAJE (ficha) es: la que se crea desde la caja «Parámetros» de una ficha. Solo se asocia a ella y no se exporta con el
+    /// conjunto (viaja con la ficha). `None`: general (del conjunto), la que se crea desde ⚙ → «Macros…» y solo puede crear el host.
+    #[serde(default)]
+    pub propietaria: Option<u16>,
+}
+
+impl Macro {
+    /// ¿Es una macro general del conjunto? (la del host que no es de ningún personaje: la que se exporta con el conjunto y puede usar cualquiera)
+    pub fn es_general(&self) -> bool {
+        self.propietaria.is_none() && self.autor == ID_HOST
+    }
+}
+
+/// Una macro tal como viaja en la plantilla de una ficha: las de la propia ficha (`general = false`, con su código, siempre asociadas) y
+/// TODAS las generales del conjunto (`general = true`; quien exporta sin conocer su código, un jugador, las lleva solo con el nombre).
+/// `asociada`: la tenía puesta ESTE personaje (las demás generales solo viajan para que existan en el conjunto al importar).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct MacroFicha {
+    pub nombre: String,
+    #[serde(default)]
+    pub codigo: String,
+    #[serde(default)]
+    pub general: bool,
+    #[serde(default = "verdadero")]
+    pub asociada: bool,
+}
+
+fn verdadero() -> bool {
+    true
+}
+
+/// Una macro como DATOS dentro de un conjunto de parámetros (las de serie y las que trae una plantilla). No es una copia viva: al añadir
+/// el conjunto a la partida se crean como macros del host de ese conjunto (ver `conjuntos::anadir`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct MacroConjunto {
+    pub nombre: String,
+    pub codigo: String,
 }
 
 /// A qué está asociada una macro: a una FICHA (todas sus instancias; desde la caja «Parámetros») o a una INSTANCIA (lo que reparte

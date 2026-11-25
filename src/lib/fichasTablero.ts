@@ -29,7 +29,7 @@ export const COLOR_TIPO: Record<TipoEntidad, string> = {
 
 /**
  * ¿Este tipo de ficha oculta este parámetro? Un Objeto no representa en el tablero los parámetros con forma visual
- * (cuadrado, rombo, círculo, barra de vida), así que tampoco se enseñan en la caja «Parámetros». Los de tipo «Resumen» y los
+ * (cuadrado, rombo, círculo), así que tampoco se enseñan en la caja «Parámetros». Los de tipo «Resumen» y los
  * que no se representan (texto, etc.) se ven como en cualquier otra ficha.
  */
 export function parametroOculto(tipo: TipoEntidad, d: DefinicionParametro): boolean {
@@ -274,11 +274,10 @@ const colorDe = (rgba: number[], alfa?: number) =>
 
 /**
  * Dibuja, alrededor de la ficha, la forma de cada parámetro que la tenga. `valorDe(definicion)`
- * da el número que se usa (el actual si tiene máximo); `maximoDe` el máximo, para la barra de vida.
+ * da el número que se usa (el actual si tiene máximo); `maximoDe` el máximo, para la.
  *  - Cuadrado: el rectángulo cuyos lados están a `n` casillas de los bordes del cuerpo.
  *  - Rombo: une los cuatro puntos a `n` casillas (izquierda, arriba, derecha, abajo).
  *  - Círculo: la elipse (círculo con cuerpo cuadrado) que pasa por esos cuatro puntos.
- *  - Barra de vida: barra sobre la ficha con la proporción actual/máx.
  * Los cuatro puntos de referencia caen siempre en la rejilla; el resto de la figura, donde caiga.
  */
 export function dibujarFormas(
@@ -290,7 +289,7 @@ export function dibujarFormas(
   valorDe: (d: DefinicionParametro) => number,
   maximoDe: (d: DefinicionParametro) => number
 ) {
-  // Un Objeto no dibuja los parámetros visuales en el tablero (ni rangos ni barra de vida): solo su cuerpo
+  // Un Objeto no dibuja los parámetros visuales en el tablero (rangos): solo su cuerpo
   if (ficha.instancia.base.tipo === "Objeto") return;
   const lados = ladosInstancia(ficha.instancia);
   // Pasa una línea de rejilla (en casillas) a pantalla

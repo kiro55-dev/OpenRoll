@@ -8,8 +8,9 @@
   import { redimensionable } from "$lib/redimensionarVentana";
   import { esJugador } from "$lib/modo";
   import { untrack } from "svelte";
-  import { CODIGO_NUEVA_MACRO, macros, macrosEditables, nombreNuevaMacro, type Comprobacion } from "$lib/macros.svelte";
+  import { CODIGO_NUEVA_MACRO, esGeneral, macros, macrosDeLaVentana, nombreNuevaMacro, type Comprobacion } from "$lib/macros.svelte";
   import { partida } from "$lib/partida.svelte";
+  import { conjuntoActual } from "$lib/plantillaIo";
 
   let { onCerrar }: { onCerrar: () => void } = $props();
 
@@ -21,7 +22,11 @@
 
   const EJEMPLO = "ONTURN\nDO CHANGE @vida -1d4 IFNOT EXECUTE 1d20 + .con >= 14\nELSE QUIT";
 
-  const mias = $derived(macrosEditables(macros.lista, esJugador));
+  // Lo que enseña la lista: las generales y, desde un personaje, las suyas (un jugador ve las generales sin código: solo se asocian)
+  const mias = $derived(macrosDeLaVentana(macros.lista, entidad?.id));
+  /** Desde un personaje se crean macros SUYAS; sin personaje se crean generales, y eso solo lo hace el host. */
+  const puedeCrear = $derived(!!entidad || !esJugador);
+
   let busqueda = $state("");
   const visibles = $derived(mias.filter((m) => m.nombre.toLowerCase().includes(busqueda.trim().toLowerCase())));
   /** La asociación de una macro con la ficha de la ventana (para la marca ✓ y el ✕). */
@@ -40,6 +45,8 @@
   let ayudaAbierta = $state(false);
 
   const guardada = $derived(mias.find((m) => m.id === idActual));
+  /** Una general que a un jugador le llega sin código: se puede asociar, no editar. */
+  const soloLectura = $derived(!!guardada && esJugador && guardada.codigo === "");
   /** El texto escrito difiere del aplicado: queda guardado como borrador hasta pulsar «Guardar». */
   const sinAplicar = $derived(!!guardada && guardada.codigo !== codigo);
 
@@ -133,8 +140,12 @@
     guardando = true;
     error = "";
     try {
-      const m = await macros.guardar({ id: 0, nombre: nombreNuevaMacro(mias.map((x) => x.nombre)), codigo: CODIGO_NUEVA_MACRO });
-      if (entidad) await macros.asociar(m.id, entidad.id);
+      const m = await macros.guardar({
+        id: 0,
+        nombre: nombreNuevaMacro(macros.lista.map((x) => x.nombre)),
+        codigo: CODIGO_NUEVA_MACRO,
+        idEntidad: entidad?.id
+      });
       busqueda = "";
       abrir(m.id);
     } catch (err) {
@@ -218,7 +229,22 @@
   <div class="cuerpo">
     <div class="lista">
       <input type="text" class="buscar" placeholder="Buscar macro..." bind:value={busqueda} />
-      <button type="button" class="item nueva" disabled={guardando} onclick={crear}>+ Nueva macro</button>
+      {#if conjuntoActual()}
+        <!-- Cada macro es de un conjunto de parámetros (usa sus nombres): solo se ven las del que está en uso -->
+        <span class="del-conjunto" title={ayuda("Las macros son del conjunto de parámetros con el que se crearon: las de otros conjuntos se guardan, pero solo se ven y funcionan con el suyo en uso")}>Del conjunto «{conjuntoActual()}»</span>
+      {/if}
+      <button
+        type="button"
+        class="item nueva"
+        disabled={guardando || !puedeCrear}
+        title={ayuda(
+          !puedeCrear
+            ? "Solo el host crea macros generales: las tuyas se crean desde una de tus fichas (caja «Parámetros» → + Macro)"
+            : entidad
+              ? `Crea una macro de ${entidad.nombre}: se asocia a él y viaja con su plantilla`
+              : "Crea una macro general, del conjunto: sale con él al exportarlo"
+        )}
+        onclick={crear}>+ Nueva macro</button>
       {#each visibles as m (m.id)}
         {@const aso = deLaFicha(m.id)}
         <div class="fila" class:activa={idActual === m.id} class:asociada={!!aso}>
@@ -237,6 +263,7 @@
           <button type="button" class="item" title={ayuda("Pulsa para abrirla y editarla")} onclick={() => abrir(m.id)}>
             <span class="nombre">{m.nombre}</span>
             <span class="tipos">
+              {#if m.propietaria != null}<span class="tipo personaje" title="De este personaje">FICHA</span>{:else if esGeneral(m)}<span class="tipo general" title="General, del conjunto">GEN</span>{/if}
               {#if m.al_pulsar}<span class="tipo">CLICK</span>{/if}
               {#if m.en_turno}<span class="tipo turno">TURNO</span>{/if}
             </span>
@@ -249,7 +276,11 @@
 
     {#if !guardada}
       <div class="editor sin-macro">
-        <p>{mias.length ? "Elige una macro de la lista para editarla" : "Aún no tienes ninguna macro"}, o crea una con «+ Nueva macro».</p>
+        <p>
+          {mias.length ? "Elige una macro de la lista" : entidad ? "Este personaje aún no tiene macros" : "Aún no hay macros generales"}{puedeCrear
+            ? ", o crea una con «+ Nueva macro»"
+            : ""}.
+        </p>
         <p class="ejemplo">Por ejemplo:</p>
         <pre>{EJEMPLO}</pre>
       </div>
@@ -261,6 +292,7 @@
           type="text"
           maxlength="40"
           bind:value={nombre}
+          readonly={soloLectura}
           title={ayuda("El nombre se aplica al salir del campo o con Enter")}
           onblur={aplicarNombre}
           onkeydown={(e) => {
@@ -277,7 +309,8 @@
         class="codigo"
         spellcheck="false"
         bind:value={codigo}
-        placeholder={EJEMPLO}
+        readonly={soloLectura}
+        placeholder={soloLectura ? "Es una macro general del host: puedes asociarla a tus fichas, pero no ver ni cambiar su código" : EJEMPLO}
         title={ayuda("Empieza con ONCLICK (botón en la caja «Parámetros»), ONTURN (sola cuando le llega el turno) o los dos. Lo que escribes se conserva aunque no pulses Guardar")}
       ></textarea>
       <div class="estado">
@@ -297,7 +330,7 @@
       </div>
       {#if error}<p class="mal">{error}</p>{/if}
       <div class="botones">
-        {#if guardada}
+        {#if guardada && !soloLectura}
           {#if confirmarBorrado}
             <span class="mal">¿Borrarla? Se quita de todas las fichas.</span>
             <button type="button" class="btn peligro" onclick={borrar}>Borrar</button>
@@ -306,7 +339,7 @@
             <button type="button" class="btn" onclick={() => (confirmarBorrado = true)}>Borrar</button>
           {/if}
         {/if}
-        <button type="button" class="btn guardar" disabled={guardando || !sinAplicar || !!errorCodigo} title={ayuda("Aplica el texto a la macro (Atajo: Ctrl + S)")} onclick={guardar}>
+        <button type="button" class="btn guardar" hidden={soloLectura} disabled={guardando || !sinAplicar || !!errorCodigo} title={ayuda("Aplica el texto a la macro (Atajo: Ctrl + S)")} onclick={guardar}>
           Guardar
         </button>
       </div>
@@ -378,11 +411,14 @@ SPREAD CHANGE ENTITIES@vida -(2d8 + .fue) TO ENTITIES@armadura &lt;= 1d20 + .des
   .buscar { background: #09090b; border: 1px solid #3f3f46; color: white; padding: 3px 5px; border-radius: 4px; font-size: 11px; }
   .buscar:focus { outline: none; border-color: #60a5fa; }
   .vacio { color: #71717a; font-size: 11px; padding: 4px; }
+  .del-conjunto { color: #71717a; font-size: 10px; padding: 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .nombre { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tipos { display: flex; gap: 2px; flex: none; }
   .tipo { font-size: 8px; padding: 1px 3px; border-radius: 3px; background: #1e3a8a; color: #bfdbfe; }
   .tipo.turno { background: #713f12; color: #fde68a; }
+  .tipo.personaje { background: #14532d; color: #bbf7d0; }
+  .tipo.general { background: #3f3f46; color: #e4e4e7; }
 
   .editor { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .campo { display: flex; align-items: center; gap: 6px; }

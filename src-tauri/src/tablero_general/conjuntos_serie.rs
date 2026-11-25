@@ -38,6 +38,11 @@ fn derivada(id: u16, nombre: &str, abreviatura: &str, grupo: u16, de: u16, opcio
     DefinicionVariable { bases: vec![de], opcionales: opcionales.to_vec(), ..base(id, nombre, abreviatura, grupo, 0, 1) }
 }
 
+/// Las macros por defecto de un conjunto: (nombre, código).
+fn macros(lista: &[(&str, &str)]) -> Vec<MacroConjunto> {
+    lista.iter().map(|(nombre, codigo)| MacroConjunto { nombre: (*nombre).into(), codigo: (*codigo).into() }).collect()
+}
+
 fn grupo(id: u16, nombre: &str, tipo: TipoGrupoVariables) -> GrupoVariables {
     GrupoVariables { id, nombre: nombre.into(), tipo }
 }
@@ -231,6 +236,16 @@ pub fn dnd5e() -> ConjuntoParametros {
         listas_rangos: vec![],
         escala_resultado: Some(escala("dnd")),
         archivos_texto: archivos_dnd(),
+        macros: macros(&[
+            // Ataque a quien está pegado: cada uno con su tirada contra su clase de armadura, y el daño que se lleva cada uno
+            (
+                "Ataque cuerpo a cuerpo",
+                "ONCLICK\nSPREAD [\n  SAVE dano 1d8 + .fue\n  CHANGE ENTITIES@puntosdegolpe -dano\n  EXECUTE -dano\n] TO DISTANCE <= 1 AND EXECUTE 1d20 + .atcc >= ENTITIES@clasedearmadura",
+            ),
+            // Se asocia a quien envenenan (por ejemplo con SPREAD MACROS.envenenado): pierde vida hasta que supera la salvación
+            ("Envenenado", "ONTURN\nDO CHANGE @puntosdegolpe -1d4 IFNOT EXECUTE 1d20 + .scon >= 12\nELSE QUIT"),
+            ("Iniciativa", "ONCLICK\nEXECUTE 1d20 + .ini"),
+        ]),
     }
 }
 
@@ -312,6 +327,14 @@ pub fn pathfinder2e() -> ConjuntoParametros {
         listas_rangos: listas,
         escala_resultado: None,
         archivos_texto: vec![],
+        macros: macros(&[
+            (
+                "Golpe",
+                "ONCLICK\nSPREAD [\n  SAVE dano 1d8 + .fue\n  CHANGE ENTITIES@vida -dano\n  EXECUTE -dano\n] TO DISTANCE <= 1 AND EXECUTE 1d20 + .fue + .niv >= ENTITIES@ca",
+            ),
+            ("Envenenado", "ONTURN\nDO CHANGE @vida -1d6 IFNOT EXECUTE 1d20 + .fort >= 15\nELSE QUIT"),
+            ("Reflejos", "ONCLICK\nEXECUTE 1d20 + .refl"),
+        ]),
     }
 }
 
@@ -421,6 +444,15 @@ pub fn cthulhu7e() -> ConjuntoParametros {
         listas_rangos: vec![],
         escala_resultado: Some(escala("cthulhu")),
         archivos_texto: vec![],
+        macros: macros(&[
+            ("Esquivar", "ONCLICK\nEXECUTE 1d100 <= .esq"),
+            (
+                "Pelea",
+                "ONCLICK\nSPREAD [\n  SAVE dano 1d3\n  CHANGE ENTITIES@vida -dano\n  EXECUTE -dano\n] TO DISTANCE <= 1 AND EXECUTE 1d100 <= .pel",
+            ),
+            // Si falla la tirada de cordura (contra su cordura actual) pierde 1d6
+            ("Tirada de cordura", "ONCLICK\nDO CHANGE @cordura -1d6 IFNOT EXECUTE 1d100 <= @cordura"),
+        ]),
     }
 }
 

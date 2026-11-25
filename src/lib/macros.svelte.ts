@@ -56,6 +56,17 @@ export function macrosDeInstancia(
   return resultado;
 }
 
+/** ¿Es una macro general (del conjunto)? Las del host sin personaje; las que llegan sin código a un jugador son de este tipo. */
+export const esGeneral = (m: Pick<Macro, "propietaria" | "autor">) => (m.propietaria ?? null) === null && m.autor === 0;
+
+/**
+ * Las macros que se enseñan en la ventana: las generales y, si se abrió desde un personaje, las de ESE personaje (las de otros
+ * personajes no pintan nada ahí). Una macro de antes de las de personaje (sin propietaria ni del host) se enseña siempre.
+ */
+export function macrosDeLaVentana(lista: readonly Macro[], idEntidad: number | null | undefined): Macro[] {
+  return lista.filter((m) => (m.propietaria ?? null) === null || (idEntidad !== null && idEntidad !== undefined && m.propietaria === idEntidad));
+}
+
 /** Las macros que puedo editar: el host, todas; un jugador, las suyas (las ajenas le llegan sin código). */
 export function macrosEditables(macros: readonly Macro[], jugador: boolean): Macro[] {
   return jugador ? macros.filter((m) => m.codigo !== "") : [...macros];
@@ -150,7 +161,8 @@ class Macros {
     return invoke<Comprobacion>("validar_macro", { codigo });
   }
 
-  async guardar(datos: { id: number; nombre: string; codigo: string }): Promise<Macro> {
+  /** `idEntidad` (solo al crear): la macro es de ese personaje; sin él es general (solo la crea el host). */
+  async guardar(datos: { id: number; nombre: string; codigo: string; idEntidad?: number }): Promise<Macro> {
     const m = await invoke<Macro>("guardar_macro", { datos });
     await this.recargar();
     return m;
@@ -170,6 +182,30 @@ class Macros {
   async desasociar(idAsociacion: number) {
     await invoke("desasociar_macro", { idAsociacion });
     await this.recargar();
+  }
+
+  /**
+   * Lo que viaja en la plantilla de un personaje: SUS macros (las que son de él, con su código) y TODAS las generales del conjunto, con
+   * el código si lo conozco (un jugador no lo conoce y las lleva solo con el nombre) y si el personaje la tiene puesta (`asociada`).
+   */
+  async deFicha(idEntidad: number): Promise<{ nombre: string; codigo: string; general: boolean; asociada: boolean }[]> {
+    await this.recargar();
+    const puestas = new Set(this.asociaciones.filter((a) => "Ficha" in a.destino && a.destino.Ficha === idEntidad).map((a) => a.id_macro));
+    const propias = this.lista
+      .filter((m) => m.propietaria === idEntidad && m.codigo !== "")
+      .map((m) => ({ nombre: m.nombre, codigo: m.codigo, general: false, asociada: true }));
+    const generales = this.lista
+      .filter((m) => esGeneral(m))
+      .map((m) => ({ nombre: m.nombre, codigo: m.codigo, general: true, asociada: puestas.has(m.id) }));
+    return [...propias, ...generales];
+  }
+
+  /** Las macros que trae la plantilla de una ficha: Rust las crea (o reutiliza por nombre) y se las asocia. Devuelve los avisos. */
+  async importarDeFicha(idEntidad: number, lista: { nombre: string; codigo: string; general?: boolean; asociada?: boolean }[]): Promise<string[]> {
+    if (!lista.length) return [];
+    const avisos = await invoke<string[]>("importar_macros_ficha", { idEntidad, macros: lista });
+    await this.recargar();
+    return avisos;
   }
 
   /** El botón de una macro ONCLICK. Lo que haga (vida, chat, otras macros) se vuelve a leer al acabar; un error ya sale en el chat. */

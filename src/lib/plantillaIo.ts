@@ -10,6 +10,7 @@ import { importarImagen, urlDeImagen } from "$lib/imagenes";
 import { partida, type Entidad } from "$lib/partida.svelte";
 import { encuadreCentrado } from "$lib/recorteFoto";
 import { MIME_FOTO, datosDePlantilla, generarPlantilla, leerPlantilla, type ArchivoPlantilla, type FotoPlantilla, type PlantillaLeida } from "$lib/plantillaFicha";
+import { macros } from "$lib/macros.svelte";
 
 /** El nombre del conjunto de parámetros en uso (un jugador no lo sabe: los conjuntos son del host). */
 export function conjuntoActual(): string {
@@ -61,8 +62,10 @@ export async function exportarPlantilla(entidad: Entidad | null, idFicha: number
     entidad,
     idFicha,
     foto: entidad ? await fotoDe(entidad) : null,
-    // El conjunto entero va dentro (para importarlo desde la plantilla); un jugador no lo conoce
-    definicionConjunto: esJugador ? null : await invoke<Record<string, unknown>>("obtener_conjunto_activo"),
+    // El conjunto entero va dentro (para importarlo desde la plantilla); un jugador no lo conoce. Sus macros, solo en la plantilla de los
+    // parámetros (en blanco): la de una ficha lleva únicamente las de esa ficha
+    definicionConjunto: esJugador ? null : await invoke<Record<string, unknown>>("obtener_conjunto_activo", { conMacros: !entidad }),
+    macros: entidad && idFicha !== null ? await macros.deFicha(idFicha) : [],
     // En blanco, la plantilla trae los .txt con los que nace toda ficha del conjunto; de una ficha, los suyos
     archivos: entidad ? archivos : partida.archivosTextoDefecto.map((a) => ({ original: null, nombre: `${a.nombre}.txt`, contenido: a.contenido }))
   });

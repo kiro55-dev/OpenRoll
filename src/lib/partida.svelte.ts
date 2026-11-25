@@ -375,6 +375,10 @@ export interface Macro {
   autor: number;
   al_pulsar: boolean;
   en_turno: boolean;
+  /** El conjunto de parámetros al que pertenece (solo vale con él activo). `null`: de antes de esto, vale en cualquiera. */
+  conjunto?: number | null;
+  /** El personaje (ficha) del que es: la creada desde su caja «Parámetros». `null`: general, del conjunto (solo la crea el host). */
+  propietaria?: number | null;
 }
 
 /** A qué está asociada una macro: a una ficha (todas sus instancias) o a una instancia (lo que reparte un SPREAD). */

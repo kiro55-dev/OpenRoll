@@ -82,7 +82,7 @@ fn partida() -> EstadoPartida {
 fn con_macro(est: &mut EstadoPartida, id: u16, nombre: &str, codigo: &str, destino: u16) {
     let tipo = comprobar(codigo).unwrap();
     est.aplicar_delta(&DeltaPartida::MacroGuardada(Macro {
-        id, nombre: nombre.into(), codigo: codigo.into(), autor: ID_HOST, al_pulsar: tipo.al_pulsar, en_turno: tipo.en_turno,
+        id, nombre: nombre.into(), codigo: codigo.into(), autor: ID_HOST, al_pulsar: tipo.al_pulsar, en_turno: tipo.en_turno, conjunto: None, propietaria: None,
     }));
     est.aplicar_delta(&DeltaPartida::MacroAsociada(AsociacionMacro {
         id: u32::from(id), id_macro: id, destino: DestinoMacro::Instancia(destino), autor: ID_HOST,
@@ -265,18 +265,28 @@ fn estado_real(nombre: &str) -> AppState {
     AppState::nuevo(partida(), almacen, dir)
 }
 
+/// Una macro GENERAL (del conjunto): solo la crea el host.
 fn datos(nombre: &str, codigo: &str) -> DatosMacro {
-    DatosMacro { id: 0, nombre: nombre.into(), codigo: codigo.into() }
+    DatosMacro { id: 0, nombre: nombre.into(), codigo: codigo.into(), id_entidad: None }
+}
+
+/// Una macro de un PERSONAJE (la que se crea desde su caja «Parámetros»).
+fn de_ficha(nombre: &str, codigo: &str, ficha: u16) -> DatosMacro {
+    DatosMacro { id_entidad: Some(ficha), ..datos(nombre, codigo) }
 }
 
 #[test]
 fn guardar_valida_el_codigo_y_saca_el_tipo_de_la_cabecera() {
     let state = estado_real("macros_guardar");
-    let m = guardar_macro_en(&state, 1, datos("Golpe", "ONTURN ONCLICK\nEXECUTE 1d6")).unwrap();
+    let m = guardar_macro_en(&state, 1, de_ficha("Golpe", "ONTURN ONCLICK\nEXECUTE 1d6", 1)).unwrap();
     assert!(m.al_pulsar && m.en_turno && m.autor == 1);
-    assert!(guardar_macro_en(&state, 1, datos("Mal", "EXECUTE 1")).unwrap_err().contains("línea"));
-    assert!(guardar_macro_en(&state, 1, datos("golpe", "ONCLICK\nEXECUTE 1")).unwrap_err().contains("Ya hay"));
-    assert!(guardar_macro_en(&state, 1, datos("Raro<script>", "ONCLICK\nEXECUTE 1")).is_err());
+    assert!(guardar_macro_en(&state, 1, de_ficha("Mal", "EXECUTE 1", 1)).unwrap_err().contains("línea"));
+    assert!(guardar_macro_en(&state, 1, de_ficha("golpe", "ONCLICK\nEXECUTE 1", 1)).unwrap_err().contains("Ya hay"));
+    assert!(guardar_macro_en(&state, 1, de_ficha("Raro<script>", "ONCLICK\nEXECUTE 1", 1)).is_err());
+    // Un jugador no crea generales ni macros de una ficha que no es suya
+    assert!(guardar_macro_en(&state, 1, datos("General", "ONCLICK\nEXECUTE 1")).unwrap_err().contains("host"));
+    assert!(guardar_macro_en(&state, 1, de_ficha("Ajena", "ONCLICK\nEXECUTE 1", 2)).is_err());
+    assert_eq!(m.propietaria, Some(1));
     // Otro jugador no la cambia ni la borra; el host sí, y conserva el autor
     assert!(guardar_macro_en(&state, 2, DatosMacro { id: m.id, ..datos("X", "ONCLICK\nEXECUTE 1") }).is_err());
     assert!(borrar_macro_en(&state, 2, m.id).is_err());
@@ -287,27 +297,31 @@ fn guardar_valida_el_codigo_y_saca_el_tipo_de_la_cabecera() {
 #[test]
 fn un_jugador_asocia_sus_macros_a_sus_fichas_y_solo_ejecuta_las_de_pulsar() {
     let state = estado_real("macros_permisos");
-    let suya = guardar_macro_en(&state, 1, datos("Golpe", "ONCLICK\nCHANGE @vida -1")).unwrap();
-    let turno = guardar_macro_en(&state, 1, datos("Veneno", "ONTURN\nCHANGE @vida -1")).unwrap();
+    let suya = guardar_macro_en(&state, 1, de_ficha("Golpe", "ONCLICK\nCHANGE @vida -1", 1)).unwrap();
+    let turno = guardar_macro_en(&state, 1, de_ficha("Veneno", "ONTURN\nCHANGE @vida -1", 1)).unwrap();
     let del_host = guardar_macro_en(&state, ID_HOST, datos("Secreta", "ONCLICK\nCHANGE @vida -1")).unwrap();
     assert!(asociar_macro_en(&state, 1, suya.id, 2).unwrap_err().contains("tus fichas"), "la ficha 2 no es suya");
-    assert!(asociar_macro_en(&state, 1, del_host.id, 1).unwrap_err().contains("tus macros"));
     let a = asociar_macro_en(&state, 1, suya.id, 1).unwrap();
-    assert_eq!(asociar_macro_en(&state, 1, suya.id, 1).unwrap(), a, "dos veces es la misma");
+    assert_eq!(asociar_macro_en(&state, 1, suya.id, 1).unwrap(), a, "dos veces es la misma (nació asociada a su personaje)");
     let b = asociar_macro_en(&state, 1, turno.id, 1).unwrap();
+    // Una macro de un personaje solo se asocia a él (ni siquiera el host la pone en otro)
+    assert!(asociar_macro_en(&state, ID_HOST, suya.id, 2).unwrap_err().contains("otro personaje"));
     assert!(ejecutar_macro_en(&state, 2, a, 1).is_err(), "otro jugador no la pulsa");
     assert!(ejecutar_macro_en(&state, 1, b, 1).unwrap_err().contains("ONCLICK"));
     assert!(ejecutar_macro_en(&state, 1, a, 2).unwrap_err().contains("no está asociada"));
     ejecutar_macro_en(&state, 1, a, 1).unwrap();
     assert_eq!(vida(&state.lock(), 1), 19);
-    // El host asocia la suya a la ficha del jugador: el jugador la ve, pero sin código
-    asociar_macro_en(&state, ID_HOST, del_host.id, 1).unwrap();
+    // Una general (del host) la puede poner cualquiera en sus fichas: la ve, pero sin código
+    asociar_macro_en(&state, 1, del_host.id, 1).unwrap();
     let est = state.lock();
     let vistas = macros_para(1, &est);
     assert_eq!(vistas.len(), 3);
     assert!(vistas.iter().find(|m| m.id == del_host.id).unwrap().codigo.is_empty());
     assert!(!vistas.iter().find(|m| m.id == suya.id).unwrap().codigo.is_empty());
-    assert!(macros_para(2, &est).is_empty());
+    // Quien no controla nada la ve solo la general (sin código), no las de otros personajes
+    let de_2 = macros_para(2, &est);
+    assert_eq!(de_2.iter().map(|m| m.id).collect::<Vec<_>>(), vec![del_host.id]);
+    assert!(de_2[0].codigo.is_empty());
     assert_eq!(asociaciones_para(2, &est).len(), 0);
     drop(est);
     assert!(desasociar_macro_en(&state, 2, a).is_err());
@@ -320,18 +334,21 @@ fn por_la_red_un_jugador_solo_toca_lo_suyo_y_su_executep_solo_lo_ve_el_y_el_host
     use crate::red::vista::vista_para;
     use std::collections::HashSet;
     let state = estado_real("macros_red");
-    let suya = guardar_macro_en(&state, 1, datos("Secreto", "ONCLICK\nEXECUTEP 1d6")).unwrap();
+    let suya = guardar_macro_en(&state, 1, de_ficha("Secreto", "ONCLICK\nEXECUTEP 1d6", 1)).unwrap();
     let ajena = guardar_macro_en(&state, ID_HOST, datos("Del host", "ONCLICK\nEXECUTE 1")).unwrap();
     let pet = |v: serde_json::Value| decodificar(v).unwrap();
     let est = state.lock();
     let ok = |p: &Peticion| permitida(&est, 1, p, &HashSet::new()).is_ok();
     assert!(ok(&pet(json!({ "cmd": "validar_macro", "codigo": "ONCLICK\nEXECUTE 1" }))));
-    assert!(ok(&pet(json!({ "cmd": "guardar_macro", "datos": { "nombre": "Nueva", "codigo": "ONCLICK\nEXECUTE 1" } }))));
+    // Crear: de uno de sus personajes sí; general (sin personaje) o de un personaje ajeno, no
+    assert!(ok(&pet(json!({ "cmd": "guardar_macro", "datos": { "nombre": "Nueva", "codigo": "ONCLICK\nEXECUTE 1", "idEntidad": 1 } }))));
+    assert!(!ok(&pet(json!({ "cmd": "guardar_macro", "datos": { "nombre": "Nueva", "codigo": "ONCLICK\nEXECUTE 1" } }))));
+    assert!(!ok(&pet(json!({ "cmd": "guardar_macro", "datos": { "nombre": "Nueva", "codigo": "ONCLICK\nEXECUTE 1", "idEntidad": 2 } }))));
     assert!(!ok(&pet(json!({ "cmd": "guardar_macro", "datos": { "id": ajena.id, "nombre": "X", "codigo": "ONCLICK\nEXECUTE 1" } }))));
     assert!(!ok(&pet(json!({ "cmd": "borrar_macro", "id": ajena.id }))));
     assert!(ok(&pet(json!({ "cmd": "asociar_macro", "idMacro": suya.id, "idEntidad": 1 }))));
     assert!(!ok(&pet(json!({ "cmd": "asociar_macro", "idMacro": suya.id, "idEntidad": 2 }))));
-    assert!(!ok(&pet(json!({ "cmd": "asociar_macro", "idMacro": ajena.id, "idEntidad": 1 }))));
+    assert!(ok(&pet(json!({ "cmd": "asociar_macro", "idMacro": ajena.id, "idEntidad": 1 }))), "una general sí");
     assert!(!ok(&pet(json!({ "cmd": "ejecutar_macro", "idAsociacion": 1, "idInstancia": 2 }))));
     drop(est);
 
@@ -343,8 +360,9 @@ fn por_la_red_un_jugador_solo_toca_lo_suyo_y_su_executep_solo_lo_ve_el_y_el_host
     assert!(!privada(2), "los demás no");
     let v = vista_para(1, &est);
     assert_eq!(v.asociaciones_macro.len(), 1);
-    assert_eq!(v.macros.len(), 1, "la del host no está asociada a nada suyo");
-    assert!(vista_para(2, &est).macros.is_empty());
+    assert_eq!(v.macros.len(), 2, "la suya y la general del host (esta, sin código)");
+    assert!(v.macros.iter().find(|m| m.id == ajena.id).unwrap().codigo.is_empty());
+    assert_eq!(vista_para(2, &est).macros.iter().map(|m| m.id).collect::<Vec<_>>(), vec![ajena.id], "ni la de otro personaje");
 }
 
 #[test]
@@ -371,4 +389,206 @@ fn las_de_turno_se_ejecutan_al_pasar_el_turno_y_no_al_recargar() {
     let (cargada, _) = estado::cargar(&state.almacen).unwrap();
     assert_eq!(vida(&cargada, 2), 18);
     assert_eq!(cargada.historial_tiradas.len(), 1);
+}
+
+
+// ---------------- Macros por conjunto de parámetros ----------------
+
+#[test]
+fn una_macro_es_del_conjunto_activo_y_solo_vale_con_el() {
+    use crate::tablero_general::conjuntos::{anadir_conjunto_de_serie_en, borrar_conjunto_en, usar_conjunto_en};
+    let state = estado_real("macros_conjunto");
+    let base = state.lock().conjunto_activo;
+    let m = guardar_macro_en(&state, ID_HOST, datos("Curar", "ONCLICK\nCHANGE @vida +1")).unwrap();
+    assert_eq!(m.conjunto, Some(base), "nace en el conjunto activo");
+    let a = asociar_macro_en(&state, ID_HOST, m.id, 1).unwrap();
+
+    // Añadir Pathfinder crea sus macros de serie, del host y de ese conjunto (y el conjunto guardado no las repite)
+    let pf = anadir_conjunto_de_serie_en("pathfinder2e", &state).unwrap();
+    {
+        let est = state.lock();
+        let suyas: Vec<&Macro> = est.macros.iter().filter(|x| x.conjunto == Some(pf)).collect();
+        assert!(suyas.len() >= 3 && suyas.iter().all(|x| x.autor == ID_HOST));
+        assert!(est.conjuntos_parametros.iter().find(|c| c.id == pf).unwrap().contenido.macros.is_empty());
+    }
+
+    // Con Pathfinder en uso, la macro del otro conjunto ni se ve ni se ejecuta (pero sigue ahí)
+    usar_conjunto_en(pf, &state).unwrap();
+    assert!(ejecutar_macro_en(&state, ID_HOST, a, 1).unwrap_err().contains("otro conjunto"));
+    assert!(asociar_macro_en(&state, ID_HOST, m.id, 2).is_err());
+    {
+        let est = state.lock();
+        assert!(!macros_para(1, &est).iter().any(|x| x.id == m.id));
+        assert!(est.macros.iter().any(|x| x.id == m.id));
+    }
+    // Se puede repetir el nombre de una macro de otro conjunto
+    assert!(guardar_macro_en(&state, ID_HOST, datos("Curar", "ONCLICK\nEXECUTE 1")).is_ok());
+
+    // Al volver, vuelve a funcionar; y borrar Pathfinder se lleva sus macros
+    usar_conjunto_en(base, &state).unwrap();
+    ejecutar_macro_en(&state, ID_HOST, a, 1).unwrap();
+    borrar_conjunto_en(pf, &state).unwrap();
+    assert!(!state.lock().macros.iter().any(|x| x.conjunto == Some(pf)));
+}
+
+#[test]
+fn la_plantilla_de_los_parametros_lleva_las_macros_del_conjunto_y_al_importarla_vuelven() {
+    let state = estado_real("macros_plantilla_conjunto");
+    guardar_macro_en(&state, ID_HOST, datos("Del host", "ONCLICK\nEXECUTE 1")).unwrap();
+    guardar_macro_en(&state, 1, de_ficha("De un personaje", "ONCLICK\nEXECUTE 2", 1)).unwrap();
+    let est = state.lock();
+    let llevadas = del_conjunto_activo(&est);
+    assert_eq!(llevadas.iter().map(|m| m.nombre.as_str()).collect::<Vec<_>>(), vec!["Del host"], "las de un personaje no salen con el conjunto");
+    drop(est);
+    // Un conjunto con macros que no valen se rechaza entero
+    assert!(validar_de_conjunto(vec![MacroConjunto { nombre: "Mala".into(), codigo: "EXECUTE 1".into() }]).is_err());
+    let dos = |n: &str| MacroConjunto { nombre: n.into(), codigo: "ONCLICK\nEXECUTE 1".into() };
+    assert!(validar_de_conjunto(vec![dos("A b"), dos("ab")]).unwrap_err().contains("dos macros"));
+    assert_eq!(validar_de_conjunto(llevadas).unwrap().len(), 1);
+}
+
+#[test]
+fn importar_las_macros_de_una_ficha_las_crea_o_reutiliza_y_las_asocia() {
+    let state = estado_real("macros_importar_ficha");
+    let golpe = |codigo: &str| MacroFicha { nombre: "Golpe".into(), codigo: codigo.into(), general: false, asociada: true };
+    let mala = MacroFicha { nombre: "Rota".into(), codigo: "EXECUTE 1".into(), general: false, asociada: true };
+    let avisos = importar_macros_ficha_en(&state, 1, 1, vec![golpe("ONCLICK\nEXECUTE 1d6"), mala.clone()]).unwrap();
+    assert_eq!(avisos.len(), 1, "la que no se puede leer se salta: {avisos:?}");
+    let id = {
+        let est = state.lock();
+        let m = est.macros.iter().find(|m| m.nombre == "Golpe").unwrap();
+        assert_eq!((m.autor, m.conjunto), (1, Some(est.conjunto_activo)));
+        assert!(est.asociaciones_macro.iter().any(|a| a.id_macro == m.id && a.destino == DestinoMacro::Ficha(1)));
+        m.id
+    };
+    // Otra vez (con otro código): se reutiliza la que ya tenía, sin pisarla ni repetir la asociación
+    importar_macros_ficha_en(&state, 1, 1, vec![golpe("ONCLICK\nEXECUTE 2")]).unwrap();
+    let est = state.lock();
+    assert_eq!(est.macros.iter().filter(|m| m.nombre == "Golpe").count(), 1);
+    assert_eq!(est.macros.iter().find(|m| m.id == id).unwrap().codigo, "ONCLICK\nEXECUTE 1d6");
+    assert_eq!(est.asociaciones_macro.iter().filter(|a| a.id_macro == id).count(), 1);
+    drop(est);
+    // A una ficha que no es suya, no
+    assert!(importar_macros_ficha_en(&state, 1, 2, vec![golpe("ONCLICK\nEXECUTE 1")]).is_err());
+}
+
+#[test]
+fn las_macros_de_serie_se_leen_y_usan_nombres_de_su_conjunto() {
+    use super::lexico::{trocear, Clave, Tok};
+    let sin = |t: &str| t.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_lowercase();
+    for i in crate::tablero_general::conjuntos::integrados() {
+        let c = &i.contenido;
+        assert_eq!(validar_de_conjunto(c.macros.clone()).unwrap().len(), c.macros.len(), "{}", i.clave);
+        for m in &c.macros {
+            let mut anterior: Option<Tok> = None;
+            for p in trocear(&m.codigo).unwrap() {
+                match &p.tok {
+                    Tok::Var(n) if anterior != Some(Tok::Clave(Clave::Macros)) => assert!(
+                        c.variables.iter().any(|v| sin(&v.nombre) == sin(n) || (!v.abreviatura.is_empty() && sin(&v.abreviatura) == sin(n))),
+                        "{}: «{}» usa la variable .{n}, que no está en el conjunto",
+                        i.clave,
+                        m.nombre
+                    ),
+                    Tok::Param { nombre, .. } => assert!(
+                        c.parametros.iter().any(|d| sin(&d.clave) == sin(nombre)),
+                        "{}: «{}» usa el parámetro @{nombre}, que no está en el conjunto",
+                        i.clave,
+                        m.nombre
+                    ),
+                    _ => {}
+                }
+                anterior = Some(p.tok.clone());
+            }
+        }
+    }
+}
+
+
+// ---------------- Macros de un personaje y generales ----------------
+
+#[test]
+fn una_macro_de_un_personaje_no_sale_con_el_conjunto_y_se_va_con_el_personaje() {
+    let state = estado_real("macros_personaje");
+    let propia = guardar_macro_en(&state, ID_HOST, de_ficha("Solo del mago", "ONCLICK\nEXECUTE 1", 1)).unwrap();
+    let general = guardar_macro_en(&state, ID_HOST, datos("Para todos", "ONCLICK\nEXECUTE 2")).unwrap();
+    assert_eq!((propia.propietaria, general.propietaria), (Some(1), None));
+    {
+        let est = state.lock();
+        // Nace asociada a su personaje; la general, no
+        assert!(est.asociaciones_macro.iter().any(|a| a.id_macro == propia.id && a.destino == DestinoMacro::Ficha(1)));
+        assert!(!est.asociaciones_macro.iter().any(|a| a.id_macro == general.id));
+        // Solo la general sale con el conjunto
+        assert_eq!(del_conjunto_activo(&est).iter().map(|m| m.nombre.as_str()).collect::<Vec<_>>(), vec!["Para todos"]);
+    }
+    // El mismo nombre en dos personajes distintos vale; en el mismo personaje, o contra una general, no
+    assert!(guardar_macro_en(&state, ID_HOST, de_ficha("Solo del mago", "ONCLICK\nEXECUTE 1", 2)).is_ok());
+    assert!(guardar_macro_en(&state, ID_HOST, de_ficha("Solo del mago", "ONCLICK\nEXECUTE 1", 1)).is_err());
+    assert!(guardar_macro_en(&state, ID_HOST, de_ficha("Para todos", "ONCLICK\nEXECUTE 1", 2)).is_err());
+    // Al vaciar la papelera sin su personaje, sus macros se van con él
+    {
+        let mut est = state.lock();
+        est.banco_entidades.retain(|e| e.id != 1);
+        est.instancias_activas.retain(|i| i.base.id != 1);
+    }
+    crate::tablero_general::partida::procesar_delta(&state, DeltaPartida::PapeleraVaciada);
+    let est = state.lock();
+    assert!(!est.macros.iter().any(|m| m.id == propia.id), "la del personaje borrado desaparece");
+    assert!(est.macros.iter().any(|m| m.id == general.id), "la general se queda");
+}
+
+#[test]
+fn spread_macros_solo_alcanza_las_generales_y_las_del_personaje_que_la_lanza() {
+    let mut p = Prueba { est: partida(), caras: vec![], chat: vec![] };
+    let mut suelta = |est: &mut EstadoPartida, id: u16, nombre: &str, propietaria: Option<u16>| {
+        est.aplicar_delta(&DeltaPartida::MacroGuardada(Macro {
+            id, nombre: nombre.into(), codigo: "ONTURN\nCHANGE @vida -1".into(), autor: ID_HOST, al_pulsar: false, en_turno: true, conjunto: None, propietaria,
+        }));
+    };
+    suelta(&mut p.est, 1, "Veneno", None);
+    suelta(&mut p.est, 2, "Tuya", Some(1));
+    suelta(&mut p.est, 3, "Ajena", Some(2));
+    con_macro(&mut p.est, 4, "Lanzar", "ONCLICK\nSPREAD MACROS.veneno, MACROS.tuya TO DISTANCE <= 1", 1);
+    correr(&mut p, 4, 1).unwrap();
+    let del_goblin: Vec<u16> = p.est.asociaciones_macro.iter().filter(|a| a.destino == DestinoMacro::Instancia(2)).map(|a| a.id_macro).collect();
+    assert_eq!(del_goblin, vec![1, 2], "la general y la del personaje que la lanza (su ficha es la 1)");
+    // (id 9: los ids 5 y 6 ya son asociaciones que acaba de repartir la anterior)
+    con_macro(&mut p.est, 9, "Lanzar ajena", "ONCLICK\nSPREAD MACROS.ajena TO DISTANCE <= 1", 1);
+    assert!(correr(&mut p, 9, 1).is_err(), "la de otro personaje no se puede repartir");
+}
+
+#[test]
+fn importar_generales_y_propias_las_asocia_y_un_jugador_no_crea_generales() {
+    let state = estado_real("macros_importar_general");
+    let general = guardar_macro_en(&state, ID_HOST, datos("Atacar", "ONCLICK\nEXECUTE 1d20")).unwrap();
+    let ficha = |nombre: &str, codigo: &str, general: bool| MacroFicha { nombre: nombre.into(), codigo: codigo.into(), general, asociada: true };
+
+    // La general que ya existe se usa (aunque la plantilla no traiga su código, como la de un jugador) y se asocia
+    let avisos = importar_macros_ficha_en(&state, 1, 1, vec![ficha("Atacar", "", true), ficha("Mía", "ONCLICK\nEXECUTE 3", false)]).unwrap();
+    assert!(avisos.is_empty(), "{avisos:?}");
+    {
+        let est = state.lock();
+        assert!(est.asociaciones_macro.iter().any(|a| a.id_macro == general.id && a.destino == DestinoMacro::Ficha(1)));
+        let mia = est.macros.iter().find(|m| m.nombre == "Mía").unwrap();
+        assert_eq!((mia.autor, mia.propietaria), (1, Some(1)));
+    }
+    // Una general que no existe: sin código no se puede; con código, un jugador la crea como de su personaje (con aviso)...
+    let avisos = importar_macros_ficha_en(&state, 1, 1, vec![ficha("Nueva general", "", true)]).unwrap();
+    assert!(avisos[0].contains("no trae su código"));
+    let avisos = importar_macros_ficha_en(&state, 1, 1, vec![ficha("Nueva general", "ONCLICK\nEXECUTE 4", true)]).unwrap();
+    assert!(avisos[0].contains("no eres el host"));
+    assert_eq!(state.lock().macros.iter().find(|m| m.nombre == "Nueva general").unwrap().propietaria, Some(1));
+    // ...y el host sí la crea general
+    importar_macros_ficha_en(&state, ID_HOST, 2, vec![ficha("General del host", "ONCLICK\nEXECUTE 5", true)]).unwrap();
+    assert!(state.lock().macros.iter().find(|m| m.nombre == "General del host").unwrap().es_general());
+
+    // Las generales que el personaje NO tenía puestas viajan igual: el host las crea (el conjunto las tiene) pero no se asocian;
+    // un jugador, que no puede crear generales, las salta sin más
+    let suelta = MacroFicha { asociada: false, ..ficha("Suelta", "ONCLICK\nEXECUTE 6", true) };
+    importar_macros_ficha_en(&state, 1, 1, vec![suelta.clone()]).unwrap();
+    assert!(!state.lock().macros.iter().any(|m| m.nombre == "Suelta"), "un jugador no crea generales");
+    importar_macros_ficha_en(&state, ID_HOST, 2, vec![suelta]).unwrap();
+    let est = state.lock();
+    let id = est.macros.iter().find(|m| m.nombre == "Suelta").unwrap();
+    assert!(id.es_general());
+    assert!(!est.asociaciones_macro.iter().any(|a| a.id_macro == id.id), "existe en el conjunto pero no está puesta");
 }

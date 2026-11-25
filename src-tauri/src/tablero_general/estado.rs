@@ -227,6 +227,10 @@ impl EstadoPartida {
     fn podar_asociaciones_macro(&mut self) {
         let fichas: Vec<u16> = self.banco_entidades.iter().map(|e| e.id).collect();
         let instancias: Vec<u16> = self.instancias_activas.iter().map(|i| i.id_instancia).collect();
+        // Las macros de un personaje que ya no existe se van con él
+        let huerfanas: Vec<u16> = self.macros.iter().filter(|m| m.propietaria.is_some_and(|p| !fichas.contains(&p))).map(|m| m.id).collect();
+        self.macros.retain(|m| !huerfanas.contains(&m.id));
+        self.asociaciones_macro.retain(|a| !huerfanas.contains(&a.id_macro));
         self.asociaciones_macro.retain(|a| match a.destino {
             DestinoMacro::Ficha(id) => fichas.contains(&id),
             DestinoMacro::Instancia(id) => instancias.contains(&id),
@@ -580,6 +584,10 @@ impl EstadoPartida {
             DeltaPartida::ConjuntoBorrado(id) => {
                 if *id != self.conjunto_activo {
                     self.conjuntos_parametros.retain(|c| c.id != *id);
+                    // Sus macros (y lo que tenían asociado) se van con él
+                    let suyas: Vec<u16> = self.macros.iter().filter(|m| m.conjunto == Some(*id)).map(|m| m.id).collect();
+                    self.macros.retain(|m| m.conjunto != Some(*id));
+                    self.asociaciones_macro.retain(|a| !suyas.contains(&a.id_macro));
                 }
             }
             DeltaPartida::EscalaResultadoCambiada(escala) => self.escala_resultado = escala.clone(),
